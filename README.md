@@ -11,11 +11,12 @@ qs -p ~/Projects/launcher
 Runs as a one-shot fullscreen overlay that fades in on launch and fades out on exit:
 
 - **Idle** — shows a clock and date. Enter/Tab opens the app drawer with the most-used apps.
-- **Type** — fuzzy-matches installed apps (subsequence scoring: prefixes, word starts, and consecutive runs rank higher) into a 4×3 tile grid (max 12). Results are ordered by launch count first (persisted in Quickshell's state dir), fuzzy score second. Emptying the query shows the most-used apps; Escape steps back to the clock.
-- **Tab** — from the app drawer, rotates to a wallpaper selector for `~/Pictures/wallpapers` (3×3 paged grid, fuzzy-filterable by typing). Selecting one sets it via `awww` on the `workspaces` namespace and a blurred variant on `overview`. Blurred variants (`blurred/<file>`, or legacy `<stem>blurred.<ext>`) are generated with ImageMagick in the background at startup for any wallpaper missing one.
-- **Arrows** — move selection (←/→ by 1, ↑/↓ by row, wraps).
+- **Type** — fuzzy-matches installed apps (subsequence scoring: prefixes, word starts, and consecutive runs rank higher) into a paged 4×3 tile grid with a page indicator. Results are ordered by launch count first (persisted in Quickshell's state dir), fuzzy score second; filtering resets the selection to the first result. Emptying the query shows the most-used apps.
+- **Tab** — from the app drawer, rotates to a wallpaper selector for `~/Pictures/wallpapers` (3×3 paged grid, fuzzy-filterable by typing); Tab again returns to the clock. Selecting one sets it via `awww` on the `workspaces` namespace and a blurred variant on `overview`. Missing thumbnails (`thumbnails/<file>`) and blurred variants (`blurred/<file>`, or legacy `<stem>blurred.<ext>`) are generated with ImageMagick in the background at startup.
+- **Arrows** — move selection (←/→ by 1, ↑/↓ by row, wraps); moving past a page boundary flips the page.
 - **Enter** / click — launch selected app / apply selected wallpaper, then exit.
-- **Escape** — steps back one level: wallpapers → apps → clock → exit.
+- **Escape** — exits from anywhere.
+- **Bottom-right hover** — reveals a settings button (placeholder, no functionality yet).
 
 ## niri keybind
 

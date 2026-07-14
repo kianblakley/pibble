@@ -143,18 +143,23 @@ ShellRoot {
                     return { path: p[0], thumb: p[1], blur: p[2] || "" };
                 });
                 root.wallpapers = walls;
-                // Pre-generate blurred variants for wallpapers that don't
-                // have one yet, in the background. They land in blurred/
-                // (the existing convention), so the next scan picks them up
-                // and applying a wallpaper never has to blur synchronously.
-                const missing = walls.filter(w => !w.blur).map(w => w.path);
-                if (missing.length) {
+                // Pre-generate missing thumbnails (a full 5K image standing
+                // in as its own thumbnail costs ~100ms to decode+upload) and
+                // blurred overview variants, in the background. They land in
+                // thumbnails/ and blurred/ (the existing conventions), so the
+                // next scan picks them up and applying a wallpaper never has
+                // to blur synchronously.
+                const needsWork = walls.some(w => !w.blur || w.thumb === w.path);
+                if (needsWork) {
                     Quickshell.execDetached(["bash", "-c", `
-                        mkdir -p "$HOME/Pictures/wallpapers/blurred"
+                        cd "$HOME/Pictures/wallpapers" || exit 0
+                        mkdir -p thumbnails blurred
                         for f in "$@"; do
-                            out="$HOME/Pictures/wallpapers/blurred/$(basename "$f")"
-                            [ -e "$out" ] || magick "$f" -resize 1024x -blur 0x10 "$out"
-                        done`, "_"].concat(missing));
+                            b=$(basename "$f")
+                            stem="\${b%.*}" ext="\${b##*.}"
+                            [ -e "thumbnails/$b" ] || magick "$f" -resize 480x270^ -gravity center -extent 480x270 "thumbnails/$b"
+                            [ -e "blurred/$b" ] || [ -e "\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "blurred/$b"
+                        done`, "_"].concat(walls.map(w => w.path)));
                 }
             }
         }
@@ -188,9 +193,12 @@ ShellRoot {
         // niri applies the region in buffer (physical) pixels, not
         // surface-local logical ones, so scale by the device pixel ratio —
         // otherwise the circle grows from 40%/40% and misses the right edge.
+        // Screen-based, not window-based: at startup the window briefly
+        // reports its pre-configure size (500x500) and a rounded-up DPR (2),
+        // which would place the early reveal frames far off-center.
         property real reveal: 0
-        readonly property real physW: width * devicePixelRatio
-        readonly property real physH: height * devicePixelRatio
+        readonly property real physW: screen ? screen.width * screen.devicePixelRatio : 0
+        readonly property real physH: screen ? screen.height * screen.devicePixelRatio : 0
         // Clamped to 1px: an empty region reads as "no region set", which the
         // protocol treats as blur-the-whole-surface — a full-screen blur flash.
         readonly property int revealDiameter: Math.max(1, Math.ceil(Math.hypot(physW, physH) * reveal))
@@ -218,7 +226,7 @@ ShellRoot {
                 const all = root.allApps.slice();
                 all.sort((a, b) => root.launchCount(b) - root.launchCount(a)
                     || a.name.localeCompare(b.name));
-                return all.slice(0, root.slotCount);
+                return all;
             }
             const scored = [];
             for (const a of root.allApps) {
@@ -229,10 +237,12 @@ ShellRoot {
             scored.sort((x, y) => root.launchCount(y.entry) - root.launchCount(x.entry)
                 || y.score - x.score
                 || x.entry.name.localeCompare(y.entry.name));
-            return scored.slice(0, root.slotCount).map(x => x.entry);
+            return scored.map(x => x.entry);
         }
         property int selected: 0
-        onMatchesChanged: selected = matches.length ? Math.min(selected, matches.length - 1) : 0
+        onMatchesChanged: selected = 0
+        readonly property int appPage: root.slotCount > 0 ? Math.floor(selected / root.slotCount) : 0
+        readonly property int appPages: Math.max(1, Math.ceil(matches.length / root.slotCount))
 
         function move(delta: int) {
             const count = matches.length;
@@ -273,7 +283,7 @@ ShellRoot {
             scored.sort((x, y) => y.s - x.s || wallName(x.w).localeCompare(wallName(y.w)));
             return scored.map(x => x.w);
         }
-        onWallMatchesChanged: wallSelected = wallMatches.length ? Math.min(wallSelected, wallMatches.length - 1) : 0
+        onWallMatchesChanged: wallSelected = 0
 
         function wallMove(delta: int) {
             const count = wallMatches.length;
@@ -313,10 +323,7 @@ ShellRoot {
 
         ParallelAnimation {
             id: fadeIn
-            onFinished: {
-                win.warmingWalls = true;
-                wallWarmTimer.restart();
-            }
+            onFinished: win.warmingWalls = true
             NumberAnimation {
                 target: content
                 property: "opacity"
@@ -425,7 +432,7 @@ ShellRoot {
                 id: drawer
                 anchors.centerIn: parent
                 width: 820
-                height: grid.height + 52
+                height: grid.height + 84
                 opacity: 0.004
                 visible: win.drawerOpen || win.warmingApps
                 Connections {
@@ -445,7 +452,9 @@ ShellRoot {
 
                 Grid {
                     id: grid
-                    anchors.centerIn: parent
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 26
                     columns: 4
                     columnSpacing: 24
                     rowSpacing: 24
@@ -459,10 +468,11 @@ ShellRoot {
                             width: 174
                             height: 100
 
-                            property var entry: win.matches.length > cell.index ? win.matches[cell.index] : null
+                            readonly property int appIndex: win.appPage * root.slotCount + index
+                            property var entry: win.matches[appIndex] ?? null
                             property var shownEntry: null
                             property bool filled: false
-                            readonly property bool isSelected: entry !== null && win.selected === cell.index
+                            readonly property bool isSelected: entry !== null && win.selected === cell.appIndex
 
                             onEntryChanged: {
                                 if (entry) {
@@ -578,6 +588,16 @@ ShellRoot {
                         }
                     }
                 }
+
+                Text {
+                    visible: win.appPages > 1
+                    anchors.top: grid.bottom
+                    anchors.topMargin: 18
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: (win.appPage + 1) + " / " + win.appPages
+                    color: root.muted
+                    font { family: root.mono; pixelSize: 13; letterSpacing: 2 }
+                }
             }
             // Wallpaper selector: Tab rotates here from the app drawer
             Item {
@@ -586,7 +606,9 @@ ShellRoot {
                 width: 820
                 height: wallGrid.height + 84
                 opacity: 0.004
-                visible: win.wallMode || win.warmingWalls
+                // during warm-up, show the pane only after all thumbnail
+                // textures are uploaded, so its first frame reuses them
+                visible: win.wallMode || (win.warmingWalls && win.wallWarmTick > root.wallpapers.length)
                 Connections {
                     target: win
                     function onWallModeChanged() {
@@ -622,6 +644,8 @@ ShellRoot {
                             readonly property bool isSelected: wall !== null && win.wallSelected === wallIndex
                             width: 240
                             height: 159
+
+                            visible: !win.warmingWalls || win.wallWarmTick > root.wallpapers.length + index + 1
 
                             property var shownWall: null
                             property bool filled: false
@@ -740,6 +764,55 @@ ShellRoot {
                     font { family: root.mono; pixelSize: 13; letterSpacing: 2 }
                 }
             }
+
+            // Settings button: pops up when hovering the bottom-right corner
+            // (no functionality yet)
+            MouseArea {
+                id: settingsHover
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                width: 180
+                height: 180
+                hoverEnabled: true
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 32
+                    width: 56
+                    height: 56
+                    radius: 28
+                    color: Qt.alpha(root.accent, settingsHover.containsMouse ? 0.2 : 0.11)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.33)
+                    opacity: settingsHover.containsMouse ? 1 : 0
+                    scale: settingsHover.containsMouse ? 1 : 0.5
+                    Behavior on opacity {
+                        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
+                    }
+
+                    Image {
+                        id: settingsIcon
+                        anchors.centerIn: parent
+                        width: 28
+                        height: 28
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectFit
+                        source: Quickshell.iconPath("preferences-system", true)
+                        visible: status === Image.Ready
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        visible: !settingsIcon.visible
+                        text: "⚙"
+                        color: root.accent
+                        font { pixelSize: 24 }
+                    }
+                }
+            }
         }
 
         // Hidden input that captures all typing, mirroring the design's off-screen <input>
@@ -760,15 +833,7 @@ ShellRoot {
             Keys.onPressed: event => {
                 switch (event.key) {
                 case Qt.Key_Escape:
-                    // step back one level: filter -> pane -> clock -> quit
-                    if (input.text.length)
-                        input.text = "";
-                    else if (win.wallMode)
-                        win.wallMode = false;
-                    else if (win.browsing)
-                        win.browsing = false;
-                    else
-                        win.exit();
+                    win.exit();
                     event.accepted = true;
                     break;
                 case Qt.Key_Tab:
@@ -838,10 +903,20 @@ ShellRoot {
                 }
             }
         }
-        Timer {
-            id: wallWarmTimer
-            interval: 150
-            onTriggered: win.warmingWalls = false
+        // Spread the wallpaper warm-up over one thumbnail per frame: doing
+        // all uploads in a single frame caused a ~110ms hitch right as the
+        // reveal ended, mid-spring when the user had typed early.
+        property int wallWarmTick: 0
+        FrameAnimation {
+            running: win.warmingWalls
+            onTriggered: {
+                win.wallWarmTick = currentFrame;
+                // thumbnails first (one per frame), then the pane's cells
+                // (one per frame — each ClippingRectangle is an offscreen
+                // render target and costs a chunk of frame time to create)
+                if (currentFrame > root.wallpapers.length + win.wallPageSize + 4)
+                    win.warmingWalls = false;
+            }
         }
 
         // Tile stagger applies when a pane opens, not on every keystroke —
@@ -900,9 +975,11 @@ ShellRoot {
             Repeater {
                 model: root.wallpapers
                 Image {
+                    required property int index
                     required property var modelData
                     width: 1
                     height: 1
+                    visible: win.wallWarmTick > index
                     asynchronous: true
                     fillMode: Image.PreserveAspectCrop
                     sourceSize: Qt.size(480, 270)
@@ -910,6 +987,7 @@ ShellRoot {
                 }
             }
         }
+
 
         Component.onCompleted: {
             input.forceActiveFocus();
