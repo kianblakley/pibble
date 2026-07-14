@@ -293,6 +293,25 @@ ShellRoot {
             }
         }
 
+        // If the user starts interacting while the intro is still revealing,
+        // finish it quickly: running the reveal (per-frame blur region churn)
+        // concurrently with the drawer spring makes the spring stutter.
+        ParallelAnimation {
+            id: finishIn
+            NumberAnimation { target: content; property: "opacity"; to: 1; duration: 140; easing.type: Easing.OutCubic }
+            NumberAnimation { target: win; property: "reveal"; to: 1; duration: 140; easing.type: Easing.OutCubic }
+        }
+        function fastForwardIntro() {
+            warming = false;
+            if (exiting || reveal >= 1)
+                return;
+            firstFrames.stop();
+            fadeIn.stop();
+            finishIn.restart();
+        }
+        onDrawerOpenChanged: if (drawerOpen) fastForwardIntro()
+        onWallModeChanged: if (wallMode) fastForwardIntro()
+
         SequentialAnimation {
             id: fadeOut
             ParallelAnimation {
@@ -335,13 +354,24 @@ ShellRoot {
                 onClicked: input.forceActiveFocus()
             }
 
-            // Idle state: big clock + date
+            // Idle state: big clock + date. The outer gate holds the clock
+            // back until the blur hole is large enough to accommodate it.
+            Item {
+                id: clockGate
+                anchors.centerIn: parent
+                width: clockView.width
+                height: clockView.height
+                visible: !win.drawerOpen && !win.wallMode
+                onVisibleChanged: if (visible) fadeUp.restart()
+                opacity: {
+                    const fit = Math.hypot(width, height) + 60;
+                    return Math.max(0, Math.min(1, (win.revealDiameter - fit * 0.8) / (fit * 0.5)));
+                }
+
             Column {
                 id: clockView
                 anchors.centerIn: parent
                 spacing: 8
-                visible: !win.drawerOpen && !win.wallMode
-                onVisibleChanged: if (visible) fadeUp.restart()
 
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -362,6 +392,7 @@ ShellRoot {
                     NumberAnimation { target: clockView; property: "anchors.verticalCenterOffset"; from: 10; to: 0; duration: 300; easing.type: Easing.OutCubic }
                 }
             }
+            }
 
             // Results drawer: 4x3 grid of app tiles
             Item {
@@ -369,8 +400,15 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: 820
                 height: grid.height + 52
-                visible: win.drawerOpen
-                onVisibleChanged: if (visible) drawerIn.restart()
+                opacity: 0.004
+                visible: win.drawerOpen || win.warming
+                Connections {
+                    target: win
+                    function onDrawerOpenChanged() {
+                        if (win.drawerOpen)
+                            drawerIn.restart();
+                    }
+                }
 
                 ParallelAnimation {
                     id: drawerIn
@@ -521,8 +559,15 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: 820
                 height: wallGrid.height + 84
-                visible: win.wallMode
-                onVisibleChanged: if (visible) wallIn.restart()
+                opacity: 0.004
+                visible: win.wallMode || win.warming
+                Connections {
+                    target: win
+                    function onWallModeChanged() {
+                        if (win.wallMode)
+                            wallIn.restart();
+                    }
+                }
 
                 ParallelAnimation {
                     id: wallIn
@@ -686,12 +731,21 @@ ShellRoot {
         // map time means first-frame latency eats the start of the animation
         // and the hole pops in already partly grown.
         property bool revealStarted: false
+        // While warming, the drawer, wallpaper pane, and image preloader are
+        // rendered at near-zero opacity so their scene graph nodes and
+        // textures are built up front instead of stuttering the first open.
+        property bool warming: false
         FrameAnimation {
             id: firstFrames
             onTriggered: {
-                if (currentFrame >= 2) {
-                    stop();
+                // warm up first (frames 1-3), then start the reveal on a
+                // clean frame so its early growth can't be skipped.
+                if (currentFrame === 1) {
+                    win.warming = true;
+                } else if (currentFrame >= 4) {
+                    win.warming = false;
                     fadeIn.restart();
+                    stop();
                 }
             }
         }
@@ -703,6 +757,40 @@ ShellRoot {
             firstFrames.start();
         }
         onBackingWindowVisibleChanged: startReveal()
+
+        // Pre-decode app icons and wallpaper thumbnails while idle, so the
+        // drawer's first appearance doesn't stall on cold image loads. The
+        // sources/sourceSizes match the visible tiles exactly for cache hits.
+        Item {
+            visible: win.warming
+            opacity: 0.004
+            Repeater {
+                model: root.allApps
+                Image {
+                    required property var modelData
+                    width: 1
+                    height: 1
+                    asynchronous: true
+                    sourceSize: Qt.size(88, 88)
+                    source: {
+                        const name = modelData.icon;
+                        return name ? Quickshell.iconPath(name, true) : "";
+                    }
+                }
+            }
+            Repeater {
+                model: root.wallpapers
+                Image {
+                    required property var modelData
+                    width: 1
+                    height: 1
+                    asynchronous: true
+                    fillMode: Image.PreserveAspectCrop
+                    sourceSize: Qt.size(480, 270)
+                    source: "file://" + modelData.thumb
+                }
+            }
+        }
 
         Component.onCompleted: {
             input.forceActiveFocus();
