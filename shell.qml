@@ -63,6 +63,7 @@ ShellRoot {
             property string theme: "amber"
             property string wallpaperDir: "~/Pictures/wallpapers"
             property real dimOpacity: 0.4
+            property string revealOrigin: "center"
             property var keybinds: ({ cycle: "Tab", launch: "Return", exit: "Escape" })
         }
     }
@@ -97,7 +98,11 @@ ShellRoot {
     }
 
     Process {
-        running: true
+        id: matugenProc
+        // Needed at startup only for the dynamic theme; otherwise deferred
+        // until the settings pane wants the preview — its output triggers a
+        // theme-color rebind of every tile, which would hitch the intro.
+        running: cfg.theme === "dynamic"
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$PATH"
             img=$(awww query -n workspaces 2>/dev/null | sed -n 's/.*displaying: image: //p' | head -1)
@@ -286,7 +291,7 @@ ShellRoot {
 
     Process {
         id: clipScan
-        running: true
+        running: false // started after the intro finishes
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
@@ -332,7 +337,8 @@ ShellRoot {
     // ---------- icon themes ----------
     property var iconThemes: []
     Process {
-        running: true
+        id: iconThemeScan
+        running: false // started after the intro finishes
         command: ["bash", "-c", `
             for d in /usr/share/icons/* "$HOME/.icons"/* "$HOME/.local/share/icons"/*; do
                 [ -f "$d/index.theme" ] || continue
@@ -376,13 +382,30 @@ ShellRoot {
         property real reveal: 0
         readonly property real revW: screen ? screen.width : 0
         readonly property real revH: screen ? screen.height : 0
+        readonly property var originFrac: {
+            switch (cfg.revealOrigin) {
+            case "top-left": return [0, 0];
+            case "top-right": return [1, 0];
+            case "bottom-left": return [0, 1];
+            case "bottom-right": return [1, 1];
+            default: return [0.5, 0.5];
+            }
+        }
+        readonly property real originX: originFrac[0] * revW
+        readonly property real originY: originFrac[1] * revH
+        // radius needed to cover the farthest screen corner from the origin
+        readonly property real maxRevealRadius: Math.max(
+            Math.hypot(originX, originY),
+            Math.hypot(revW - originX, originY),
+            Math.hypot(originX, revH - originY),
+            Math.hypot(revW - originX, revH - originY))
         // Clamped to 1px: an empty region reads as "no region set", which the
         // protocol treats as blur-the-whole-surface — a full-screen blur flash.
-        readonly property int revealDiameter: Math.max(1, Math.ceil(Math.hypot(revW, revH) * reveal))
+        readonly property int revealDiameter: Math.max(1, Math.ceil(2 * maxRevealRadius * reveal))
         BackgroundEffect.blurRegion: Region {
             shape: RegionShape.Ellipse
-            x: (win.revW - win.revealDiameter) / 2
-            y: (win.revH - win.revealDiameter) / 2
+            x: win.originX - win.revealDiameter / 2
+            y: win.originY - win.revealDiameter / 2
             width: win.revealDiameter
             height: win.revealDiameter
         }
@@ -480,6 +503,8 @@ ShellRoot {
                 return 0;
             return ((sel + dir) % count + count) % count;
         }
+        // Down walks the entire column — through every page — before hopping
+        // to the top of the next column; Up mirrors it.
         function vMove(sel: int, count: int, cols: int, rows: int, dir: int): int {
             if (!count)
                 return 0;
@@ -488,31 +513,28 @@ ShellRoot {
             const w = sel % page;
             const r = Math.floor(w / cols);
             const c = w % cols;
+            const pages = Math.ceil(count / page);
             if (dir > 0) {
-                const cand = sel + cols;
-                if (r < rows - 1 && cand < count)
-                    return cand;
-                let np = p, nc = c + 1;
-                if (nc >= cols) {
-                    nc = 0;
-                    np = p + 1;
-                }
-                const idx = np * page + nc;
-                return idx < count ? idx : 0;
+                // next row in this column, continuing onto the next page
+                const idx = r < rows - 1 ? sel + cols : (p + 1) * page + c;
+                if (idx < count)
+                    return idx;
+                // column exhausted: top of the next column (first page)
+                const nc = c + 1;
+                return (nc < cols && nc < count) ? nc : 0;
             } else {
                 if (r > 0)
                     return sel - cols;
-                let np = p, nc = c - 1;
-                if (nc < 0) {
-                    nc = cols - 1;
-                    np = p - 1;
-                }
-                if (np < 0)
-                    np = Math.ceil(count / page) - 1;
-                for (let rr = rows - 1; rr >= 0; rr--) {
-                    const idx = np * page + rr * cols + nc;
-                    if (idx < count)
-                        return idx;
+                if (p > 0)
+                    return (p - 1) * page + (rows - 1) * cols + c;
+                // top of the column: bottom-most cell of the previous column
+                const nc = c > 0 ? c - 1 : cols - 1;
+                for (let pp = pages - 1; pp >= 0; pp--) {
+                    for (let rr = rows - 1; rr >= 0; rr--) {
+                        const idx = pp * page + rr * cols + nc;
+                        if (idx < count)
+                            return idx;
+                    }
                 }
                 return count - 1;
             }
@@ -627,7 +649,14 @@ ShellRoot {
 
         ParallelAnimation {
             id: fadeIn
-            onFinished: win.warmingWalls = true
+            onFinished: {
+                win.warmingWalls = true;
+                // deferred startup work: nothing heavy runs during the intro
+                clipScan.running = true;
+                iconThemeScan.running = true;
+                if (!matugenProc.running && cfg.theme !== "dynamic")
+                    matugenProc.running = true;
+            }
             NumberAnimation {
                 target: content
                 property: "opacity"
@@ -702,9 +731,13 @@ ShellRoot {
                 height: clockView.height
                 visible: win.pane === "clock"
                 onVisibleChanged: if (visible) fadeUp.restart()
+                // fade in only once the hole (from wherever it originates)
+                // has grown enough to reach and contain the clock
                 opacity: {
-                    const fit = Math.hypot(width, height) + 60;
-                    return Math.max(0, Math.min(1, (win.revealDiameter - fit * 0.8) / (fit * 0.5)));
+                    const rc = (Math.hypot(width, height) + 60) / 2;
+                    const dist = Math.hypot(win.originX - win.revW / 2, win.originY - win.revH / 2);
+                    const radius = win.revealDiameter / 2;
+                    return Math.max(0, Math.min(1, (radius - dist - rc * 0.8) / (rc * 0.5)));
                 }
 
                 Column {
@@ -1248,6 +1281,7 @@ ShellRoot {
                             { key: "clipsRows", label: "Clipboard rows" },
                             { key: "fontScale", label: "Font size" },
                             { key: "dimOpacity", label: "Opacity" },
+                            { key: "revealOrigin", label: "Circle origin" },
                             { key: "iconTheme", label: "Icon theme" }
                         ]
 
@@ -1271,7 +1305,8 @@ ShellRoot {
                                 }
                                 SValue {
                                     text: win.settingValue(srow.modelData.key)
-                                    width: srow.modelData.key === "iconTheme" ? 260 : 90
+                                    width: srow.modelData.key === "iconTheme" ? 260
+                                        : srow.modelData.key === "revealOrigin" ? 150 : 90
                                 }
                                 SBtn {
                                     label: "›"
@@ -1444,7 +1479,7 @@ ShellRoot {
                     }
 
                     Text {
-                        text: "icon theme applies on next launch (QS_ICON_THEME)"
+                        text: "icon theme applies on next launch"
                         color: Qt.alpha(root.muted, 0.7)
                         font { family: root.mono; pixelSize: root.fs(11) }
                     }
@@ -1480,22 +1515,11 @@ ShellRoot {
                         NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
                     }
 
-                    Image {
-                        id: settingsIcon
-                        anchors.centerIn: parent
-                        width: 28
-                        height: 28
-                        asynchronous: true
-                        fillMode: Image.PreserveAspectFit
-                        source: Quickshell.iconPath("preferences-system", true)
-                        visible: status === Image.Ready
-                    }
                     Text {
                         anchors.centerIn: parent
-                        visible: !settingsIcon.visible
                         text: "⚙"
-                        color: root.accent
-                        font { pixelSize: root.fs(24) }
+                        color: root.fg
+                        font { pixelSize: root.fs(26) }
                     }
                 }
             }
@@ -1516,10 +1540,12 @@ ShellRoot {
             case "clipsRows": return "" + cfg.clipsRows;
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
+            case "revealOrigin": return cfg.revealOrigin;
             case "iconTheme": return cfg.iconTheme || "system default";
             }
             return "";
         }
+        readonly property var originChoices: ["center", "top-left", "top-right", "bottom-left", "bottom-right"]
         function adjustSetting(key: string, dir: int) {
             switch (key) {
             case "appsGrid":
@@ -1550,6 +1576,13 @@ ShellRoot {
             case "dimOpacity":
                 cfg.dimOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.dimOpacity + dir * 0.05) * 100) / 100));
                 break;
+            case "revealOrigin": {
+                let i = originChoices.indexOf(cfg.revealOrigin);
+                if (i < 0)
+                    i = 0;
+                cfg.revealOrigin = originChoices[((i + dir) % originChoices.length + originChoices.length) % originChoices.length];
+                break;
+            }
             case "iconTheme":
                 cycleIconTheme(dir);
                 break;
