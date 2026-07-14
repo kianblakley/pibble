@@ -57,14 +57,18 @@ ShellRoot {
             property int appsRows: 3
             property int wallsCols: 3
             property int wallsRows: 3
-            property int clipsRows: 8
+            property int clipsCols: 3
+            property int clipsRows: 3
             property real fontScale: 1.0
             property string iconTheme: ""
             property string theme: "amber"
             property string wallpaperDir: "~/Pictures/wallpapers"
+            // command run when a wallpaper is chosen; $WALL is the image,
+            // $BLUR the blurred variant (generated beforehand if missing)
+            property string wallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
             property real dimOpacity: 0.4
             property string revealOrigin: "center"
-            property var keybinds: ({ cycle: "Tab", launch: "Return", exit: "Escape" })
+            property var keybinds: ({ cycle: "Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
         }
     }
     function saveSettings() {
@@ -95,6 +99,22 @@ ShellRoot {
 
     function fs(px: int): int {
         return Math.round(px * cfg.fontScale);
+    }
+
+    function humanBytes(n: int): string {
+        if (n < 1024)
+            return n + " B";
+        if (n < 1048576)
+            return (n / 1024).toFixed(1) + " KiB";
+        return (n / 1048576).toFixed(1) + " MiB";
+    }
+
+    Component.onCompleted: {
+        // heal settings from the old list-style clipboard pane
+        if (cfg.clipsRows > 4 || cfg.clipsRows < 2) {
+            cfg.clipsRows = 3;
+            saveSettings();
+        }
     }
 
     Process {
@@ -420,6 +440,7 @@ ShellRoot {
         function setPane(p: string) {
             input.text = "";
             capturingBind = "";
+            expandedClip = null;
             pane = p;
         }
         function cyclePane(dir: int) {
@@ -492,7 +513,9 @@ ShellRoot {
         }
         property int clipSelected: 0
         onClipMatchesChanged: clipSelected = 0
-        readonly property int clipPage: cfg.clipsRows > 0 ? Math.floor(clipSelected / cfg.clipsRows) : 0
+        readonly property int clipRowsC: Math.max(2, Math.min(4, cfg.clipsRows))
+        readonly property int clipPageSize: cfg.clipsCols * clipRowsC
+        readonly property int clipPage: clipPageSize > 0 ? Math.floor(clipSelected / clipPageSize) : 0
 
         // ---------- navigation ----------
         // Horizontal: previous/next item, wrapping. Vertical: down a row
@@ -550,8 +573,8 @@ ShellRoot {
                     : hMove(wallSelected, wallMatches.length, dx);
             } else if (pane === "clips") {
                 clipSelected = dy !== 0
-                    ? vMove(clipSelected, clipMatches.length, 1, cfg.clipsRows, dy)
-                    : hMove(clipSelected, clipMatches.length, dx * cfg.clipsRows);
+                    ? vMove(clipSelected, clipMatches.length, cfg.clipsCols, clipRowsC, dy)
+                    : hMove(clipSelected, clipMatches.length, dx);
             }
         }
 
@@ -567,43 +590,86 @@ ShellRoot {
         function applyWallpaper(wall) {
             if (!wall)
                 return;
-            // Workspaces get the image as-is; the overview gets the blurred
-            // variant, generated into blurred/ with magick if none exists yet.
+            // Ensures a blurred variant exists, then runs the configurable
+            // command with $WALL and $BLUR exported.
             Quickshell.execDetached(["bash", "-c", `
                 export PATH="$HOME/.local/bin:$PATH"
-                awww img -n workspaces --transition-type fade --transition-duration 1 "$1"
+                WALL="$1"
                 BLUR="$2"
                 if [ -z "$BLUR" ]; then
                     mkdir -p "$3/blurred"
                     BLUR="$3/blurred/$(basename "$1")"
-                    [ -e "$BLUR" ] || magick "$1" -resize 1024x -blur 0x10 "$BLUR"
+                    [ -e "$BLUR" ] || magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
                 fi
-                awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"
-            `, "_", wall.path, wall.blur, root.wallDir]);
+                export WALL BLUR
+                eval "$4"
+            `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand]);
             exit();
         }
 
-        function copyClip(clip) {
+        // Enter on a clip copies it and expands the tile into an info card;
+        // Enter again (or Escape) collapses it. The launcher stays open.
+        property var expandedClip: null
+        property string expandedText: ""
+        property int expandedBytes: -1
+        function expandClip(clip) {
             if (!clip)
                 return;
             Quickshell.execDetached(["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 cliphist decode "$1" | wl-copy`, "_", clip.id]);
-            exit();
+            expandedClip = clip;
+            expandedText = "";
+            expandedBytes = -1;
+            clipInfo.command = ["bash", "-c", `
+                export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+                cliphist decode "$1" | wc -c
+                [ "$2" = "txt" ] && cliphist decode "$1" | head -c 1500
+                exit 0`, "_", clip.id, clip.image ? "img" : "txt"];
+            clipInfo.running = true;
+        }
+        Process {
+            id: clipInfo
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const nl = text.indexOf("\n");
+                    win.expandedBytes = parseInt(text.slice(0, nl).trim()) || 0;
+                    win.expandedText = text.slice(nl + 1);
+                }
+            }
+        }
+        readonly property var expandedInfo: {
+            const c = expandedClip;
+            if (!c)
+                return [];
+            const rows = [];
+            rows.push(["type", c.image ? c.kind + " image" : "text"]);
+            rows.push(["size", expandedBytes >= 0 ? root.humanBytes(expandedBytes) : (c.image ? c.size : "…")]);
+            if (c.image)
+                rows.push(["resolution", c.dims]);
+            else if (expandedText)
+                rows.push(["lines", "" + expandedText.split("\n").length + (expandedBytes > 1500 ? " (truncated)" : "")]);
+            rows.push(["created", "not recorded by cliphist"]);
+            rows.push(["clipboard", "copied"]);
+            return rows;
         }
 
         function activate() {
             if (pane === "walls")
                 applyWallpaper(wallMatches[wallSelected] ?? null);
-            else if (pane === "clips")
-                copyClip(clipMatches[clipSelected] ?? null);
-            else if (pane === "apps")
+            else if (pane === "clips") {
+                if (expandedClip)
+                    expandedClip = null;
+                else
+                    expandClip(clipMatches[clipSelected] ?? null);
+            } else if (pane === "apps")
                 launch(matches.length ? matches[selected] : null);
             else if (pane === "clock")
                 setPane("apps");
         }
 
         // ---------- keybinds ----------
+        readonly property var bindDefaults: ({ cycle: "Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
         property string capturingBind: ""
         function keyName(event): string {
             const special = new Map([
@@ -616,7 +682,13 @@ ShellRoot {
             ]);
             const sp = special.get(event.key);
             let name = sp;
-            if (!name && event.text && event.text.trim())
+            // letters/digits from the key code, so Ctrl+letter works (its
+            // event.text is a control character)
+            if (!name && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                name = String.fromCharCode(event.key);
+            if (!name && event.key >= Qt.Key_0 && event.key <= Qt.Key_9)
+                name = String.fromCharCode(event.key);
+            if (!name && event.text && event.text.trim() && event.text.charCodeAt(0) >= 32)
                 name = event.text.toUpperCase();
             if (!name)
                 return "";
@@ -1084,12 +1156,12 @@ ShellRoot {
                 }
             }
 
-            // Clipboard history (cliphist)
+            // Clipboard history: masonry grid of variable-height tiles
             Item {
                 id: clipDrawer
                 anchors.centerIn: parent
-                width: 820
-                height: clipCol.height + 52
+                width: cfg.clipsCols * 240 + (cfg.clipsCols - 1) * 16 + 52
+                height: Math.max(clipMasonry.height, 120) + 52
                 opacity: 0.004
                 visible: win.pane === "clips"
                 Connections {
@@ -1107,131 +1179,245 @@ ShellRoot {
                     NumberAnimation { target: clipDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
-                Column {
-                    id: clipCol
+                Text {
+                    visible: !root.cliphistAvailable || root.clips.length === 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 40
+                    text: root.cliphistAvailable
+                        ? "clipboard history is empty"
+                        : "cliphist not found — sudo dnf install cliphist wl-clipboard"
+                    color: root.muted
+                    font { family: root.mono; pixelSize: root.fs(14) }
+                }
+
+                Row {
+                    id: clipMasonry
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: 26
-                    spacing: 12
-
-                    Text {
-                        visible: !root.cliphistAvailable || root.clips.length === 0
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: root.cliphistAvailable
-                            ? "clipboard history is empty"
-                            : "cliphist not found — sudo dnf install cliphist wl-clipboard"
-                        color: root.muted
-                        font { family: root.mono; pixelSize: root.fs(14) }
+                    spacing: 16
+                    opacity: win.expandedClip ? 0.2 : 1
+                    Behavior on opacity {
+                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
                     }
 
                     Repeater {
-                        model: cfg.clipsRows
+                        model: cfg.clipsCols
 
-                        Item {
-                            id: clipCell
+                        Column {
+                            id: clipColumn
                             required property int index
-                            width: 768
-                            height: 48
+                            spacing: 16
 
-                            readonly property int clipIndex: win.clipPage * cfg.clipsRows + index
-                            readonly property var clip: win.clipMatches[clipIndex] ?? null
-                            readonly property bool isSelected: clip !== null && win.clipSelected === clipIndex
+                            Repeater {
+                                model: win.clipRowsC
 
-                            property var shownClip: null
-                            property bool filled: false
-                            onClipChanged: {
-                                if (clip) {
-                                    const isNew = !filled || !shownClip || shownClip.id !== clip.id;
-                                    shownClip = clip;
-                                    filled = true;
-                                    if (isNew) {
-                                        clipSpringOut.stop();
-                                        clipSpringIn.restart();
+                                Item {
+                                    id: clipCell
+                                    required property int index
+                                    // round-robin: slot order matches the
+                                    // row-major order vMove navigates
+                                    readonly property int slot: index * cfg.clipsCols + clipColumn.index
+                                    readonly property int clipIndex: win.clipPage * win.clipPageSize + slot
+                                    readonly property var clip: win.clipMatches[clipIndex] ?? null
+                                    readonly property bool isSelected: clip !== null && win.clipSelected === clipIndex
+
+                                    property var shownClip: null
+                                    property bool filled: false
+                                    onClipChanged: {
+                                        if (clip) {
+                                            const isNew = !filled || !shownClip || shownClip.id !== clip.id;
+                                            shownClip = clip;
+                                            filled = true;
+                                            if (isNew) {
+                                                clipSpringOut.stop();
+                                                clipSpringIn.restart();
+                                            }
+                                        } else if (filled) {
+                                            filled = false;
+                                            clipSpringIn.stop();
+                                            clipSpringOut.restart();
+                                        }
                                     }
-                                } else if (filled) {
-                                    filled = false;
-                                    clipSpringIn.stop();
-                                    clipSpringOut.restart();
-                                }
-                            }
-                            Connections {
-                                target: win
-                                function onPaneChanged() {
-                                    if (win.pane === "clips" && clipCell.filled)
-                                        clipSpringIn.restart();
-                                }
-                            }
+                                    Connections {
+                                        target: win
+                                        function onPaneChanged() {
+                                            if (win.pane === "clips" && clipCell.filled)
+                                                clipSpringIn.restart();
+                                        }
+                                    }
 
-                            Rectangle {
-                                id: clipRow
-                                anchors.fill: parent
-                                radius: 12
-                                opacity: 0
-                                color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
-                                border.width: 1
-                                border.color: clipCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.25)
+                                    // text tiles size to their content; image tiles are fixed
+                                    readonly property int tileH: {
+                                        const c = shownClip;
+                                        if (!c)
+                                            return 0;
+                                        if (c.image)
+                                            return 150;
+                                        const lines = Math.min(6, Math.max(2, Math.ceil(c.preview.length / 24)));
+                                        return 26 + lines * root.fs(19);
+                                    }
+                                    width: 240
+                                    height: tileH
+                                    visible: tileH > 0
 
-                                Row {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 16
-                                    spacing: 14
+                                    Rectangle {
+                                        id: clipTile
+                                        anchors.fill: parent
+                                        radius: 12
+                                        opacity: 0
+                                        color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
+                                        border.width: 1
+                                        border.color: clipCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.25)
 
-                                    ClippingRectangle {
-                                        visible: clipCell.shownClip !== null && clipCell.shownClip.image === true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 60
-                                        height: 34
-                                        radius: 6
-                                        color: Qt.alpha(root.accent, 0.08)
-
-                                        Image {
+                                        ClippingRectangle {
+                                            visible: clipCell.shownClip !== null && clipCell.shownClip.image === true
                                             anchors.fill: parent
-                                            asynchronous: true
-                                            fillMode: Image.PreserveAspectCrop
-                                            sourceSize: Qt.size(120, 68)
-                                            source: {
-                                                const c = clipCell.shownClip;
-                                                return c && c.image && c.thumb ? "file://" + c.thumb : "";
+                                            anchors.margins: 4
+                                            radius: 9
+                                            color: "transparent"
+
+                                            Image {
+                                                anchors.fill: parent
+                                                asynchronous: true
+                                                fillMode: Image.PreserveAspectCrop
+                                                sourceSize: Qt.size(480, 300)
+                                                source: {
+                                                    const c = clipCell.shownClip;
+                                                    return c && c.image && c.thumb ? "file://" + c.thumb : "";
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            visible: clipCell.shownClip !== null && clipCell.shownClip.image !== true
+                                            anchors.fill: parent
+                                            anchors.margins: 13
+                                            text: clipCell.shownClip ? clipCell.shownClip.preview : ""
+                                            wrapMode: Text.Wrap
+                                            elide: Text.ElideRight
+                                            maximumLineCount: Math.max(2, Math.floor((clipCell.tileH - 26) / root.fs(19)))
+                                            color: root.fg
+                                            font { family: root.mono; pixelSize: root.fs(13) }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: clipCell.filled
+                                            onClicked: {
+                                                win.clipSelected = clipCell.clipIndex;
+                                                win.expandClip(clipCell.clip);
                                             }
                                         }
                                     }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: clipCell.shownClip && clipCell.shownClip.image ? 640 : 730
-                                        text: clipCell.shownClip ? clipCell.shownClip.preview : ""
-                                        elide: Text.ElideRight
-                                        maximumLineCount: 1
-                                        color: root.fg
-                                        font { family: root.mono; pixelSize: root.fs(14) }
+
+                                    SequentialAnimation {
+                                        id: clipSpringIn
+                                        PropertyAction { target: clipTile; property: "opacity"; value: 0 }
+                                        PropertyAction { target: clipTile; property: "scale"; value: 0.7 }
+                                        PropertyAction { target: clipTile; property: "y"; value: 10 }
+                                        PauseAnimation { duration: win.staggering ? clipCell.slot * 30 : 0 }
+                                        ParallelAnimation {
+                                            NumberAnimation { target: clipTile; property: "opacity"; to: 1; duration: 160; easing.type: Easing.OutCubic }
+                                            NumberAnimation { target: clipTile; property: "scale"; to: 1; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                                            NumberAnimation { target: clipTile; property: "y"; to: 0; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                                        }
+                                    }
+                                    SequentialAnimation {
+                                        id: clipSpringOut
+                                        ParallelAnimation {
+                                            NumberAnimation { target: clipTile; property: "scale"; to: 0.7; duration: 240; easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "y"; to: 10; duration: 240; easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: 240; easing.type: Easing.InQuad }
+                                        }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
 
-                                MouseArea {
-                                    anchors.fill: parent
-                                    enabled: clipCell.filled
-                                    onClicked: win.copyClip(clipCell.clip)
+                // expanded clip: copied to the clipboard, with details
+                Rectangle {
+                    id: expandCard
+                    visible: win.expandedClip !== null
+                    onVisibleChanged: if (visible) expandIn.restart()
+                    anchors.centerIn: parent
+                    width: 560
+                    height: expandCol.height + 44
+                    radius: 16
+                    color: Qt.rgba(0.07, 0.065, 0.055, 0.96)
+                    border.width: 1
+                    border.color: root.accent
+
+                    ParallelAnimation {
+                        id: expandIn
+                        NumberAnimation { target: expandCard; property: "opacity"; from: 0; to: 1; duration: 160; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "scale"; from: 0.85; to: 1; duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                    }
+
+                    Column {
+                        id: expandCol
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.topMargin: 22
+                        width: 512
+                        spacing: 14
+
+                        ClippingRectangle {
+                            visible: win.expandedClip !== null && win.expandedClip.image === true
+                            width: 512
+                            height: visible ? 288 : 0
+                            radius: 10
+                            color: Qt.alpha(root.accent, 0.06)
+
+                            Image {
+                                anchors.fill: parent
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectFit
+                                sourceSize: Qt.size(1024, 576)
+                                source: {
+                                    const c = win.expandedClip;
+                                    return c && c.image && c.thumb ? "file://" + c.thumb : "";
                                 }
                             }
+                        }
+                        Text {
+                            visible: win.expandedClip !== null && win.expandedClip.image !== true
+                            width: 512
+                            text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideRight
+                            maximumLineCount: 10
+                            color: root.fg
+                            font { family: root.mono; pixelSize: root.fs(13) }
+                        }
 
-                            SequentialAnimation {
-                                id: clipSpringIn
-                                PropertyAction { target: clipRow; property: "opacity"; value: 0 }
-                                PropertyAction { target: clipRow; property: "scale"; value: 0.7 }
-                                PropertyAction { target: clipRow; property: "y"; value: 10 }
-                                PauseAnimation { duration: win.staggering ? clipCell.index * 30 : 0 }
-                                ParallelAnimation {
-                                    NumberAnimation { target: clipRow; property: "opacity"; to: 1; duration: 160; easing.type: Easing.OutCubic }
-                                    NumberAnimation { target: clipRow; property: "scale"; to: 1; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
-                                    NumberAnimation { target: clipRow; property: "y"; to: 0; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                        Rectangle {
+                            width: 512
+                            height: 1
+                            color: Qt.alpha(root.accent, 0.25)
+                        }
+
+                        Repeater {
+                            model: win.expandedInfo
+
+                            Item {
+                                required property var modelData
+                                width: 512
+                                height: root.fs(20)
+
+                                Text {
+                                    anchors.left: parent.left
+                                    text: parent.modelData[0]
+                                    color: root.muted
+                                    font { family: root.mono; pixelSize: root.fs(13) }
                                 }
-                            }
-                            SequentialAnimation {
-                                id: clipSpringOut
-                                ParallelAnimation {
-                                    NumberAnimation { target: clipRow; property: "scale"; to: 0.7; duration: 240; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: clipRow; property: "y"; to: 10; duration: 240; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: clipRow; property: "opacity"; to: 0; duration: 240; easing.type: Easing.InQuad }
+                                Text {
+                                    anchors.right: parent.right
+                                    text: parent.modelData[1]
+                                    color: root.fg
+                                    font { family: root.mono; pixelSize: root.fs(13) }
                                 }
                             }
                         }
@@ -1278,7 +1464,7 @@ ShellRoot {
                         model: [
                             { key: "appsGrid", label: "Apps grid" },
                             { key: "wallsGrid", label: "Wallpaper grid" },
-                            { key: "clipsRows", label: "Clipboard rows" },
+                            { key: "clipsGrid", label: "Clipboard grid" },
                             { key: "fontScale", label: "Font size" },
                             { key: "dimOpacity", label: "Opacity" },
                             { key: "revealOrigin", label: "Circle origin" },
@@ -1430,12 +1616,63 @@ ShellRoot {
                         }
                     }
 
+                    // wallpaper command ($WALL = image, $BLUR = blurred variant)
+                    Item {
+                        width: 780
+                        height: 38
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Wallpaper command"
+                        }
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 540
+                            height: 34
+                            radius: 8
+                            color: Qt.alpha(root.accent, cmdInput.activeFocus ? 0.16 : 0.08)
+                            border.width: 1
+                            border.color: cmdInput.activeFocus ? root.accent : Qt.alpha(root.accent, 0.33)
+
+                            TextInput {
+                                id: cmdInput
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                verticalAlignment: TextInput.AlignVCenter
+                                text: cfg.wallCommand
+                                color: root.fg
+                                clip: true
+                                font { family: root.mono; pixelSize: root.fs(12) }
+                                onEditingFinished: {
+                                    if (text !== cfg.wallCommand) {
+                                        cfg.wallCommand = text;
+                                        root.saveSettings();
+                                    }
+                                    input.forceActiveFocus();
+                                }
+                                Keys.onEscapePressed: input.forceActiveFocus()
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.NoButton
+                                cursorShape: Qt.IBeamCursor
+                            }
+                        }
+                    }
+                    Text {
+                        text: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
+                        color: Qt.alpha(root.muted, 0.7)
+                        font { family: root.mono; pixelSize: root.fs(11) }
+                    }
+
                     // keybinds
                     Repeater {
                         model: [
                             { action: "cycle", label: "Cycle pages (Shift+ reverses)" },
                             { action: "launch", label: "Launch / apply" },
-                            { action: "exit", label: "Exit" }
+                            { action: "settings", label: "Settings" },
+                            { action: "exit", label: "Exit / back" }
                         ]
 
                         Item {
@@ -1463,7 +1700,7 @@ ShellRoot {
                                     anchors.centerIn: parent
                                     text: win.capturingBind === bindRow.modelData.action
                                         ? "press a key…"
-                                        : (cfg.keybinds[bindRow.modelData.action] ?? "")
+                                        : (cfg.keybinds[bindRow.modelData.action] ?? win.bindDefaults[bindRow.modelData.action] ?? "")
                                     color: root.fg
                                     font { family: root.mono; pixelSize: root.fs(13) }
                                 }
@@ -1537,7 +1774,7 @@ ShellRoot {
             switch (key) {
             case "appsGrid": return cfg.appsCols + " × " + cfg.appsRows;
             case "wallsGrid": return cfg.wallsCols + " × " + cfg.wallsRows;
-            case "clipsRows": return "" + cfg.clipsRows;
+            case "clipsGrid": return cfg.clipsCols + " × " + clipRowsC;
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "revealOrigin": return cfg.revealOrigin;
@@ -1567,8 +1804,14 @@ ShellRoot {
                     else if (cfg.wallsRows > 2) { cfg.wallsRows--; cfg.wallsCols = 4; }
                 }
                 break;
-            case "clipsRows":
-                cfg.clipsRows = Math.max(4, Math.min(12, cfg.clipsRows + dir));
+            case "clipsGrid":
+                if (dir > 0) {
+                    if (cfg.clipsCols < 4) cfg.clipsCols++;
+                    else if (clipRowsC < 4) { cfg.clipsRows = clipRowsC + 1; cfg.clipsCols = 2; }
+                } else {
+                    if (cfg.clipsCols > 2) cfg.clipsCols--;
+                    else if (clipRowsC > 2) { cfg.clipsRows = clipRowsC - 1; cfg.clipsCols = 4; }
+                }
                 break;
             case "fontScale":
                 cfg.fontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.fontScale + dir * 0.1) * 100) / 100));
@@ -1618,7 +1861,16 @@ ShellRoot {
                 const ks = win.keyName(event);
                 const kb = cfg.keybinds;
                 if (ks === (kb.exit ?? "Escape")) {
-                    win.exit();
+                    // layered: expanded clip -> settings -> whole app
+                    if (win.expandedClip)
+                        win.expandedClip = null;
+                    else if (win.pane === "settings")
+                        win.setPane("clock");
+                    else
+                        win.exit();
+                    event.accepted = true;
+                } else if (ks === (kb.settings ?? "Ctrl+S")) {
+                    win.setPane(win.pane === "settings" ? "clock" : "settings");
                     event.accepted = true;
                 } else if (event.key === Qt.Key_Backtab || ks === "Shift+" + (kb.cycle ?? "Tab")) {
                     win.cyclePane(-1);

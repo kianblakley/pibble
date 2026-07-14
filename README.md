@@ -14,17 +14,17 @@ Runs as a one-shot fullscreen overlay that fades in on launch and fades out on e
 - **Tab / Shift+Tab** — cycles panes forward/backward: clock → apps → wallpapers → clipboard → clock.
 - **Apps** — typing fuzzy-matches installed apps (launch count first, fuzzy score second; counts persisted in Quickshell's state dir) into a paged grid; emptying the query shows the most-used apps.
 - **Wallpapers** — paged grid of `wallpaperDir` images, fuzzy-filterable. Selecting one sets it via `awww` (`workspaces` namespace) with a blurred variant on `overview`. Missing thumbnails and blurred variants are generated with ImageMagick in the background at startup.
-- **Clipboard** — cliphist history (text and images), fuzzy-filterable; Enter/click copies via `wl-copy`. Requires `cliphist` + `wl-clipboard`; the niri config spawns the `wl-paste --watch cliphist store` watchers at startup.
+- **Clipboard** — cliphist history in a masonry grid (text tiles size to their content, image tiles show thumbnails), fuzzy-filterable. Enter/click copies via `wl-copy` and expands the tile into a details card (type, size, resolution/lines; cliphist doesn't record timestamps); Escape collapses it. Requires `cliphist` + `wl-clipboard`; the niri config spawns the `wl-paste --watch cliphist store` watchers at startup.
 - **Arrows** — ←/→ previous/next; ↓/↑ walks the entire column across pages, then hops to the next/previous column.
 - **Enter** / click — launch app / apply wallpaper / copy clip, then exit.
-- **Escape** — exits from anywhere.
-- **Bottom-right hover** — settings button. Settings pane: per-pane grid sizes, font size, opacity, icon theme (applied on the next launch — `launch.sh` exports `QS_ICON_THEME` from the saved settings, and the niri bind uses it), color themes with palette previews (including a matugen-powered Dynamic theme derived from the current wallpaper), circle reveal origin (center or any corner), wallpaper directory, and rebindable cycle/launch/exit keys. Stored in `settings.json` in Quickshell's state dir.
+- **Escape** — steps back from an expanded clip or the settings pane, otherwise exits.
+- **Bottom-right hover** — settings button (Ctrl+S also toggles it). Settings pane: per-pane grid sizes, font size, opacity, icon theme (applied on the next launch — `launch.sh` exports `QS_ICON_THEME` from the saved settings, and the niri bind uses it), color themes with palette previews (including a matugen-powered Dynamic theme derived from the current wallpaper), circle reveal origin (center or any corner), wallpaper directory, the wallpaper-apply command (`$WALL`/`$BLUR` placeholders, default drives awww on both namespaces), and rebindable cycle/launch/settings/exit keys. Stored in `settings.json` in Quickshell's state dir.
 
 ## niri keybind
 
 ```kdl
 binds {
-    Mod+Space { spawn "qs" "-p" "/home/kian/Projects/launcher"; }
+    Mod+Space { spawn "/home/kian/Projects/launcher/launch.sh"; }
 }
 ```
 
