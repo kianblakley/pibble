@@ -287,7 +287,9 @@ ShellRoot {
                 from: 0
                 to: 1
                 duration: 650
-                easing.type: Easing.OutQuint
+                // InOut so the hole visibly grows from a point; Out-style
+                // curves cover a quarter of the screen within two frames.
+                easing.type: Easing.InOutCubic
             }
         }
 
@@ -679,14 +681,26 @@ ShellRoot {
             }
         }
 
-        // Start the reveal only once the surface is actually mapped, so the
-        // animation doesn't run down while the window is still invisible.
+        // Start the reveal only after the mapped window has actually rendered
+        // a couple of frames. Animations are wall-clock based, so starting at
+        // map time means first-frame latency eats the start of the animation
+        // and the hole pops in already partly grown.
         property bool revealStarted: false
+        FrameAnimation {
+            id: firstFrames
+            onTriggered: {
+                if (currentFrame >= 2) {
+                    stop();
+                    fadeIn.restart();
+                }
+            }
+        }
         function startReveal() {
             if (revealStarted || !backingWindowVisible)
                 return;
             revealStarted = true;
-            fadeIn.restart();
+            firstFrames.reset();
+            firstFrames.start();
         }
         onBackingWindowVisibleChanged: startReveal()
 
