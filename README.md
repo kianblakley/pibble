@@ -11,12 +11,14 @@ qs -p ~/Projects/launcher
 Runs as a one-shot fullscreen overlay that fades in on launch and fades out on exit:
 
 - **Idle** — shows a clock and date. Enter/Tab opens the app drawer with the most-used apps.
-- **Type** — fuzzy-matches installed apps (subsequence scoring: prefixes, word starts, and consecutive runs rank higher) into a paged 4×3 tile grid with a page indicator. Results are ordered by launch count first (persisted in Quickshell's state dir), fuzzy score second; filtering resets the selection to the first result. Emptying the query shows the most-used apps.
-- **Tab** — from the app drawer, rotates to a wallpaper selector for `~/Pictures/wallpapers` (3×3 paged grid, fuzzy-filterable by typing); Tab again returns to the clock. Selecting one sets it via `awww` on the `workspaces` namespace and a blurred variant on `overview`. Missing thumbnails (`thumbnails/<file>`) and blurred variants (`blurred/<file>`, or legacy `<stem>blurred.<ext>`) are generated with ImageMagick in the background at startup.
-- **Arrows** — move selection (←/→ by 1, ↑/↓ by row, wraps); moving past a page boundary flips the page.
-- **Enter** / click — launch selected app / apply selected wallpaper, then exit.
+- **Tab / Shift+Tab** — cycles panes forward/backward: clock → apps → wallpapers → clipboard → clock.
+- **Apps** — typing fuzzy-matches installed apps (launch count first, fuzzy score second; counts persisted in Quickshell's state dir) into a paged grid; emptying the query shows the most-used apps.
+- **Wallpapers** — paged grid of `wallpaperDir` images, fuzzy-filterable. Selecting one sets it via `awww` (`workspaces` namespace) with a blurred variant on `overview`. Missing thumbnails and blurred variants are generated with ImageMagick in the background at startup.
+- **Clipboard** — cliphist history (text and images), fuzzy-filterable; Enter/click copies via `wl-copy`. Requires `cliphist` + `wl-clipboard`; the niri config spawns the `wl-paste --watch cliphist store` watchers at startup.
+- **Arrows** — ←/→ previous/next; ↓/↑ moves within the column and hops to the next/previous column (and page) at the edges.
+- **Enter** / click — launch app / apply wallpaper / copy clip, then exit.
 - **Escape** — exits from anywhere.
-- **Bottom-right hover** — reveals a settings button (placeholder, no functionality yet).
+- **Bottom-right hover** — settings button. Settings pane: per-pane grid sizes, font size, opacity, icon theme (applied next launch via `QS_ICON_THEME`), color themes with palette previews (including a matugen-powered Dynamic theme derived from the current wallpaper), wallpaper directory, and rebindable cycle/launch/exit keys. Stored in `settings.json` in Quickshell's state dir.
 
 ## niri keybind
 
