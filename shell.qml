@@ -44,6 +44,32 @@ ShellRoot {
         anchors.verticalCenter: parent.verticalCenter
     }
 
+    readonly property string defaultWallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
+
+    component SReset: Rectangle {
+        id: sreset
+        property string key
+        width: 24
+        height: 24
+        radius: 12
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.alpha(root.muted, resetArea.containsMouse ? 0.8 : 0.3)
+        anchors.verticalCenter: parent.verticalCenter
+        Text {
+            anchors.centerIn: parent
+            text: "↺"
+            color: resetArea.containsMouse ? root.fg : root.muted
+            font.pixelSize: root.fs(13)
+        }
+        MouseArea {
+            id: resetArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: win.resetSetting(sreset.key)
+        }
+    }
+
     // ---------- settings ----------
     FileView {
         id: settingsStore
@@ -60,12 +86,13 @@ ShellRoot {
             property int clipsCols: 3
             property int clipsRows: 3
             property real fontScale: 1.0
+            property string fontFamily: ""
             property string iconTheme: ""
             property string theme: "amber"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
-            // $BLUR the blurred variant (generated beforehand if missing)
-            property string wallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
+            // $BLUR the blurred variant (only generated if referenced)
+            property string wallCommand: root.defaultWallCommand
             property real dimOpacity: 0.4
             property string revealOrigin: "center"
             property var keybinds: ({ cycle: "Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
@@ -95,7 +122,7 @@ ShellRoot {
     readonly property color accent: activeTheme.accent
     readonly property color fg: activeTheme.fg
     readonly property color muted: activeTheme.muted
-    readonly property string mono: "JetBrains Mono"
+    readonly property string mono: cfg.fontFamily || "JetBrains Mono"
 
     function fs(px: int): int {
         return Math.round(px * cfg.fontScale);
@@ -287,18 +314,22 @@ ShellRoot {
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
                 // overview variants in the background; the next scan picks
                 // them up and applying never has to blur synchronously.
-                const needsWork = walls.some(w => !w.blur || w.thumb === w.path);
+                const wantBlur = cfg.wallCommand.includes("$BLUR");
+                const needsWork = walls.some(w => (wantBlur && !w.blur) || w.thumb === w.path);
                 if (needsWork) {
                     Quickshell.execDetached(["bash", "-c", `
-                        dir="$1"; shift
+                        dir="$1" gb="$2"; shift 2
                         cd "$dir" || exit 0
-                        mkdir -p thumbnails blurred
+                        mkdir -p thumbnails
+                        [ "$gb" = "1" ] && mkdir -p blurred
                         for f in "$@"; do
                             b=$(basename "$f")
                             stem="\${b%.*}" ext="\${b##*.}"
                             [ -e "thumbnails/$b" ] || magick "$f" -resize 480x270^ -gravity center -extent 480x270 "thumbnails/$b"
-                            [ -e "blurred/$b" ] || [ -e "\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "blurred/$b"
-                        done`, "_", root.wallDir].concat(walls.map(w => w.path)));
+                            if [ "$gb" = "1" ]; then
+                                [ -e "blurred/$b" ] || [ -e "\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "blurred/$b"
+                            fi
+                        done`, "_", root.wallDir, wantBlur ? "1" : "0"].concat(walls.map(w => w.path)));
                 }
             }
         }
@@ -351,6 +382,17 @@ ShellRoot {
             root.clips = root.clips.map(c => c.image
                 ? Object.assign({}, c, { thumb: root.clipThumbDir + "/" + c.id + ".png" })
                 : c);
+        }
+    }
+
+    // ---------- fonts ----------
+    property var fontFamilies: []
+    Process {
+        id: fontScan
+        running: false // started after the intro finishes
+        command: ["bash", "-c", "fc-list :spacing=mono family | sed 's/,.*//' | sort -u"]
+        stdout: StdioCollector {
+            onStreamFinished: root.fontFamilies = text.split("\n").filter(l => l.trim())
         }
     }
 
@@ -442,6 +484,16 @@ ShellRoot {
             capturingBind = "";
             expandedClip = null;
             pane = p;
+        }
+        // settings remembers where it was opened from
+        property string paneBeforeSettings: "clock"
+        function toggleSettings() {
+            if (pane === "settings") {
+                setPane(paneBeforeSettings);
+            } else {
+                paneBeforeSettings = pane;
+                setPane("settings");
+            }
         }
         function cyclePane(dir: int) {
             if (pane === "settings") {
@@ -590,20 +642,22 @@ ShellRoot {
         function applyWallpaper(wall) {
             if (!wall)
                 return;
-            // Ensures a blurred variant exists, then runs the configurable
-            // command with $WALL and $BLUR exported.
+            // Runs the configurable command with $WALL and $BLUR exported.
+            // The blurred variant is only ensured when the command actually
+            // references $BLUR, so non-blur setups skip that work entirely.
             Quickshell.execDetached(["bash", "-c", `
                 export PATH="$HOME/.local/bin:$PATH"
                 WALL="$1"
                 BLUR="$2"
-                if [ -z "$BLUR" ]; then
+                if [ "$5" = "1" ] && [ -z "$BLUR" ]; then
                     mkdir -p "$3/blurred"
                     BLUR="$3/blurred/$(basename "$1")"
                     [ -e "$BLUR" ] || magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
                 fi
                 export WALL BLUR
                 eval "$4"
-            `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand]);
+            `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand,
+                cfg.wallCommand.includes("$BLUR") ? "1" : "0"]);
             exit();
         }
 
@@ -612,6 +666,13 @@ ShellRoot {
         property var expandedClip: null
         property string expandedText: ""
         property int expandedBytes: -1
+        property point expandOrigin: Qt.point(0, 0)
+        signal expandAnimStart
+        signal expandAnimCollapse
+        function collapseClip() {
+            if (expandedClip)
+                expandAnimCollapse();
+        }
         function expandClip(clip) {
             if (!clip)
                 return;
@@ -621,6 +682,8 @@ ShellRoot {
             expandedClip = clip;
             expandedText = "";
             expandedBytes = -1;
+            // cells record expandOrigin synchronously on the change above
+            Qt.callLater(() => expandAnimStart());
             clipInfo.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 cliphist decode "$1" | wc -c
@@ -649,8 +712,6 @@ ShellRoot {
                 rows.push(["resolution", c.dims]);
             else if (expandedText)
                 rows.push(["lines", "" + expandedText.split("\n").length + (expandedBytes > 1500 ? " (truncated)" : "")]);
-            rows.push(["created", "not recorded by cliphist"]);
-            rows.push(["clipboard", "copied"]);
             return rows;
         }
 
@@ -659,7 +720,7 @@ ShellRoot {
                 applyWallpaper(wallMatches[wallSelected] ?? null);
             else if (pane === "clips") {
                 if (expandedClip)
-                    expandedClip = null;
+                    collapseClip();
                 else
                     expandClip(clipMatches[clipSelected] ?? null);
             } else if (pane === "apps")
@@ -726,6 +787,7 @@ ShellRoot {
                 // deferred startup work: nothing heavy runs during the intro
                 clipScan.running = true;
                 iconThemeScan.running = true;
+                fontScan.running = true;
                 if (!matugenProc.running && cfg.theme !== "dynamic")
                     matugenProc.running = true;
             }
@@ -899,6 +961,15 @@ ShellRoot {
                                     filled = false;
                                     springIn.stop();
                                     springOut.restart();
+                                }
+                            }
+                            // replay the wave when the drawer opens: cells
+                            // were already filled while it was hidden
+                            Connections {
+                                target: win
+                                function onPaneChanged() {
+                                    if (win.pane === "apps" && cell.filled)
+                                        springIn.restart();
                                 }
                             }
 
@@ -1197,10 +1268,6 @@ ShellRoot {
                     anchors.top: parent.top
                     anchors.topMargin: 26
                     spacing: 16
-                    opacity: win.expandedClip ? 0.2 : 1
-                    Behavior on opacity {
-                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
-                    }
 
                     Repeater {
                         model: cfg.clipsCols
@@ -1248,19 +1315,46 @@ ShellRoot {
                                         }
                                     }
 
-                                    // text tiles size to their content; image tiles are fixed
+                                    // text tiles grow with content up to a square;
+                                    // image tiles keep their real aspect ratio
                                     readonly property int tileH: {
                                         const c = shownClip;
                                         if (!c)
                                             return 0;
-                                        if (c.image)
-                                            return 150;
-                                        const lines = Math.min(6, Math.max(2, Math.ceil(c.preview.length / 24)));
+                                        if (c.image) {
+                                            const d = (c.dims || "").split("x");
+                                            const iw = parseInt(d[0]) || 16;
+                                            const ih = parseInt(d[1]) || 9;
+                                            return Math.max(70, Math.min(320, Math.round(240 * ih / iw)));
+                                        }
+                                        const maxLines = Math.max(2, Math.floor((240 - 26) / root.fs(19)));
+                                        const lines = Math.min(maxLines, Math.max(2, Math.ceil(c.preview.length / 24)));
                                         return 26 + lines * root.fs(19);
                                     }
                                     width: 240
                                     height: tileH
                                     visible: tileH > 0
+
+                                    // expanding one clip animates the rest away
+                                    opacity: win.expandedClip !== null ? 0 : 1
+                                    scale: win.expandedClip !== null ? 0.85 : 1
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                    }
+                                    // report the tile position so the expand
+                                    // animation can grow out of it
+                                    Connections {
+                                        target: win
+                                        function onExpandedClipChanged() {
+                                            if (win.expandedClip && clipCell.isSelected) {
+                                                const p = clipCell.mapToItem(clipDrawer, clipCell.width / 2, clipCell.height / 2);
+                                                win.expandOrigin = Qt.point(p.x, p.y);
+                                            }
+                                        }
+                                    }
 
                                     Rectangle {
                                         id: clipTile
@@ -1281,8 +1375,8 @@ ShellRoot {
                                             Image {
                                                 anchors.fill: parent
                                                 asynchronous: true
-                                                fillMode: Image.PreserveAspectCrop
-                                                sourceSize: Qt.size(480, 300)
+                                                fillMode: Image.PreserveAspectFit
+                                                sourceSize: Qt.size(480, 640)
                                                 source: {
                                                     const c = clipCell.shownClip;
                                                     return c && c.image && c.thumb ? "file://" + c.thumb : "";
@@ -1337,11 +1431,11 @@ ShellRoot {
                     }
                 }
 
-                // expanded clip: copied to the clipboard, with details
+                // expanded clip: grows out of the selected tile while the
+                // rest of the grid animates away (no dimming overlay)
                 Rectangle {
                     id: expandCard
                     visible: win.expandedClip !== null
-                    onVisibleChanged: if (visible) expandIn.restart()
                     anchors.centerIn: parent
                     width: 560
                     height: expandCol.height + 44
@@ -1349,11 +1443,49 @@ ShellRoot {
                     color: Qt.rgba(0.07, 0.065, 0.055, 0.96)
                     border.width: 1
                     border.color: root.accent
+                    transform: Translate { id: expandTx }
 
                     ParallelAnimation {
                         id: expandIn
-                        NumberAnimation { target: expandCard; property: "opacity"; from: 0; to: 1; duration: 160; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandCard; property: "scale"; from: 0.85; to: 1; duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                        NumberAnimation { target: expandTx; property: "x"; to: 0; duration: 380; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandTx; property: "y"; to: 0; duration: 380; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "opacity"; from: 0.3; to: 1; duration: 220; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "scale"; from: 0.35; to: 1; duration: 380; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                    }
+                    SequentialAnimation {
+                        id: expandOut
+                        ParallelAnimation {
+                            NumberAnimation {
+                                target: expandTx
+                                property: "x"
+                                to: win.expandOrigin.x - clipDrawer.width / 2
+                                duration: 260
+                                easing.type: Easing.InCubic
+                            }
+                            NumberAnimation {
+                                target: expandTx
+                                property: "y"
+                                to: win.expandOrigin.y - clipDrawer.height / 2
+                                duration: 260
+                                easing.type: Easing.InCubic
+                            }
+                            NumberAnimation { target: expandCard; property: "scale"; to: 0.35; duration: 260; easing.type: Easing.InCubic }
+                            NumberAnimation { target: expandCard; property: "opacity"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                        }
+                        ScriptAction { script: win.expandedClip = null }
+                    }
+                    Connections {
+                        target: win
+                        function onExpandAnimStart() {
+                            expandOut.stop();
+                            expandTx.x = win.expandOrigin.x - clipDrawer.width / 2;
+                            expandTx.y = win.expandOrigin.y - clipDrawer.height / 2;
+                            expandIn.restart();
+                        }
+                        function onExpandAnimCollapse() {
+                            expandIn.stop();
+                            expandOut.restart();
+                        }
                     }
 
                     Column {
@@ -1468,6 +1600,7 @@ ShellRoot {
                             { key: "fontScale", label: "Font size" },
                             { key: "dimOpacity", label: "Opacity" },
                             { key: "revealOrigin", label: "Circle origin" },
+                            { key: "fontFamily", label: "Font" },
                             { key: "iconTheme", label: "Icon theme" }
                         ]
 
@@ -1491,12 +1624,15 @@ ShellRoot {
                                 }
                                 SValue {
                                     text: win.settingValue(srow.modelData.key)
-                                    width: srow.modelData.key === "iconTheme" ? 260
+                                    width: srow.modelData.key === "iconTheme" || srow.modelData.key === "fontFamily" ? 260
                                         : srow.modelData.key === "revealOrigin" ? 150 : 90
                                 }
                                 SBtn {
                                     label: "›"
                                     onPressed: win.adjustSetting(srow.modelData.key, 1)
+                                }
+                                SReset {
+                                    key: srow.modelData.key
                                 }
                             }
                         }
@@ -1513,8 +1649,13 @@ ShellRoot {
                             y: 6
                             text: "Color theme"
                         }
+                        SReset {
+                            key: "theme"
+                            anchors.right: parent.right
+                        }
                         Row {
                             anchors.right: parent.right
+                            anchors.rightMargin: 34
                             spacing: 10
 
                             Repeater {
@@ -1579,8 +1720,13 @@ ShellRoot {
                             anchors.left: parent.left
                             text: "Wallpaper path"
                         }
+                        SReset {
+                            key: "wallpaperDir"
+                            anchors.right: parent.right
+                        }
                         Rectangle {
                             anchors.right: parent.right
+                            anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
                             width: 420
                             height: 34
@@ -1607,6 +1753,12 @@ ShellRoot {
                                     input.forceActiveFocus();
                                 }
                                 Keys.onEscapePressed: input.forceActiveFocus()
+                                Connections {
+                                    target: cfg
+                                    function onWallpaperDirChanged() {
+                                        pathInput.text = cfg.wallpaperDir;
+                                    }
+                                }
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -1625,10 +1777,15 @@ ShellRoot {
                             anchors.left: parent.left
                             text: "Wallpaper command"
                         }
+                        SReset {
+                            key: "wallCommand"
+                            anchors.right: parent.right
+                        }
                         Rectangle {
                             anchors.right: parent.right
+                            anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 540
+                            width: 506
                             height: 34
                             radius: 8
                             color: Qt.alpha(root.accent, cmdInput.activeFocus ? 0.16 : 0.08)
@@ -1652,6 +1809,12 @@ ShellRoot {
                                     input.forceActiveFocus();
                                 }
                                 Keys.onEscapePressed: input.forceActiveFocus()
+                                Connections {
+                                    target: cfg
+                                    function onWallCommandChanged() {
+                                        cmdInput.text = cfg.wallCommand;
+                                    }
+                                }
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -1685,8 +1848,13 @@ ShellRoot {
                                 anchors.left: parent.left
                                 text: bindRow.modelData.label
                             }
+                            SReset {
+                                key: "bind:" + bindRow.modelData.action
+                                anchors.right: parent.right
+                            }
                             Rectangle {
                                 anchors.right: parent.right
+                                anchors.rightMargin: 34
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: Math.max(110, bindText.implicitWidth + 26)
                                 height: 30
@@ -1731,7 +1899,7 @@ ShellRoot {
                 width: 180
                 height: 180
                 hoverEnabled: true
-                onClicked: win.setPane(win.pane === "settings" ? "clock" : "settings")
+                onClicked: win.toggleSettings()
 
                 Rectangle {
                     anchors.right: parent.right
@@ -1778,6 +1946,7 @@ ShellRoot {
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "revealOrigin": return cfg.revealOrigin;
+            case "fontFamily": return cfg.fontFamily || "JetBrains Mono";
             case "iconTheme": return cfg.iconTheme || "system default";
             }
             return "";
@@ -1826,9 +1995,43 @@ ShellRoot {
                 cfg.revealOrigin = originChoices[((i + dir) % originChoices.length + originChoices.length) % originChoices.length];
                 break;
             }
+            case "fontFamily": {
+                const list = [""].concat(root.fontFamilies);
+                let i = list.indexOf(cfg.fontFamily);
+                if (i < 0)
+                    i = 0;
+                cfg.fontFamily = list[((i + dir) % list.length + list.length) % list.length];
+                break;
+            }
             case "iconTheme":
                 cycleIconTheme(dir);
                 break;
+            }
+            root.saveSettings();
+        }
+
+        function resetSetting(key: string) {
+            switch (key) {
+            case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
+            case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
+            case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
+            case "fontScale": cfg.fontScale = 1.0; break;
+            case "dimOpacity": cfg.dimOpacity = 0.4; break;
+            case "revealOrigin": cfg.revealOrigin = "center"; break;
+            case "fontFamily": cfg.fontFamily = ""; break;
+            case "iconTheme": cfg.iconTheme = ""; break;
+            case "theme": cfg.theme = "amber"; break;
+            case "wallpaperDir":
+                cfg.wallpaperDir = "~/Pictures/wallpapers";
+                root.rescanWallpapers();
+                break;
+            case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
+            default:
+                if (key.startsWith("bind:")) {
+                    const a = key.slice(5);
+                    setBind(a, bindDefaults[a] ?? "");
+                    return; // setBind saves
+                }
             }
             root.saveSettings();
         }
@@ -1863,14 +2066,14 @@ ShellRoot {
                 if (ks === (kb.exit ?? "Escape")) {
                     // layered: expanded clip -> settings -> whole app
                     if (win.expandedClip)
-                        win.expandedClip = null;
+                        win.collapseClip();
                     else if (win.pane === "settings")
-                        win.setPane("clock");
+                        win.setPane(win.paneBeforeSettings);
                     else
                         win.exit();
                     event.accepted = true;
                 } else if (ks === (kb.settings ?? "Ctrl+S")) {
-                    win.setPane(win.pane === "settings" ? "clock" : "settings");
+                    win.toggleSettings();
                     event.accepted = true;
                 } else if (event.key === Qt.Key_Backtab || ks === "Shift+" + (kb.cycle ?? "Tab")) {
                     win.cyclePane(-1);
