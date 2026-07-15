@@ -676,18 +676,23 @@ ShellRoot {
         function expandClip(clip) {
             if (!clip)
                 return;
-            Quickshell.execDetached(["bash", "-c", `
-                export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                cliphist decode "$1" | wl-copy`, "_", clip.id]);
             expandedClip = clip;
             expandedText = "";
             expandedBytes = -1;
             // cells record expandOrigin synchronously on the change above
             Qt.callLater(() => expandAnimStart());
+            // Decode once to a temp file, read info from it, THEN copy from
+            // it. Copying re-stores the entry through the watcher, which
+            // dedupes by deleting the old id — so a second decode of the
+            // original id would come back empty.
             clipInfo.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                cliphist decode "$1" | wc -c
-                [ "$2" = "txt" ] && cliphist decode "$1" | head -c 1500
+                f=$(mktemp)
+                trap 'rm -f "$f"' EXIT
+                cliphist decode "$1" > "$f"
+                wc -c < "$f"
+                [ "$2" = "txt" ] && head -c 4000 "$f"
+                wl-copy < "$f"
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt"];
             clipInfo.running = true;
         }
@@ -853,7 +858,12 @@ ShellRoot {
 
             MouseArea {
                 anchors.fill: parent
-                onClicked: input.forceActiveFocus()
+                onClicked: {
+                    if (win.expandedClip)
+                        win.collapseClip();
+                    else
+                        input.forceActiveFocus();
+                }
             }
 
             // Idle state: big clock + date. The outer gate holds the clock
@@ -1413,7 +1423,7 @@ ShellRoot {
 
                                         MouseArea {
                                             anchors.fill: parent
-                                            enabled: clipCell.filled
+                                            enabled: clipCell.filled && win.expandedClip === null
                                             onClicked: {
                                                 win.clipSelected = clipCell.clipIndex;
                                                 win.expandClip(clipCell.clip);
@@ -1468,6 +1478,12 @@ ShellRoot {
                     height: expandCol.height + 44
                     transform: Translate { id: expandTx }
 
+                    // swallow clicks so they don't fall through to the
+                    // background (which collapses the expansion)
+                    MouseArea {
+                        anchors.fill: parent
+                    }
+
                     ParallelAnimation {
                         id: expandIn
                         NumberAnimation { target: expandTx; property: "x"; to: 0; duration: win.ad(380); easing.type: Easing.OutCubic }
@@ -1495,7 +1511,15 @@ ShellRoot {
                             NumberAnimation { target: expandCard; property: "scale"; to: 0.35; duration: win.ad(260); easing.type: Easing.InCubic }
                             NumberAnimation { target: expandCard; property: "opacity"; to: 0; duration: win.ad(260); easing.type: Easing.InCubic }
                         }
-                        ScriptAction { script: win.expandedClip = null }
+                        ScriptAction {
+                            script: {
+                                win.expandedClip = null;
+                                // copying re-stored the entry under a new id;
+                                // refresh so the grid's ids stay valid
+                                clipScan.running = false;
+                                clipScan.running = true;
+                            }
+                        }
                     }
                     Connections {
                         target: win
@@ -1543,7 +1567,7 @@ ShellRoot {
                             text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
                             wrapMode: Text.Wrap
                             elide: Text.ElideRight
-                            maximumLineCount: 10
+                            maximumLineCount: 30
                             color: root.fg
                             font { family: root.mono; pixelSize: root.fs(13) }
                         }
@@ -2229,6 +2253,14 @@ ShellRoot {
             if (revealStarted || !backingWindowVisible)
                 return;
             revealStarted = true;
+            // With animations off there is no reveal to protect from the
+            // warm-up frames: show everything on the very first frame.
+            // (firstFrames still runs for cache warming; the zero-duration
+            // fadeIn it triggers just re-sets these same values.)
+            if (animStyle === "none") {
+                reveal = 1;
+                content.opacity = 1;
+            }
             firstFrames.reset();
             firstFrames.start();
         }

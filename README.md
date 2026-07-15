@@ -20,6 +20,10 @@ Runs as a one-shot fullscreen overlay that fades in on launch and fades out on e
 - **Escape** — steps back from an expanded clip or the settings pane, otherwise exits.
 - **Bottom-right hover** — settings button (Ctrl+S toggles it; closing returns to the pane you came from). Every setting has a ↺ reset-to-default button. Settings pane: per-pane grid sizes, clipboard history size, animation style (wave / pop / fade / slide / none — none disables every animation including the reveal), font size, monospace font family, opacity, icon theme (applied on the next launch — `launch.sh` exports `QS_ICON_THEME` from the saved settings, and the niri bind uses it), color themes with palette previews (including a matugen-powered Dynamic theme derived from the current wallpaper), circle reveal origin (center or any corner), wallpaper directory, the wallpaper-apply command (`$WALL`/`$BLUR` placeholders, default drives awww on both namespaces; blur variants are only generated when the command references `$BLUR`, so non-awww/non-blur setups just replace the command), and rebindable cycle/reverse-cycle/launch/settings/exit keys. Stored in `settings.json` in Quickshell's state dir.
 
+## OSD daemon
+
+`daemon/shell.qml` is a persistent quickshell instance providing a volume OSD (PipeWire default sink, bottom-center bar) and a notification popup (top-right; quickshell's built-in `NotificationServer`). Start it at login with `spawn-at-startup "qs" "-p" "<repo>/daemon"` and give its `app-launcher-osd` layer namespace the same blur layer-rule. Note: only one process can own `org.freedesktop.Notifications` — disable any other notification daemon (mako/dunst/etc.), or quickshell will wait until the name frees up.
+
 ## niri keybind
 
 ```kdl
