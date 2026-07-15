@@ -95,7 +95,7 @@ ShellRoot {
             property string wallCommand: root.defaultWallCommand
             property real dimOpacity: 0.4
             property string revealOrigin: "center"
-            property var keybinds: ({ cycle: "Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
+            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
         }
     }
     function saveSettings() {
@@ -730,7 +730,7 @@ ShellRoot {
         }
 
         // ---------- keybinds ----------
-        readonly property var bindDefaults: ({ cycle: "Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
+        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
         property string capturingBind: ""
         function keyName(event): string {
             const special = new Map([
@@ -796,7 +796,7 @@ ShellRoot {
                 property: "opacity"
                 from: 0
                 to: 1
-                duration: 450
+                duration: win.ad(450)
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
@@ -804,7 +804,7 @@ ShellRoot {
                 property: "reveal"
                 from: 0
                 to: 1
-                duration: 520
+                duration: win.ad(520)
                 // Starts at moderate velocity (no ease-in dead zone where the
                 // dot seems stuck, no Out-style explosion), settles gently.
                 easing.type: Easing.BezierSpline
@@ -819,14 +819,14 @@ ShellRoot {
                     target: content
                     property: "opacity"
                     to: 0
-                    duration: 320
+                    duration: win.ad(320)
                     easing.type: Easing.InCubic
                 }
                 NumberAnimation {
                     target: win
                     property: "reveal"
                     to: 0
-                    duration: 320
+                    duration: win.ad(320)
                     easing.type: Easing.InQuad
                 }
             }
@@ -894,8 +894,8 @@ ShellRoot {
 
                     ParallelAnimation {
                         id: fadeUp
-                        NumberAnimation { target: clockView; property: "opacity"; from: 0; to: 1; duration: 300; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: clockView; property: "anchors.verticalCenterOffset"; from: 10; to: 0; duration: 300; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: clockView; property: "opacity"; from: 0; to: 1; duration: win.ad(300); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: clockView; property: "anchors.verticalCenterOffset"; from: 10; to: 0; duration: win.ad(300); easing.type: Easing.OutCubic }
                     }
                 }
             }
@@ -918,9 +918,9 @@ ShellRoot {
 
                 ParallelAnimation {
                     id: drawerIn
-                    NumberAnimation { target: drawer; property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: drawer; property: "scale"; from: 0.9; to: 1; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: drawer; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: drawer; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
                 Grid {
@@ -1057,13 +1057,13 @@ ShellRoot {
                             SequentialAnimation {
                                 id: springOut
                                 ParallelAnimation {
-                                    NumberAnimation { target: wrap; property: "scale"; to: 1.08; duration: 80; easing.type: Easing.OutQuad }
-                                    NumberAnimation { target: wrap; property: "y"; to: -3; duration: 80; easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
                                 }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wrap; property: "scale"; to: 0.4; duration: 320; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wrap; property: "y"; to: 14; duration: 320; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: 320; easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
                                 }
                             }
                         }
@@ -1091,9 +1091,9 @@ ShellRoot {
 
                 ParallelAnimation {
                     id: wallIn
-                    NumberAnimation { target: wallDrawer; property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: wallDrawer; property: "scale"; from: 0.9; to: 1; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: wallDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: wallDrawer; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: wallDrawer; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: wallDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
                 Grid {
@@ -1213,13 +1213,13 @@ ShellRoot {
                             SequentialAnimation {
                                 id: wallSpringOut
                                 ParallelAnimation {
-                                    NumberAnimation { target: wallWrap; property: "scale"; to: 1.08; duration: 80; easing.type: Easing.OutQuad }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: -3; duration: 80; easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wallWrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wallWrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
                                 }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wallWrap; property: "scale"; to: 0.4; duration: 320; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: 14; duration: 320; easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 0; duration: 320; easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wallWrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wallWrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
                                 }
                             }
                         }
@@ -1245,9 +1245,9 @@ ShellRoot {
 
                 ParallelAnimation {
                     id: clipIn
-                    NumberAnimation { target: clipDrawer; property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: clipDrawer; property: "scale"; from: 0.9; to: 1; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: clipDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: clipDrawer; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: clipDrawer; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: clipDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
                 Text {
@@ -1317,6 +1317,23 @@ ShellRoot {
 
                                     // text tiles grow with content up to a square;
                                     // image tiles keep their real aspect ratio
+                                    // measure the wrapped text for an exact fit:
+                                    // the tile hugs the content, truncating only
+                                    // once it would exceed a square
+                                    Text {
+                                        id: measureText
+                                        visible: false
+                                        width: 214
+                                        wrapMode: Text.Wrap
+                                        text: {
+                                            const c = clipCell.shownClip;
+                                            return c && !c.image ? c.preview : "";
+                                        }
+                                        font { family: root.mono; pixelSize: root.fs(13) }
+                                    }
+                                    readonly property real lineHpx: measureText.lineCount > 0
+                                        ? measureText.paintedHeight / measureText.lineCount
+                                        : root.fs(16)
                                     readonly property int tileH: {
                                         const c = shownClip;
                                         if (!c)
@@ -1327,14 +1344,7 @@ ShellRoot {
                                             const ih = parseInt(d[1]) || 9;
                                             return Math.max(70, Math.min(320, Math.round(240 * ih / iw)));
                                         }
-                                        const maxLines = Math.max(2, Math.floor((240 - 26) / root.fs(19)));
-                                        // estimate wrapped lines per explicit line,
-                                        // with headroom so text isn't cut early
-                                        let est = 0;
-                                        for (const l of c.preview.split("\n"))
-                                            est += Math.max(1, Math.ceil(l.length / 20));
-                                        const lines = Math.min(maxLines, Math.max(2, est + 2));
-                                        return 26 + lines * root.fs(19);
+                                        return Math.max(44, Math.min(240, Math.ceil(measureText.paintedHeight) + 26));
                                     }
                                     width: 240
                                     height: tileH
@@ -1344,10 +1354,10 @@ ShellRoot {
                                     opacity: win.expandedClip !== null ? 0 : 1
                                     scale: win.expandedClip !== null ? 0.85 : 1
                                     Behavior on opacity {
-                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                        NumberAnimation { duration: win.ad(180); easing.type: Easing.OutCubic }
                                     }
                                     Behavior on scale {
-                                        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                        NumberAnimation { duration: win.ad(220); easing.type: Easing.OutCubic }
                                     }
                                     // report the tile position so the expand
                                     // animation can grow out of it
@@ -1363,7 +1373,8 @@ ShellRoot {
 
                                     Rectangle {
                                         id: clipTile
-                                        anchors.fill: parent
+                                        width: parent.width
+                                        height: parent.height
                                         radius: 12
                                         opacity: 0
                                         color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
@@ -1395,7 +1406,7 @@ ShellRoot {
                                             text: clipCell.shownClip ? clipCell.shownClip.preview : ""
                                             wrapMode: Text.Wrap
                                             elide: Text.ElideRight
-                                            maximumLineCount: Math.max(2, Math.floor((clipCell.tileH - 26) / root.fs(19)))
+                                            maximumLineCount: Math.max(1, Math.floor((clipCell.tileH - 26) / Math.max(1, clipCell.lineHpx)))
                                             color: root.fg
                                             font { family: root.mono; pixelSize: root.fs(13) }
                                         }
@@ -1425,9 +1436,9 @@ ShellRoot {
                                     SequentialAnimation {
                                         id: clipSpringOut
                                         ParallelAnimation {
-                                            NumberAnimation { target: clipTile; property: "scale"; to: 0.7; duration: 240; easing.type: Easing.InQuad }
-                                            NumberAnimation { target: clipTile; property: "y"; to: 10; duration: 240; easing.type: Easing.InQuad }
-                                            NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: 240; easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "scale"; to: 0.7; duration: win.ad(240); easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "y"; to: 10; duration: win.ad(240); easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: win.ad(240); easing.type: Easing.InQuad }
                                         }
                                     }
                                 }
@@ -1442,17 +1453,27 @@ ShellRoot {
                     id: expandCard
                     visible: win.expandedClip !== null
                     readonly property bool isImg: win.expandedClip !== null && win.expandedClip.image === true
+                    // images render at native size, capped to fit the screen
+                    readonly property size imgFit: {
+                        if (!isImg)
+                            return Qt.size(0, 0);
+                        const d = (win.expandedClip.dims || "").split("x");
+                        const iw = parseInt(d[0]) || 16;
+                        const ih = parseInt(d[1]) || 9;
+                        const s = Math.min(1, 1500 / iw, 800 / ih);
+                        return Qt.size(Math.max(320, Math.round(iw * s)), Math.max(180, Math.round(ih * s)));
+                    }
                     anchors.centerIn: parent
-                    width: isImg ? 920 : 560
+                    width: isImg ? imgFit.width + 48 : 560
                     height: expandCol.height + 44
                     transform: Translate { id: expandTx }
 
                     ParallelAnimation {
                         id: expandIn
-                        NumberAnimation { target: expandTx; property: "x"; to: 0; duration: 380; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandTx; property: "y"; to: 0; duration: 380; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandCard; property: "opacity"; from: 0.3; to: 1; duration: 220; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandCard; property: "scale"; from: 0.35; to: 1; duration: 380; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                        NumberAnimation { target: expandTx; property: "x"; to: 0; duration: win.ad(380); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandTx; property: "y"; to: 0; duration: win.ad(380); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "opacity"; from: 0.3; to: 1; duration: win.ad(220); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "scale"; from: 0.35; to: 1; duration: win.ad(380); easing.type: Easing.OutBack; easing.overshoot: 1.1 }
                     }
                     SequentialAnimation {
                         id: expandOut
@@ -1461,18 +1482,18 @@ ShellRoot {
                                 target: expandTx
                                 property: "x"
                                 to: win.expandOrigin.x - clipDrawer.width / 2
-                                duration: 260
+                                duration: win.ad(260)
                                 easing.type: Easing.InCubic
                             }
                             NumberAnimation {
                                 target: expandTx
                                 property: "y"
                                 to: win.expandOrigin.y - clipDrawer.height / 2
-                                duration: 260
+                                duration: win.ad(260)
                                 easing.type: Easing.InCubic
                             }
-                            NumberAnimation { target: expandCard; property: "scale"; to: 0.35; duration: 260; easing.type: Easing.InCubic }
-                            NumberAnimation { target: expandCard; property: "opacity"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                            NumberAnimation { target: expandCard; property: "scale"; to: 0.35; duration: win.ad(260); easing.type: Easing.InCubic }
+                            NumberAnimation { target: expandCard; property: "opacity"; to: 0; duration: win.ad(260); easing.type: Easing.InCubic }
                         }
                         ScriptAction { script: win.expandedClip = null }
                     }
@@ -1501,15 +1522,7 @@ ShellRoot {
                         ClippingRectangle {
                             visible: expandCard.isImg
                             width: parent.width
-                            // real aspect ratio, as large as fits
-                            height: {
-                                if (!expandCard.isImg)
-                                    return 0;
-                                const d = (win.expandedClip.dims || "").split("x");
-                                const iw = parseInt(d[0]) || 16;
-                                const ih = parseInt(d[1]) || 9;
-                                return Math.min(620, Math.round(width * ih / iw));
-                            }
+                            height: expandCard.imgFit.height
                             radius: 12
                             color: "transparent"
 
@@ -1517,7 +1530,7 @@ ShellRoot {
                                 anchors.fill: parent
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectFit
-                                sourceSize: Qt.size(1840, 1240)
+                                sourceSize: Qt.size(2000, 1200)
                                 source: {
                                     const c = win.expandedClip;
                                     return c && c.image && c.thumb ? "file://" + c.thumb : "";
@@ -1584,9 +1597,9 @@ ShellRoot {
                 }
                 ParallelAnimation {
                     id: settingsIn
-                    NumberAnimation { target: settingsPane; property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: settingsPane; property: "scale"; from: 0.9; to: 1; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: settingsPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: settingsPane; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: settingsPane; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: settingsPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
                 Column {
@@ -1611,7 +1624,7 @@ ShellRoot {
                             { key: "animStyle", label: "Animation" },
                             { key: "fontScale", label: "Font size" },
                             { key: "dimOpacity", label: "Opacity" },
-                            { key: "revealOrigin", label: "Circle origin" },
+                            { key: "revealOrigin", label: "Spawn circle origin" },
                             { key: "fontFamily", label: "Font" },
                             { key: "iconTheme", label: "Icon theme" }
                         ]
@@ -1844,7 +1857,8 @@ ShellRoot {
                     // keybinds
                     Repeater {
                         model: [
-                            { action: "cycle", label: "Cycle pages (Shift+ reverses)" },
+                            { action: "cycle", label: "Cycle pages" },
+                            { action: "reverseCycle", label: "Cycle pages (reverse)" },
                             { action: "launch", label: "Launch / apply" },
                             { action: "settings", label: "Settings" },
                             { action: "exit", label: "Exit / back" }
@@ -2108,7 +2122,7 @@ ShellRoot {
                 } else if (ks === (kb.settings ?? "Ctrl+S")) {
                     win.toggleSettings();
                     event.accepted = true;
-                } else if (event.key === Qt.Key_Backtab || ks === "Shift+" + (kb.cycle ?? "Tab")) {
+                } else if (ks === (kb.reverseCycle ?? "Shift+Tab")) {
                     win.cyclePane(-1);
                     event.accepted = true;
                 } else if (ks === (kb.cycle ?? "Tab")) {
@@ -2182,6 +2196,10 @@ ShellRoot {
         readonly property int animDur: animStyle === "fade" ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
         readonly property int animFadeDur: animStyle === "none" ? 0 : 180
         readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
+        // "none" zeroes every animation duration, including the intro reveal
+        function ad(ms: int): int {
+            return animStyle === "none" ? 0 : ms;
+        }
         function animDelay(slot: int, cols: int): int {
             if (!staggering)
                 return 0;
