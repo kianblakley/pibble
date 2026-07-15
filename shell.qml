@@ -46,6 +46,92 @@ ShellRoot {
         anchors.verticalCenter: parent.verticalCenter
     }
 
+    component ThemeRow: Item {
+        id: tr
+        property string cfgKey: "theme"
+        property bool includeFollow: false
+        width: 780
+        height: 86
+        readonly property string current: cfgKey === "theme" ? cfg.theme
+            : cfgKey === "volTheme" ? cfg.volTheme : cfg.notifTheme
+        function setVal(v: string) {
+            if (cfgKey === "theme")
+                cfg.theme = v;
+            else if (cfgKey === "volTheme")
+                cfg.volTheme = v;
+            else
+                cfg.notifTheme = v;
+            root.saveSettings();
+        }
+
+        SLabel {
+            anchors.left: parent.left
+            anchors.verticalCenter: undefined
+            y: 6
+            text: "Color theme"
+        }
+        SReset {
+            key: tr.cfgKey
+            anchors.right: parent.right
+        }
+        Row {
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            spacing: 8
+
+            Repeater {
+                model: (tr.includeFollow
+                    ? [{ id: "follow", name: "Follow", accent: "", fg: "", muted: "" }]
+                    : []).concat(root.themes)
+
+                Rectangle {
+                    id: trCard
+                    required property var modelData
+                    readonly property var pal: modelData.id === "follow" ? root.activeTheme
+                        : modelData.id === "dynamic" ? root.dynTheme : modelData
+                    readonly property bool active: tr.current === modelData.id
+                    width: tr.includeFollow ? 80 : 88
+                    height: 86
+                    radius: 12
+                    color: Qt.alpha(root.accent, active ? 0.16 : 0.06)
+                    border.width: active ? 2 : 1
+                    border.color: active ? root.accent : Qt.alpha(root.accent, 0.25)
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Row {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: 5
+                            Repeater {
+                                model: [trCard.pal.accent, trCard.pal.fg, trCard.pal.muted]
+                                Rectangle {
+                                    required property var modelData
+                                    width: 18
+                                    height: 18
+                                    radius: 5
+                                    color: modelData
+                                    border.width: 1
+                                    border.color: Qt.rgba(1, 1, 1, 0.15)
+                                }
+                            }
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: trCard.modelData.name
+                            color: trCard.active ? root.fg : root.muted
+                            font { family: root.mono; pixelSize: root.fs(12) }
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: tr.setVal(trCard.modelData.id)
+                    }
+                }
+            }
+        }
+    }
+
     component SettingRow: Item {
         id: sr
         property string key
@@ -180,6 +266,7 @@ ShellRoot {
             property real volOpacity: 0.4
             property string volTheme: "follow"
             property string volAnim: "slide"
+            property bool volBounce: false
             // notification OSD
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
@@ -187,6 +274,7 @@ ShellRoot {
             property real notifOpacity: 0.4
             property real notifWidth: 420
             property string notifAnim: "expand"
+            property bool notifBounce: false
         }
     }
     function saveSettings() {
@@ -233,6 +321,11 @@ ShellRoot {
         return Math.round(px * cfg.fontScale);
     }
 
+    // internal errors surface as regular notifications (we are the server)
+    function notifyError(summary: string, body: string) {
+        Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "dialog-error", summary, body]);
+    }
+
     function humanBytes(n: int): string {
         if (n < 1024)
             return n + " B";
@@ -269,7 +362,10 @@ ShellRoot {
                         fg: c.on_surface.dark.color,
                         muted: c.outline.dark.color
                     };
-                } catch (e) {}
+                } catch (e) {
+                    if (cfg.theme === "dynamic")
+                        root.notifyError("Dynamic theme failed", "matugen returned no palette for the current wallpaper");
+                }
             }
         }
     }
@@ -370,6 +466,7 @@ ShellRoot {
     // Each entry: path|thumb|blurred. Reuses the conventions: thumbnails/<f>
     // for grid previews, blurred/<f> or <stem>blurred.<ext> for the overview.
     property var wallpapers: []
+    property string lastMissingDir: ""
     function rescanWallpapers() {
         wallScan.running = false;
         wallScan.running = true;
@@ -378,7 +475,7 @@ ShellRoot {
         id: wallScan
         running: true
         command: ["bash", "-c", `
-            cd "$1" || exit 0
+            cd "$1" || { echo NODIR; exit 0; }
             shopt -s nullglob nocaseglob
             for f in *.png *.jpg *.jpeg *.webp; do
                 case "$f" in *blurred.*) continue ;; esac
@@ -391,6 +488,15 @@ ShellRoot {
             done | sort`, "_", root.wallDir]
         stdout: StdioCollector {
             onStreamFinished: {
+                if (text.trim() === "NODIR") {
+                    root.wallpapers = [];
+                    if (root.lastMissingDir !== root.wallDir) {
+                        root.lastMissingDir = root.wallDir;
+                        root.notifyError("Wallpaper folder not found", root.wallDir);
+                    }
+                    return;
+                }
+                root.lastMissingDir = "";
                 const walls = text.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
                     return { path: p[0], thumb: p[1], blur: p[2] || "" };
@@ -797,7 +903,7 @@ ShellRoot {
                     [ -e "$BLUR" ] || magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
                 fi
                 export WALL BLUR
-                eval "$4"
+                eval "$4" || notify-send -a launcher -i dialog-error "Wallpaper command failed" "$4"
             `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand,
                 cfg.wallCommand.includes("$BLUR") ? "1" : "0"]);
             exit();
@@ -1455,7 +1561,7 @@ ShellRoot {
                     id: clipMasonry
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
-                    anchors.topMargin: 26
+                    anchors.topMargin: clipDrawer.clipPages > 1 ? 56 : 26
                     spacing: 16
 
                     Repeater {
@@ -1536,7 +1642,7 @@ ShellRoot {
                                         return Math.max(44, Math.min(240, Math.ceil(measureText.paintedHeight) + 26));
                                     }
                                     width: 240
-                                    height: tileH
+                                    height: tileH > 0 ? tileH + 24 : 0
                                     visible: tileH > 0
 
                                     // expanding one clip animates the rest away
@@ -1560,10 +1666,26 @@ ShellRoot {
                                         }
                                     }
 
+                                    // caption line, like app/wallpaper labels
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        y: clipTile.y + clipCell.tileH + 6
+                                        opacity: clipTile.opacity
+                                        scale: clipTile.scale
+                                        text: {
+                                            const c = clipCell.shownClip;
+                                            if (!c)
+                                                return "";
+                                            return c.image ? c.kind + " · " + c.dims : "text · " + c.preview.length;
+                                        }
+                                        color: root.fg
+                                        font { family: root.mono; pixelSize: root.fs(12) }
+                                    }
+
                                     Rectangle {
                                         id: clipTile
                                         width: parent.width
-                                        height: parent.height
+                                        height: clipCell.tileH
                                         radius: 12
                                         opacity: 0
                                         color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
@@ -1638,8 +1760,8 @@ ShellRoot {
 
                 Text {
                     visible: clipDrawer.clipPages > 1 && win.expandedClip === null
-                    anchors.top: clipMasonry.bottom
-                    anchors.topMargin: 16
+                    anchors.top: parent.top
+                    anchors.topMargin: 26
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: (win.clipPage + 1) + " / " + clipDrawer.clipPages
                     color: root.muted
@@ -1668,7 +1790,7 @@ ShellRoot {
                     // the decoded full text arrives async and is longer than
                     // the preview; grow smoothly instead of jumping
                     Behavior on height {
-                        NumberAnimation { duration: win.ad(160); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.ad(380); easing.type: Easing.OutCubic }
                     }
                     transform: Translate { id: expandTx }
 
@@ -1747,15 +1869,27 @@ ShellRoot {
                                 }
                             }
                         }
-                        Text {
+                        // the full text reveals gradually as the container
+                        // grows, instead of jumping when the decode lands
+                        Item {
                             visible: win.expandedClip !== null && win.expandedClip.image !== true
                             width: parent.width
-                            text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
-                            wrapMode: Text.Wrap
-                            elide: Text.ElideRight
-                            maximumLineCount: 30
-                            color: root.fg
-                            font { family: root.mono; pixelSize: root.fs(13) }
+                            height: expandBody.paintedHeight
+                            clip: true
+                            Behavior on height {
+                                NumberAnimation { duration: win.ad(380); easing.type: Easing.OutCubic }
+                            }
+
+                            Text {
+                                id: expandBody
+                                width: parent.width
+                                text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
+                                wrapMode: Text.Wrap
+                                elide: Text.ElideRight
+                                maximumLineCount: 30
+                                color: root.fg
+                                font { family: root.mono; pixelSize: root.fs(13) }
+                            }
                         }
 
                         Rectangle {
@@ -1793,10 +1927,11 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
+                readonly property int tabIdx: win.settingsTab === "general" ? 0
+                    : win.settingsTab === "volume" ? 1 : 2
                 anchors.centerIn: parent
                 width: 860
-                height: 78 + (win.settingsTab === "general" ? settingsCol.height
-                    : win.settingsTab === "volume" ? volCol.height : notifSetCol.height) + 26
+                height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
                 opacity: 0.004
                 visible: win.pane === "settings"
                 Connections {
@@ -1813,86 +1948,120 @@ ShellRoot {
                     NumberAnimation { target: settingsPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
-                // tab bar
-                Row {
-                    id: settingsTabs
+                // header: title + underlined tab links, left-aligned
+                Item {
+                    id: settingsHeader
+                    width: 780
+                    height: 58
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: 26
-                    spacing: 10
 
-                    Repeater {
-                        model: [
-                            { id: "general", label: "General" },
-                            { id: "volume", label: "Volume OSD" },
-                            { id: "notifications", label: "Notifications" }
-                        ]
+                    Text {
+                        text: "SETTINGS"
+                        color: root.muted
+                        font { family: root.mono; pixelSize: root.fs(13); letterSpacing: 3 }
+                    }
+                    Row {
+                        anchors.bottom: parent.bottom
+                        spacing: 26
 
-                        Rectangle {
-                            id: settingsTabChip
-                            required property var modelData
-                            readonly property bool active: win.settingsTab === modelData.id
-                            width: settingsTabText.implicitWidth + 28
-                            height: 30
-                            radius: 9
-                            color: Qt.alpha(root.accent, active ? 0.22 : 0.07)
-                            border.width: 1
-                            border.color: active ? root.accent : Qt.alpha(root.accent, 0.25)
+                        Repeater {
+                            model: [
+                                { id: "general", label: "Launcher" },
+                                { id: "volume", label: "Volume OSD" },
+                                { id: "notifications", label: "Notifications" }
+                            ]
 
-                            Text {
-                                id: settingsTabText
-                                anchors.centerIn: parent
-                                text: settingsTabChip.modelData.label
-                                color: settingsTabChip.active ? root.fg : root.muted
-                                font { family: root.mono; pixelSize: root.fs(13) }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: win.settingsTab = settingsTabChip.modelData.id
+                            Item {
+                                id: settingsTabItem
+                                required property var modelData
+                                readonly property bool active: win.settingsTab === modelData.id
+                                width: settingsTabText.implicitWidth
+                                height: 24
+
+                                Text {
+                                    id: settingsTabText
+                                    text: settingsTabItem.modelData.label
+                                    color: settingsTabItem.active ? root.fg : root.muted
+                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width
+                                    height: 2
+                                    radius: 1
+                                    color: root.accent
+                                    opacity: settingsTabItem.active ? 1 : 0
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                    }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: win.settingsTab = settingsTabItem.modelData.id
+                                }
                             }
                         }
                     }
                 }
 
+                // pages slide horizontally when switching tabs, all
+                // top-aligned so shorter pages stay level
+                Item {
+                    id: tabViewport
+                    clip: true
+                    width: 820
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: settingsHeader.bottom
+                    anchors.topMargin: 18
+                    height: settingsPane.tabIdx === 0 ? settingsCol.height
+                        : settingsPane.tabIdx === 1 ? volCol.height : notifSetCol.height
+                    Behavior on height {
+                        NumberAnimation { duration: win.ad(220); easing.type: Easing.OutCubic }
+                    }
+
                 // volume OSD tab
                 Column {
                     id: volCol
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 78
+                    x: 20 + (1 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
+                    }
                     spacing: 14
-                    visible: win.settingsTab === "volume"
 
                     SettingRow { key: "volWidth"; label: "Size" }
                     SettingRow { key: "volOpacity"; label: "Opacity" }
-                    SettingRow { key: "volTheme"; label: "Theme"; valueWidth: 130 }
                     SettingRow { key: "volAnim"; label: "Animation"; valueWidth: 130 }
+                    SettingRow { key: "volBounce"; label: "Bounce" }
+                    ThemeRow { cfgKey: "volTheme"; includeFollow: true }
                 }
 
                 // notifications tab
                 Column {
                     id: notifSetCol
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 78
+                    x: 20 + (2 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
+                    }
                     spacing: 14
-                    visible: win.settingsTab === "notifications"
 
                     SettingRow { key: "notifTimeout"; label: "Timeout" }
                     SettingRow { key: "notifFontScale"; label: "Font size" }
                     SettingRow { key: "notifWidth"; label: "Size" }
                     SettingRow { key: "notifOpacity"; label: "Opacity" }
-                    SettingRow { key: "notifTheme"; label: "Theme"; valueWidth: 130 }
                     SettingRow { key: "notifAnim"; label: "Animation"; valueWidth: 130 }
+                    SettingRow { key: "notifBounce"; label: "Bounce" }
+                    ThemeRow { cfgKey: "notifTheme"; includeFollow: true }
                 }
 
                 Column {
                     id: settingsCol
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 78
+                    x: 20 + (0 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
+                    }
                     spacing: 14
-                    visible: win.settingsTab === "general"
 
                     Repeater {
                         model: [
@@ -2009,76 +2178,8 @@ ShellRoot {
                     }
 
                     // color themes with palette previews
-                    Item {
-                        width: 780
-                        height: 86
-
-                        SLabel {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: undefined
-                            y: 6
-                            text: "Color theme"
-                        }
-                        SReset {
-                            key: "theme"
-                            anchors.right: parent.right
-                        }
-                        Row {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 34
-                            spacing: 10
-
-                            Repeater {
-                                model: root.themes
-
-                                Rectangle {
-                                    id: themeCard
-                                    required property var modelData
-                                    readonly property var pal: modelData.id === "dynamic" ? root.dynTheme : modelData
-                                    readonly property bool active: cfg.theme === modelData.id
-                                    width: 88
-                                    height: 86
-                                    radius: 12
-                                    color: Qt.alpha(root.accent, active ? 0.16 : 0.06)
-                                    border.width: active ? 2 : 1
-                                    border.color: active ? root.accent : Qt.alpha(root.accent, 0.25)
-
-                                    Column {
-                                        anchors.centerIn: parent
-                                        spacing: 8
-                                        Row {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            spacing: 5
-                                            Repeater {
-                                                model: [themeCard.pal.accent, themeCard.pal.fg, themeCard.pal.muted]
-                                                Rectangle {
-                                                    required property var modelData
-                                                    width: 18
-                                                    height: 18
-                                                    radius: 5
-                                                    color: modelData
-                                                    border.width: 1
-                                                    border.color: Qt.rgba(1, 1, 1, 0.15)
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: themeCard.modelData.name
-                                            color: themeCard.active ? root.fg : root.muted
-                                            font { family: root.mono; pixelSize: root.fs(12) }
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            cfg.theme = themeCard.modelData.id;
-                                            root.saveSettings();
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    ThemeRow {
+                        cfgKey: "theme"
                     }
 
                     // wallpaper path
@@ -2260,6 +2361,7 @@ ShellRoot {
                         font { family: root.mono; pixelSize: root.fs(11) }
                     }
                 }
+                } // tabViewport
             }
 
             // Settings button: pops up when hovering the bottom-right corner
@@ -2325,6 +2427,8 @@ ShellRoot {
             case "volOpacity": return Math.round(cfg.volOpacity * 100) + "%";
             case "volTheme": return cfg.volTheme;
             case "volAnim": return cfg.volAnim;
+            case "volBounce": return cfg.volBounce ? "on" : "off";
+            case "notifBounce": return cfg.notifBounce ? "on" : "off";
             case "notifWidth": return cfg.notifWidth + " px";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
@@ -2421,6 +2525,12 @@ ShellRoot {
             case "volAnim":
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
                 break;
+            case "volBounce":
+                cfg.volBounce = !cfg.volBounce;
+                break;
+            case "notifBounce":
+                cfg.notifBounce = !cfg.notifBounce;
+                break;
             case "notifWidth":
                 cfg.notifWidth = Math.max(320, Math.min(600, cfg.notifWidth + dir * 20));
                 break;
@@ -2485,6 +2595,8 @@ ShellRoot {
             case "volOpacity": cfg.volOpacity = 0.4; break;
             case "volTheme": cfg.volTheme = "follow"; break;
             case "volAnim": cfg.volAnim = "slide"; break;
+            case "volBounce": cfg.volBounce = false; break;
+            case "notifBounce": cfg.notifBounce = false; break;
             case "notifWidth": cfg.notifWidth = 420; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
@@ -2738,9 +2850,12 @@ ShellRoot {
         id: volOsd
         property bool show: false
         property bool leaving: false
+        signal reenter
         function ping() {
             leaving = false;
             show = true;
+            // a change can land mid-dismiss; pull the card back on screen
+            reenter();
             volHide.restart();
         }
         Timer {
@@ -2770,10 +2885,15 @@ ShellRoot {
                 WlrLayershell.layer: WlrLayer.Overlay
                 WlrLayershell.namespace: "app-launcher-osd"
                 BackgroundEffect.blurRegion: RoundedBlur {
-                    ry: volCard.y
-                    rw: volWin.width
-                    rh: volCard.height
-                    rr: volCard.radius
+                    // track pop/fade exits too, so the blur hole shrinks with
+                    // the card instead of lingering until unload
+                    readonly property real rs: volCard.mode === "pop" ? volCard.scale
+                        : volCard.mode === "fade" ? volCard.opacity : 1
+                    rx: (volWin.width - volWin.width * rs) / 2
+                    ry: volCard.y + volCard.height * (1 - rs) / 2
+                    rw: volWin.width * rs
+                    rh: volCard.height * rs
+                    rr: (volCard.height * rs) / 2
                 }
 
                 Rectangle {
@@ -2790,21 +2910,33 @@ ShellRoot {
                     border.color: Qt.alpha(root.volTh.accent, 0.33)
 
                     Behavior on y {
-                        NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 300; easing.type: Easing.OutCubic }
+                        NumberAnimation {
+                            duration: cfg.volAnim === "none" ? 0 : 300
+                            easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
+                            easing.overshoot: 1.3
+                        }
                     }
                     Behavior on opacity {
                         NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
                     }
                     Behavior on scale {
-                        NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 260; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                        NumberAnimation {
+                            duration: cfg.volAnim === "none" ? 0 : 260
+                            easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
+                            easing.overshoot: 1.6
+                        }
                     }
-                    Component.onCompleted: {
+                    function enter() {
                         y = 0;
                         opacity = 1;
                         scale = 1;
                     }
+                    Component.onCompleted: enter()
                     Connections {
                         target: volOsd
+                        function onReenter() {
+                            volCard.enter();
+                        }
                         function onLeavingChanged() {
                             if (!volOsd.leaving)
                                 return;
@@ -2892,11 +3024,13 @@ ShellRoot {
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
             WlrLayershell.namespace: "app-launcher-osd"
-            // track the scaling/swiping card so blur never pokes out
+            // track the scaling/fading/swiping card so blur never pokes out
             BackgroundEffect.blurRegion: CornerBlur {
-                rx: notifWin.width * (1 - notifCard.scale) + dragWrap.x
-                rw: notifWin.width * notifCard.scale
-                rh: (notifCol.height + 30) * notifCard.scale
+                readonly property real rs: notifCard.mode === "expand" ? notifCard.scale
+                    : notifCard.mode === "fade" ? notifCard.opacity : 1
+                rx: notifWin.width * (1 - rs) + dragWrap.x
+                rw: notifWin.width * rs
+                rh: (notifCol.height + 30) * rs
             }
 
             Item {
@@ -2906,7 +3040,11 @@ ShellRoot {
                 height: parent.height
                 Behavior on x {
                     enabled: dragWrap.animOn && !notifDragArea.drag.active
-                    NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+                    NumberAnimation {
+                        duration: cfg.notifAnim === "none" ? 0 : 220
+                        easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                        easing.overshoot: 1.3
+                    }
                 }
 
                 Rectangle {
@@ -2935,19 +3073,24 @@ ShellRoot {
                             dragWrap.x = 0;
                     }
                     Behavior on scale {
-                        NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 280; easing.type: Easing.OutCubic }
+                        NumberAnimation {
+                            duration: cfg.notifAnim === "none" ? 0 : 280
+                            easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                            easing.overshoot: 1.4
+                        }
                     }
                     Behavior on opacity {
                         NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
                     }
-                    // closing animation (also used after a swipe)
+                    // closing animation (also used after a swipe, following
+                    // whichever direction the card was dragged)
                     Connections {
                         target: root
                         function onNotifLeavingChanged() {
                             if (!root.notifLeaving)
                                 return;
-                            if (dragWrap.x > 0 || notifCard.mode === "slide")
-                                dragWrap.x = notifWin.width + 20;
+                            if (dragWrap.x !== 0 || notifCard.mode === "slide")
+                                dragWrap.x = dragWrap.x < 0 ? -(notifWin.width + 20) : notifWin.width + 20;
                             else if (notifCard.mode === "expand")
                                 notifCard.scale = 0;
                             else
@@ -3020,11 +3163,11 @@ ShellRoot {
                     anchors.fill: parent
                     drag.target: dragWrap
                     drag.axis: Drag.XAxis
-                    drag.minimumX: 0
+                    drag.minimumX: -(notifWin.width + 20)
                     drag.maximumX: notifWin.width + 20
                     onClicked: root.dismissNotif()
                     onReleased: {
-                        if (dragWrap.x > 80)
+                        if (Math.abs(dragWrap.x) > 80)
                             root.dismissNotif();
                         else
                             dragWrap.x = 0;
