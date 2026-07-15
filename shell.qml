@@ -3,6 +3,8 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Widgets
+import Quickshell.Services.Pipewire
+import Quickshell.Services.Notifications
 
 ShellRoot {
     id: root
@@ -42,6 +44,53 @@ ShellRoot {
         horizontalAlignment: Text.AlignHCenter
         font { family: root.mono; pixelSize: root.fs(14) }
         anchors.verticalCenter: parent.verticalCenter
+    }
+
+    // Blur region approximating a radius-18 rounded rect with banded rects,
+    // so the compositor blur doesn't show as a square poking out of the
+    // card's rounded corners (the protocol region is rect-only).
+    component RoundedBlur: Region {
+        id: rb
+        property real rx: 0
+        property real ry: 0
+        property real rw: 100
+        property real rh: 50
+        x: rx
+        y: ry + 18
+        width: rw
+        height: Math.max(0, rh - 36)
+        regions: [
+            Region { x: rb.rx + 12; y: rb.ry; width: rb.rw - 24; height: 2 },
+            Region { x: rb.rx + 7; y: rb.ry + 2; width: rb.rw - 14; height: 3 },
+            Region { x: rb.rx + 4; y: rb.ry + 5; width: rb.rw - 8; height: 4 },
+            Region { x: rb.rx + 2; y: rb.ry + 9; width: rb.rw - 4; height: 4 },
+            Region { x: rb.rx + 1; y: rb.ry + 13; width: rb.rw - 2; height: 5 },
+            Region { x: rb.rx + 1; y: rb.ry + rb.rh - 18; width: rb.rw - 2; height: 5 },
+            Region { x: rb.rx + 2; y: rb.ry + rb.rh - 13; width: rb.rw - 4; height: 4 },
+            Region { x: rb.rx + 4; y: rb.ry + rb.rh - 9; width: rb.rw - 8; height: 4 },
+            Region { x: rb.rx + 7; y: rb.ry + rb.rh - 5; width: rb.rw - 14; height: 3 },
+            Region { x: rb.rx + 12; y: rb.ry + rb.rh - 2; width: rb.rw - 24; height: 2 }
+        ]
+    }
+
+    // Same idea for a card attached to the top-right corner: only its
+    // bottom-left corner is rounded.
+    component CornerBlur: Region {
+        id: cb
+        property real rx: 0
+        property real rw: 100
+        property real rh: 50
+        x: rx
+        y: 0
+        width: rw
+        height: Math.max(0, rh - 18)
+        regions: [
+            Region { x: cb.rx + 1; y: cb.rh - 18; width: cb.rw - 1; height: 5 },
+            Region { x: cb.rx + 2; y: cb.rh - 13; width: cb.rw - 2; height: 4 },
+            Region { x: cb.rx + 4; y: cb.rh - 9; width: cb.rw - 4; height: 4 },
+            Region { x: cb.rx + 7; y: cb.rh - 5; width: cb.rw - 7; height: 3 },
+            Region { x: cb.rx + 12; y: cb.rh - 2; width: cb.rw - 12; height: 2 }
+        ]
     }
 
     readonly property string defaultWallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
@@ -84,6 +133,7 @@ ShellRoot {
             property int clipsCols: 3
             property int clipsRows: 3
             property int clipsMax: 60
+            property var pages: ({ clock: true, apps: true, walls: true, clips: true })
             property string animStyle: "wave"
             property real fontScale: 1.0
             property string fontFamily: ""
@@ -209,46 +259,25 @@ ShellRoot {
         return score - lname.length * 0.1;
     }
 
-    // Single-instance guard. The first instance records its pid and shows the
-    // window; a second invocation instead asks the running one to dismiss
-    // itself (by touching the toggle file it watches) and exits — so the
-    // keybind acts as open/close and instances can never overlap.
-    property bool primary: false
-    readonly property string toggleFile: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher.toggle"
+    // The shell runs as a persistent daemon; the launcher window is toggled
+    // over IPC: qs -p <repo> ipc call launcher toggle
+    IpcHandler {
+        target: "launcher"
 
-    Process {
-        running: true
-        command: ["bash", "-c", `
-            rt="\${XDG_RUNTIME_DIR:-/tmp}"
-            pf="$rt/app-launcher.pid"
-            tf="$rt/app-launcher.toggle"
-            if [ -f "$pf" ]; then
-                old=$(cat "$pf" 2>/dev/null)
-                if [ -n "$old" ] && grep -qE 'quickshell|^qs$' "/proc/$old/comm" 2>/dev/null \\
-                    && tr '\\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q "Projects/launcher"; then
-                    date +%s%N > "$tf"
-                    echo DUP
-                    exit 0
-                fi
-            fi
-            echo "$PPID" > "$pf"
-            [ -e "$tf" ] || echo 0 > "$tf"
-            echo PRIMARY`]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                if (text.trim() === "PRIMARY")
-                    root.primary = true;
-                else
-                    Qt.quit();
-            }
+        function toggle(): void {
+            if (win.shown)
+                win.exit();
+            else
+                win.open();
         }
-    }
-
-    FileView {
-        path: root.toggleFile
-        watchChanges: root.primary
-        printErrors: false
-        onFileChanged: win.exit()
+        function show(): void {
+            if (!win.shown)
+                win.open();
+        }
+        function hide(): void {
+            if (win.shown)
+                win.exit();
+        }
     }
 
     // Per-app launch counts, persisted across runs. Apps launched more often
@@ -385,6 +414,8 @@ ShellRoot {
         }
     }
 
+    property bool scansStarted: false
+
     // ---------- fonts ----------
     property var fontFamilies: []
     Process {
@@ -420,7 +451,41 @@ ShellRoot {
     PanelWindow {
         id: win
 
-        visible: root.primary
+        property bool shown: false
+        visible: shown
+
+        function open() {
+            resetState();
+            shown = true;
+            input.forceActiveFocus();
+            // fresh data per open: the clipboard changes between opens, and
+            // a dynamic theme should follow the current wallpaper
+            clipScan.running = false;
+            clipScan.running = true;
+            if (cfg.theme === "dynamic") {
+                matugenProc.running = false;
+                matugenProc.running = true;
+            }
+        }
+
+        function resetState() {
+            exiting = false;
+            revealStarted = false;
+            reveal = 0;
+            content.opacity = 0;
+            warmingApps = false;
+            warmingWalls = false;
+            wallWarmTick = 0;
+            expandedClip = null;
+            capturingBind = "";
+            input.text = "";
+            pane = homePane();
+            paneBeforeSettings = homePane();
+            selected = 0;
+            wallSelected = 0;
+            clipSelected = 0;
+        }
+
         anchors {
             left: true
             right: true
@@ -473,17 +538,25 @@ ShellRoot {
         }
 
         // ---------- pane state ----------
-        // Tab cycles clock -> apps -> walls -> clips -> clock; the settings
-        // pane sits outside the cycle (opened via the corner button).
+        // Tab cycles the enabled panes; the settings pane sits outside the
+        // cycle (opened via the corner button or Ctrl+S).
         property string pane: "clock"
         readonly property var paneOrder: ["clock", "apps", "walls", "clips"]
+        readonly property var activePanes: {
+            const pages = cfg.pages ?? {};
+            const list = paneOrder.filter(p => pages[p] !== false);
+            return list.length ? list : ["clock"];
+        }
+        function homePane(): string {
+            return activePanes[0];
+        }
         readonly property bool drawerOpen: pane === "apps"
 
         function setPane(p: string) {
             input.text = "";
             capturingBind = "";
             expandedClip = null;
-            pane = p;
+            pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
         }
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
@@ -497,11 +570,13 @@ ShellRoot {
         }
         function cyclePane(dir: int) {
             if (pane === "settings") {
-                setPane("clock");
+                setPane(homePane());
                 return;
             }
-            const i = paneOrder.indexOf(pane);
-            setPane(paneOrder[((i + dir) % paneOrder.length + paneOrder.length) % paneOrder.length]);
+            let i = activePanes.indexOf(pane);
+            if (i < 0)
+                i = 0;
+            setPane(activePanes[((i + dir) % activePanes.length + activePanes.length) % activePanes.length]);
         }
 
         // ---------- matches ----------
@@ -684,25 +759,46 @@ ShellRoot {
             // Decode once to a temp file, read info from it, THEN copy from
             // it. Copying re-stores the entry through the watcher, which
             // dedupes by deleting the old id — so a second decode of the
-            // original id would come back empty.
+            // original id would come back empty. The new id is captured so
+            // the in-memory list (and its cached thumbnail) can be patched
+            // in place instead of rescanning everything.
+            infoClipId = clip.id;
             clipInfo.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 f=$(mktemp)
                 trap 'rm -f "$f"' EXIT
                 cliphist decode "$1" > "$f"
                 wc -c < "$f"
-                [ "$2" = "txt" ] && head -c 4000 "$f"
                 wl-copy < "$f"
-                exit 0`, "_", clip.id, clip.image ? "img" : "txt"];
+                sleep 0.25
+                nid=$(cliphist list | head -n 1 | cut -f1)
+                echo "NEWID $nid"
+                if [ "$2" = "img" ] && [ -n "$nid" ] && [ "$nid" != "$1" ]; then
+                    cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
+                fi
+                [ "$2" = "txt" ] && head -c 4000 "$f"
+                exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir];
             clipInfo.running = true;
         }
+        property string infoClipId: ""
         Process {
             id: clipInfo
             stdout: StdioCollector {
                 onStreamFinished: {
-                    const nl = text.indexOf("\n");
-                    win.expandedBytes = parseInt(text.slice(0, nl).trim()) || 0;
-                    win.expandedText = text.slice(nl + 1);
+                    const lines = text.split("\n");
+                    win.expandedBytes = parseInt((lines[0] ?? "").trim()) || 0;
+                    win.expandedText = lines.slice(2).join("\n");
+                    const m = (lines[1] ?? "").match(/^NEWID (\S+)/);
+                    if (m && win.infoClipId && m[1] !== win.infoClipId) {
+                        const idx = root.clips.findIndex(c => c.id === win.infoClipId);
+                        if (idx >= 0) {
+                            const c = root.clips[idx];
+                            const upd = Object.assign({}, c, { id: m[1] });
+                            if (c.image && c.thumb)
+                                upd.thumb = root.clipThumbDir + "/" + m[1] + ".png";
+                            root.clips = [upd].concat(root.clips.filter(x => x.id !== win.infoClipId));
+                        }
+                    }
                 }
             }
         }
@@ -789,12 +885,14 @@ ShellRoot {
             id: fadeIn
             onFinished: {
                 win.warmingWalls = true;
-                // deferred startup work: nothing heavy runs during the intro
-                clipScan.running = true;
-                iconThemeScan.running = true;
-                fontScan.running = true;
-                if (!matugenProc.running && cfg.theme !== "dynamic")
-                    matugenProc.running = true;
+                // deferred one-time startup work (clip scans run per open)
+                if (!root.scansStarted) {
+                    root.scansStarted = true;
+                    iconThemeScan.running = true;
+                    fontScan.running = true;
+                    if (!matugenProc.running && cfg.theme !== "dynamic")
+                        matugenProc.running = true;
+                }
             }
             NumberAnimation {
                 target: content
@@ -835,13 +933,9 @@ ShellRoot {
                     easing.type: Easing.InQuad
                 }
             }
-            // waitForJob flushes pending state writes before exiting
+            // hide the window; the daemon keeps running
             ScriptAction {
-                script: {
-                    store.waitForJob();
-                    settingsStore.waitForJob();
-                    Qt.quit();
-                }
+                script: win.shown = false
             }
         }
 
@@ -1511,15 +1605,7 @@ ShellRoot {
                             NumberAnimation { target: expandCard; property: "scale"; to: 0.35; duration: win.ad(260); easing.type: Easing.InCubic }
                             NumberAnimation { target: expandCard; property: "opacity"; to: 0; duration: win.ad(260); easing.type: Easing.InCubic }
                         }
-                        ScriptAction {
-                            script: {
-                                win.expandedClip = null;
-                                // copying re-stored the entry under a new id;
-                                // refresh so the grid's ids stay valid
-                                clipScan.running = false;
-                                clipScan.running = true;
-                            }
-                        }
+                        ScriptAction { script: win.expandedClip = null }
                     }
                     Connections {
                         target: win
@@ -1682,6 +1768,56 @@ ShellRoot {
                                 }
                                 SReset {
                                     key: srow.modelData.key
+                                }
+                            }
+                        }
+                    }
+
+                    // enabled pages
+                    Item {
+                        width: 780
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Pages"
+                        }
+                        SReset {
+                            key: "pages"
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34
+                            spacing: 8
+                            height: parent.height
+
+                            Repeater {
+                                model: ["clock", "apps", "walls", "clips"]
+
+                                Rectangle {
+                                    id: pageChip
+                                    required property var modelData
+                                    readonly property bool on: (cfg.pages ?? {})[modelData] !== false
+                                    width: pageChipText.implicitWidth + 20
+                                    height: 28
+                                    radius: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: Qt.alpha(root.accent, on ? 0.2 : 0.06)
+                                    border.width: 1
+                                    border.color: on ? root.accent : Qt.alpha(root.accent, 0.25)
+
+                                    Text {
+                                        id: pageChipText
+                                        anchors.centerIn: parent
+                                        text: pageChip.modelData
+                                        color: pageChip.on ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(12) }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: win.togglePage(pageChip.modelData)
+                                    }
                                 }
                             }
                         }
@@ -2075,8 +2211,24 @@ ShellRoot {
             root.saveSettings();
         }
 
+        function togglePage(p: string) {
+            const pages = Object.assign({ clock: true, apps: true, walls: true, clips: true }, cfg.pages);
+            const enabled = paneOrder.filter(x => pages[x] !== false);
+            // keep at least one page enabled
+            if (pages[p] !== false && enabled.length <= 1)
+                return;
+            pages[p] = pages[p] === false;
+            cfg.pages = pages;
+            root.saveSettings();
+            if (!activePanes.includes(pane) && pane !== "settings")
+                setPane(homePane());
+        }
+
         function resetSetting(key: string) {
             switch (key) {
+            case "pages":
+                cfg.pages = ({ clock: true, apps: true, walls: true, clips: true });
+                break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
             case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
@@ -2117,7 +2269,7 @@ ShellRoot {
 
             // typing from the clock jumps straight into the app search
             onTextChanged: {
-                if (text.length > 0 && win.pane === "clock")
+                if (text.length > 0 && win.pane === "clock" && win.activePanes.includes("apps"))
                     win.pane = "apps";
             }
 
@@ -2309,6 +2461,261 @@ ShellRoot {
         Component.onCompleted: {
             input.forceActiveFocus();
             startReveal();
+        }
+    }
+
+    // ================= OSDs (persistent) =================
+
+    // ---------- volume OSD: slides up from the bottom edge ----------
+    PwObjectTracker {
+        objects: [Pipewire.defaultAudioSink]
+    }
+    readonly property var sink: Pipewire.defaultAudioSink
+    readonly property real vol: sink && sink.audio ? sink.audio.volume : 0
+    readonly property bool sinkMuted: sink && sink.audio ? sink.audio.muted : false
+
+    // ignore the initial property churn while pipewire connects
+    property bool volReady: false
+    Timer {
+        interval: 2000
+        running: true
+        onTriggered: root.volReady = true
+    }
+    onVolChanged: if (volReady) volOsd.ping()
+    onSinkMutedChanged: if (volReady) volOsd.ping()
+
+    Scope {
+        id: volOsd
+        property bool show: false
+        property bool leaving: false
+        function ping() {
+            leaving = false;
+            show = true;
+            volHide.restart();
+        }
+        Timer {
+            id: volHide
+            interval: 1600
+            onTriggered: volOsd.leaving = true
+        }
+        Timer {
+            interval: 340
+            running: volOsd.leaving
+            onTriggered: {
+                volOsd.show = false;
+                volOsd.leaving = false;
+            }
+        }
+
+        LazyLoader {
+            active: volOsd.show
+
+            PanelWindow {
+                id: volWin
+                anchors.bottom: true
+                implicitWidth: 380
+                implicitHeight: 68 + 90 // card + slide/offset zone
+                color: "transparent"
+                exclusionMode: ExclusionMode.Ignore
+                WlrLayershell.layer: WlrLayer.Overlay
+                WlrLayershell.namespace: "app-launcher-osd"
+                BackgroundEffect.blurRegion: RoundedBlur {
+                    ry: volCard.y
+                    rw: volWin.width
+                    rh: volCard.height
+                }
+
+                Rectangle {
+                    id: volCard
+                    width: parent.width
+                    height: 68
+                    y: volWin.implicitHeight // starts below the screen edge
+                    radius: 18
+                    color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, 0.4)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.33)
+
+                    Behavior on y {
+                        NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+                    }
+                    Component.onCompleted: y = 0
+                    Connections {
+                        target: volOsd
+                        function onLeavingChanged() {
+                            if (volOsd.leaving)
+                                volCard.y = volWin.implicitHeight;
+                        }
+                    }
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 16
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.sinkMuted ? "🔇" : root.vol < 0.01 ? "🔈" : root.vol < 0.5 ? "🔉" : "🔊"
+                            font.pixelSize: 20
+                        }
+                        Item {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 220
+                            height: 8
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 4
+                                color: Qt.alpha(root.accent, 0.15)
+                            }
+                            Rectangle {
+                                width: parent.width * Math.min(1, root.vol)
+                                height: parent.height
+                                radius: 4
+                                color: root.sinkMuted ? Qt.alpha(root.muted, 0.8) : root.accent
+                                Behavior on width {
+                                    NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                                }
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 52
+                            horizontalAlignment: Text.AlignRight
+                            text: root.sinkMuted ? "mute" : Math.round(root.vol * 100) + "%"
+                            color: root.fg
+                            font { family: root.mono; pixelSize: 14 }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- notification OSD: expands out of the top-right corner ----------
+    property var notif: null
+    NotificationServer {
+        id: notifServer
+        bodySupported: true
+        imageSupported: true
+        onNotification: n => {
+            n.tracked = true;
+            root.notif = n;
+            notifHide.restart();
+        }
+    }
+    Timer {
+        id: notifHide
+        interval: root.notif && root.notif.expireTimeout > 0 ? root.notif.expireTimeout : 5000
+        onTriggered: root.dismissNotif()
+    }
+    function dismissNotif() {
+        if (notif) {
+            notif.expire();
+            notif = null;
+        }
+    }
+
+    LazyLoader {
+        active: root.notif !== null
+
+        PanelWindow {
+            id: notifWin
+            anchors.top: true
+            anchors.right: true
+            implicitWidth: 420
+            implicitHeight: notifCard.height
+            color: "transparent"
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "app-launcher-osd"
+            // track the scaling card so blur never pokes out during the
+            // corner expansion
+            BackgroundEffect.blurRegion: CornerBlur {
+                rx: notifWin.width * (1 - notifCard.scale)
+                rw: notifWin.width * notifCard.scale
+                rh: notifCard.height * notifCard.scale
+            }
+
+            Rectangle {
+                id: notifCard
+                width: parent.width
+                height: notifCol.height + 30
+                topLeftRadius: 0
+                topRightRadius: 0
+                bottomRightRadius: 0
+                bottomLeftRadius: 18
+                color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, 0.4)
+                border.width: 1
+                border.color: Qt.alpha(root.accent, 0.33)
+                transformOrigin: Item.TopRight
+                scale: 0
+                Component.onCompleted: scale = 1
+                Behavior on scale {
+                    NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+                }
+
+                Row {
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.margins: 15
+                    spacing: 14
+
+                    Image {
+                        id: notifImage
+                        visible: source !== ""
+                        width: visible ? 48 : 0
+                        height: 48
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectCrop
+                        source: {
+                            const n = root.notif;
+                            if (!n)
+                                return "";
+                            if (n.image)
+                                return n.image;
+                            return n.appIcon ? Quickshell.iconPath(n.appIcon, true) : "";
+                        }
+                    }
+
+                    Column {
+                        id: notifCol
+                        width: 390 - (notifImage.visible ? 62 : 0) - 15
+                        spacing: 4
+
+                        Text {
+                            visible: text.length > 0
+                            text: root.notif ? root.notif.appName : ""
+                            color: root.muted
+                            font { family: root.mono; pixelSize: 11; letterSpacing: 2; capitalization: Font.AllUppercase }
+                        }
+                        Text {
+                            visible: text.length > 0
+                            width: parent.width
+                            text: root.notif ? root.notif.summary : ""
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            color: root.fg
+                            font { family: root.mono; pixelSize: 14; weight: Font.DemiBold }
+                        }
+                        Text {
+                            visible: text.length > 0
+                            width: parent.width
+                            text: root.notif ? root.notif.body : ""
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 4
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            color: root.muted
+                            font { family: root.mono; pixelSize: 12 }
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.dismissNotif()
+                }
+            }
         }
     }
 }
