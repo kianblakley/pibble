@@ -52,15 +52,12 @@ ShellRoot {
         property bool includeFollow: false
         width: 780
         height: 86
-        readonly property string current: cfgKey === "theme" ? cfg.theme
-            : cfgKey === "volTheme" ? cfg.volTheme : cfg.notifTheme
+        readonly property string current: cfgKey === "theme" ? cfg.theme : cfg.flyTheme
         function setVal(v: string) {
             if (cfgKey === "theme")
                 cfg.theme = v;
-            else if (cfgKey === "volTheme")
-                cfg.volTheme = v;
             else
-                cfg.notifTheme = v;
+                cfg.flyTheme = v;
             root.saveSettings();
         }
 
@@ -261,17 +258,14 @@ ShellRoot {
             property real dimOpacity: 0.4
             property string revealOrigin: "center"
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
-            // volume OSD
+            // flyouts (volume + notification OSDs)
+            property string flyTheme: "follow"
+            property real flyOpacity: 0.4
             property real volWidth: 340
-            property real volOpacity: 0.4
-            property string volTheme: "follow"
             property string volAnim: "slide"
             property bool volBounce: false
-            // notification OSD
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
-            property string notifTheme: "follow"
-            property real notifOpacity: 0.4
             property real notifWidth: 420
             property string notifAnim: "expand"
             property bool notifBounce: false
@@ -314,8 +308,7 @@ ShellRoot {
         }
         return activeTheme;
     }
-    readonly property var volTh: themeColors(cfg.volTheme)
-    readonly property var notifTh: themeColors(cfg.notifTheme)
+    readonly property var flyTh: themeColors(cfg.flyTheme)
 
     function fs(px: int): int {
         return Math.round(px * cfg.fontScale);
@@ -538,7 +531,10 @@ ShellRoot {
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
-            cliphist list | head -n "$1"`, "_", String(cfg.clipsMax)]
+            cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
+                n=$(cliphist decode "$id" 2>/dev/null | wc -c)
+                printf '%s\t%s\t%s\n' "$id" "$n" "$preview"
+            done`, "_", String(cfg.clipsMax)]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
@@ -546,13 +542,15 @@ ShellRoot {
                     return;
                 }
                 root.clips = text.split("\n").filter(l => l.trim()).map(l => {
-                    const tab = l.indexOf("\t");
-                    const id = l.slice(0, tab);
-                    const preview = l.slice(tab + 1);
+                    const t1 = l.indexOf("\t");
+                    const t2 = l.indexOf("\t", t1 + 1);
+                    const id = l.slice(0, t1);
+                    const bytes = parseInt(l.slice(t1 + 1, t2)) || 0;
+                    const preview = l.slice(t2 + 1);
                     const m = preview.match(/^\[\[ binary data ([0-9.]+ \w+) (\w+) (\d+x\d+)/);
                     return m
-                        ? { id, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: "" }
-                        : { id, image: false, preview: preview.trim() };
+                        ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: "" }
+                        : { id, bytes, image: false, preview: preview.trim() };
                 });
                 const imgs = root.clips.filter(c => c.image).map(c => c.id);
                 if (imgs.length) {
@@ -929,46 +927,55 @@ ShellRoot {
             expandedBytes = -1;
             // cells record expandOrigin synchronously on the change above
             Qt.callLater(() => expandAnimStart());
-            // Decode once to a temp file, read info from it, THEN copy from
-            // it. Copying re-stores the entry through the watcher, which
-            // dedupes by deleting the old id — so a second decode of the
-            // original id would come back empty. The new id is captured so
-            // the in-memory list (and its cached thumbnail) can be patched
-            // in place instead of rescanning everything.
+            // Fast path: decode for the details view immediately so the
+            // text reveal runs together with the expand animation.
             infoClipId = clip.id;
             clipInfo.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                f=$(mktemp)
-                trap 'rm -f "$f"' EXIT
-                cliphist decode "$1" > "$f"
-                wc -c < "$f"
-                wl-copy < "$f"
-                sleep 0.25
+                cliphist decode "$1" | wc -c
+                [ "$2" = "txt" ] && cliphist decode "$1" | head -c 4000
+                exit 0`, "_", clip.id, clip.image ? "img" : "txt"];
+            clipInfo.running = true;
+            // Slow path: copy (which re-stores the entry under a new id via
+            // the watcher), notify, then patch the new id into the list so
+            // cached thumbnails stay valid.
+            clipCopy.command = ["bash", "-c", `
+                export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+                cliphist decode "$1" | wl-copy
+                notify-send -a launcher -i edit-copy "Copied to clipboard" "$4"
+                sleep 0.3
                 nid=$(cliphist list | head -n 1 | cut -f1)
-                echo "NEWID $nid"
+                echo "$nid"
                 if [ "$2" = "img" ] && [ -n "$nid" ] && [ "$nid" != "$1" ]; then
                     cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
                 fi
-                [ "$2" = "txt" ] && head -c 4000 "$f"
-                exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir];
-            clipInfo.running = true;
+                exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir,
+                clip.preview.slice(0, 60)];
+            clipCopy.running = true;
         }
         property string infoClipId: ""
         Process {
             id: clipInfo
             stdout: StdioCollector {
                 onStreamFinished: {
-                    const lines = text.split("\n");
-                    win.expandedBytes = parseInt((lines[0] ?? "").trim()) || 0;
-                    win.expandedText = lines.slice(2).join("\n");
-                    const m = (lines[1] ?? "").match(/^NEWID (\S+)/);
-                    if (m && win.infoClipId && m[1] !== win.infoClipId) {
+                    const nl = text.indexOf("\n");
+                    win.expandedBytes = parseInt(text.slice(0, nl).trim()) || 0;
+                    win.expandedText = text.slice(nl + 1);
+                }
+            }
+        }
+        Process {
+            id: clipCopy
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const nid = text.trim();
+                    if (nid && win.infoClipId && nid !== win.infoClipId) {
                         const idx = root.clips.findIndex(c => c.id === win.infoClipId);
                         if (idx >= 0) {
                             const c = root.clips[idx];
-                            const upd = Object.assign({}, c, { id: m[1] });
+                            const upd = Object.assign({}, c, { id: nid });
                             if (c.image && c.thumb)
-                                upd.thumb = root.clipThumbDir + "/" + m[1] + ".png";
+                                upd.thumb = root.clipThumbDir + "/" + nid + ".png";
                             root.clips = [upd].concat(root.clips.filter(x => x.id !== win.infoClipId));
                         }
                     }
@@ -1524,10 +1531,9 @@ ShellRoot {
             // Clipboard history: masonry grid of variable-height tiles
             Item {
                 id: clipDrawer
-                readonly property int clipPages: Math.max(1, Math.ceil(win.clipMatches.length / win.clipPageSize))
                 anchors.centerIn: parent
                 width: cfg.clipsCols * 240 + (cfg.clipsCols - 1) * 16 + 52
-                height: Math.max(clipMasonry.height, 120) + 52 + (clipPages > 1 ? 30 : 0)
+                height: Math.max(clipMasonry.height, 120) + 52
                 opacity: 0.004
                 visible: win.pane === "clips"
                 Connections {
@@ -1561,7 +1567,7 @@ ShellRoot {
                     id: clipMasonry
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
-                    anchors.topMargin: clipDrawer.clipPages > 1 ? 56 : 26
+                    anchors.topMargin: 26
                     spacing: 16
 
                     Repeater {
@@ -1676,7 +1682,7 @@ ShellRoot {
                                             const c = clipCell.shownClip;
                                             if (!c)
                                                 return "";
-                                            return c.image ? c.kind + " · " + c.dims : "text · " + c.preview.length;
+                                            return c.image ? c.kind + " · " + c.dims : c.bytes + " chars";
                                         }
                                         color: root.fg
                                         font { family: root.mono; pixelSize: root.fs(12) }
@@ -1756,16 +1762,6 @@ ShellRoot {
                             }
                         }
                     }
-                }
-
-                Text {
-                    visible: clipDrawer.clipPages > 1 && win.expandedClip === null
-                    anchors.top: parent.top
-                    anchors.topMargin: 26
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: (win.clipPage + 1) + " / " + clipDrawer.clipPages
-                    color: root.muted
-                    font { family: root.mono; pixelSize: root.fs(13); letterSpacing: 2 }
                 }
 
                 // expanded clip: grows out of the selected tile while the
@@ -1927,8 +1923,7 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property int tabIdx: win.settingsTab === "general" ? 0
-                    : win.settingsTab === "volume" ? 1 : 2
+                readonly property int tabIdx: win.settingsTab === "general" ? 0 : 1
                 anchors.centerIn: parent
                 width: 860
                 height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
@@ -1969,8 +1964,7 @@ ShellRoot {
                         Repeater {
                             model: [
                                 { id: "general", label: "Launcher" },
-                                { id: "volume", label: "Volume OSD" },
-                                { id: "notifications", label: "Notifications" }
+                                { id: "flyouts", label: "Flyouts" }
                             ]
 
                             Item {
@@ -2015,51 +2009,36 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: settingsHeader.bottom
                     anchors.topMargin: 18
-                    height: settingsPane.tabIdx === 0 ? settingsCol.height
-                        : settingsPane.tabIdx === 1 ? volCol.height : notifSetCol.height
-                    Behavior on height {
-                        NumberAnimation { duration: win.ad(220); easing.type: Easing.OutCubic }
-                    }
+                    // constant height (tallest page): switching tabs never
+                    // moves the pane, shorter pages stay top-aligned
+                    height: Math.max(settingsCol.height, flyCol.height)
 
-                // volume OSD tab
+                // flyouts tab: volume + notification OSDs
                 Column {
-                    id: volCol
+                    id: flyCol
                     x: 20 + (1 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
-                    SettingRow { key: "volWidth"; label: "Size" }
-                    SettingRow { key: "volOpacity"; label: "Opacity" }
-                    SettingRow { key: "volAnim"; label: "Animation"; valueWidth: 130 }
-                    SettingRow { key: "volBounce"; label: "Bounce" }
-                    ThemeRow { cfgKey: "volTheme"; includeFollow: true }
-                }
-
-                // notifications tab
-                Column {
-                    id: notifSetCol
-                    x: 20 + (2 - settingsPane.tabIdx) * 840
-                    Behavior on x {
-                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
-                    }
-                    spacing: 14
-
-                    SettingRow { key: "notifTimeout"; label: "Timeout" }
-                    SettingRow { key: "notifFontScale"; label: "Font size" }
-                    SettingRow { key: "notifWidth"; label: "Size" }
-                    SettingRow { key: "notifOpacity"; label: "Opacity" }
-                    SettingRow { key: "notifAnim"; label: "Animation"; valueWidth: 130 }
-                    SettingRow { key: "notifBounce"; label: "Bounce" }
-                    ThemeRow { cfgKey: "notifTheme"; includeFollow: true }
+                    SettingRow { key: "volWidth"; label: "Volume size" }
+                    SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: 130 }
+                    SettingRow { key: "volBounce"; label: "Volume bounce" }
+                    SettingRow { key: "notifWidth"; label: "Notification size" }
+                    SettingRow { key: "notifTimeout"; label: "Notification timeout" }
+                    SettingRow { key: "notifFontScale"; label: "Notification font" }
+                    SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: 130 }
+                    SettingRow { key: "notifBounce"; label: "Notification bounce" }
+                    SettingRow { key: "flyOpacity"; label: "Opacity" }
+                    ThemeRow { cfgKey: "flyTheme"; includeFollow: true }
                 }
 
                 Column {
                     id: settingsCol
                     x: 20 + (0 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(260); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
@@ -2424,16 +2403,13 @@ ShellRoot {
             case "fontFamily": return cfg.fontFamily || "JetBrains Mono";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
-            case "volOpacity": return Math.round(cfg.volOpacity * 100) + "%";
-            case "volTheme": return cfg.volTheme;
+            case "flyOpacity": return Math.round(cfg.flyOpacity * 100) + "%";
             case "volAnim": return cfg.volAnim;
             case "volBounce": return cfg.volBounce ? "on" : "off";
             case "notifBounce": return cfg.notifBounce ? "on" : "off";
             case "notifWidth": return cfg.notifWidth + " px";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
-            case "notifOpacity": return Math.round(cfg.notifOpacity * 100) + "%";
-            case "notifTheme": return cfg.notifTheme;
             case "notifAnim": return cfg.notifAnim;
             }
             return "";
@@ -2516,11 +2492,8 @@ ShellRoot {
             case "volWidth":
                 cfg.volWidth = Math.max(240, Math.min(560, cfg.volWidth + dir * 20));
                 break;
-            case "volOpacity":
-                cfg.volOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.volOpacity + dir * 0.05) * 100) / 100));
-                break;
-            case "volTheme":
-                cfg.volTheme = cycleChoice(cfg.volTheme, osdThemeChoices, dir);
+            case "flyOpacity":
+                cfg.flyOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.flyOpacity + dir * 0.05) * 100) / 100));
                 break;
             case "volAnim":
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
@@ -2539,12 +2512,6 @@ ShellRoot {
                 break;
             case "notifFontScale":
                 cfg.notifFontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.notifFontScale + dir * 0.1) * 100) / 100));
-                break;
-            case "notifOpacity":
-                cfg.notifOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.notifOpacity + dir * 0.05) * 100) / 100));
-                break;
-            case "notifTheme":
-                cfg.notifTheme = cycleChoice(cfg.notifTheme, osdThemeChoices, dir);
                 break;
             case "notifAnim":
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["expand", "slide", "fade", "none"], dir);
@@ -2592,16 +2559,14 @@ ShellRoot {
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 340; break;
-            case "volOpacity": cfg.volOpacity = 0.4; break;
-            case "volTheme": cfg.volTheme = "follow"; break;
+            case "flyOpacity": cfg.flyOpacity = 0.4; break;
+            case "flyTheme": cfg.flyTheme = "follow"; break;
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volBounce": cfg.volBounce = false; break;
             case "notifBounce": cfg.notifBounce = false; break;
             case "notifWidth": cfg.notifWidth = 420; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
-            case "notifOpacity": cfg.notifOpacity = 0.4; break;
-            case "notifTheme": cfg.notifTheme = "follow"; break;
             case "notifAnim": cfg.notifAnim = "expand"; break;
             default:
                 if (key.startsWith("bind:")) {
@@ -2850,12 +2815,12 @@ ShellRoot {
         id: volOsd
         property bool show: false
         property bool leaving: false
-        signal reenter
+        property bool linger: false
         function ping() {
             leaving = false;
+            linger = true;
+            lingerTimer.restart();
             show = true;
-            // a change can land mid-dismiss; pull the card back on screen
-            reenter();
             volHide.restart();
         }
         Timer {
@@ -2864,87 +2829,77 @@ ShellRoot {
             onTriggered: volOsd.leaving = true
         }
         Timer {
-            interval: 340
+            interval: 380
             running: volOsd.leaving
             onTriggered: {
                 volOsd.show = false;
                 volOsd.leaving = false;
             }
         }
+        // keep the window alive between bursts of volume changes so rapid
+        // presses never pay the window-recreate cost
+        Timer {
+            id: lingerTimer
+            interval: 8000
+            onTriggered: volOsd.linger = false
+        }
 
         LazyLoader {
-            active: volOsd.show
+            active: volOsd.show || volOsd.linger
 
             PanelWindow {
                 id: volWin
+                readonly property string mode: cfg.volAnim
+                // booted delays the "on screen" state one tick so the very
+                // first appearance animates in rather than starting shown
+                property bool booted: false
+                readonly property bool onScreen: booted && volOsd.show && !volOsd.leaving
+                Component.onCompleted: Qt.callLater(() => booted = true)
+
                 anchors.bottom: true
                 implicitWidth: cfg.volWidth
-                implicitHeight: 56 + 90 // pill + slide/offset zone
+                implicitHeight: 56
+                // the surface is exactly the pill: niri rounds and clips the
+                // blur to it via geometry-corner-radius, and the slide is a
+                // layer-margin animation
+                margins.bottom: mode === "slide" ? (onScreen ? 90 : -64) : 90
+                Behavior on margins.bottom {
+                    NumberAnimation {
+                        duration: cfg.volAnim === "none" ? 0 : 320
+                        easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
+                        easing.overshoot: 1.3
+                    }
+                }
                 color: "transparent"
                 exclusionMode: ExclusionMode.Ignore
                 WlrLayershell.layer: WlrLayer.Overlay
-                WlrLayershell.namespace: "app-launcher-osd"
-                BackgroundEffect.blurRegion: RoundedBlur {
-                    // track pop/fade exits too, so the blur hole shrinks with
-                    // the card instead of lingering until unload
-                    readonly property real rs: volCard.mode === "pop" ? volCard.scale
-                        : volCard.mode === "fade" ? volCard.opacity : 1
-                    rx: (volWin.width - volWin.width * rs) / 2
-                    ry: volCard.y + volCard.height * (1 - rs) / 2
-                    rw: volWin.width * rs
-                    rh: volCard.height * rs
-                    rr: (volCard.height * rs) / 2
+                WlrLayershell.namespace: "launcher-vol-osd"
+                BackgroundEffect.blurRegion: Region {
+                    readonly property real rs: volWin.mode === "pop" ? volCard.scale
+                        : volWin.mode === "fade" ? volCard.opacity : 1
+                    x: (volWin.width - volWin.width * rs) / 2
+                    y: (volWin.height - volWin.height * rs) / 2
+                    width: Math.max(1, volWin.width * rs)
+                    height: Math.max(1, volWin.height * rs)
                 }
 
                 Rectangle {
                     id: volCard
-                    readonly property string mode: cfg.volAnim
-                    width: parent.width
-                    height: 56
-                    radius: height / 2 // pill
-                    y: mode === "slide" ? volWin.implicitHeight : 0
-                    opacity: mode === "fade" || mode === "pop" ? 0 : 1
-                    scale: mode === "pop" ? 0.8 : 1
-                    color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.volOpacity)
+                    anchors.fill: parent
+                    radius: 28
+                    color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
                     border.width: 1
-                    border.color: Qt.alpha(root.volTh.accent, 0.33)
-
-                    Behavior on y {
-                        NumberAnimation {
-                            duration: cfg.volAnim === "none" ? 0 : 300
-                            easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
-                            easing.overshoot: 1.3
-                        }
-                    }
+                    border.color: Qt.alpha(root.flyTh.accent, 0.33)
+                    opacity: volWin.mode === "fade" || volWin.mode === "pop" ? (volWin.onScreen ? 1 : 0) : 1
+                    scale: volWin.mode === "pop" ? (volWin.onScreen ? 1 : 0.8) : 1
                     Behavior on opacity {
-                        NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 200; easing.type: Easing.OutCubic }
                     }
                     Behavior on scale {
                         NumberAnimation {
-                            duration: cfg.volAnim === "none" ? 0 : 260
+                            duration: cfg.volAnim === "none" ? 0 : 240
                             easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
                             easing.overshoot: 1.6
-                        }
-                    }
-                    function enter() {
-                        y = 0;
-                        opacity = 1;
-                        scale = 1;
-                    }
-                    Component.onCompleted: enter()
-                    Connections {
-                        target: volOsd
-                        function onReenter() {
-                            volCard.enter();
-                        }
-                        function onLeavingChanged() {
-                            if (!volOsd.leaving)
-                                return;
-                            if (volCard.mode === "slide")
-                                volCard.y = volWin.implicitHeight;
-                            else if (volCard.mode === "pop")
-                                volCard.scale = 0.8;
-                            volCard.opacity = volCard.mode === "slide" ? volCard.opacity : 0;
                         }
                     }
 
@@ -2957,15 +2912,15 @@ ShellRoot {
                         Rectangle {
                             anchors.fill: parent
                             radius: 4
-                            color: Qt.alpha(root.volTh.accent, 0.15)
+                            color: Qt.alpha(root.flyTh.accent, 0.15)
                         }
                         Rectangle {
                             width: parent.width * Math.min(1, root.vol)
                             height: parent.height
                             radius: 4
-                            color: root.sinkMuted ? Qt.alpha(root.volTh.muted, 0.8) : root.volTh.accent
+                            color: root.sinkMuted ? Qt.alpha(root.flyTh.muted, 0.8) : root.flyTh.accent
                             Behavior on width {
-                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                                NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
                             }
                         }
                     }
@@ -3016,161 +2971,176 @@ ShellRoot {
 
         PanelWindow {
             id: notifWin
+            readonly property string mode: cfg.notifAnim
+            // drag right translates the card; drag left stretches the window
+            // (and card) leftward while the right edge stays on the screen edge
+            readonly property real stretch: Math.max(0, -dragProxy.x)
+            readonly property real shift: Math.max(0, dragProxy.x)
             anchors.top: true
             anchors.right: true
-            implicitWidth: cfg.notifWidth
+            implicitWidth: cfg.notifWidth + stretch
             implicitHeight: notifCol.height + 30
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "app-launcher-osd"
-            // track the scaling/fading/swiping card so blur never pokes out
-            BackgroundEffect.blurRegion: CornerBlur {
-                readonly property real rs: notifCard.mode === "expand" ? notifCard.scale
-                    : notifCard.mode === "fade" ? notifCard.opacity : 1
-                rx: notifWin.width * (1 - rs) + dragWrap.x
-                rw: notifWin.width * rs
-                rh: (notifCol.height + 30) * rs
+            WlrLayershell.namespace: "launcher-notif-osd"
+            BackgroundEffect.blurRegion: Region {
+                readonly property real rs: notifWin.mode === "expand" ? notifCard.scale
+                    : notifWin.mode === "fade" ? notifCard.opacity : 1
+                x: notifWin.width * (1 - rs) + notifWin.shift
+                y: 0
+                width: Math.max(1, notifWin.width * rs)
+                height: Math.max(1, notifWin.height * rs)
             }
 
+            // invisible drag value holder
             Item {
-                id: dragWrap
+                id: dragProxy
                 property bool animOn: false
-                width: parent.width
-                height: parent.height
                 Behavior on x {
-                    enabled: dragWrap.animOn && !notifDragArea.drag.active
+                    enabled: dragProxy.animOn && !notifDragArea.drag.active
                     NumberAnimation {
                         duration: cfg.notifAnim === "none" ? 0 : 220
                         easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
                         easing.overshoot: 1.3
                     }
                 }
+            }
 
-                Rectangle {
-                    id: notifCard
-                    readonly property string mode: cfg.notifAnim
-                    // top and right borders hang 1px outside the window so
-                    // no border line shows against the screen edges
-                    x: 0
-                    y: -1
-                    width: parent.width + 1
-                    height: parent.height + 1
-                    bottomLeftRadius: 18
-                    color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.notifOpacity)
-                    border.width: 1
-                    border.color: Qt.alpha(root.notifTh.accent, 0.33)
-                    transformOrigin: Item.TopRight
-                    scale: mode === "expand" ? 0 : 1
-                    opacity: mode === "fade" ? 0 : 1
-                    Component.onCompleted: {
-                        if (mode === "slide")
-                            dragWrap.x = notifWin.width;
-                        dragWrap.animOn = true;
-                        scale = 1;
-                        opacity = 1;
-                        if (mode === "slide")
-                            dragWrap.x = 0;
+            Rectangle {
+                id: notifCard
+                // top and right borders hang 1px outside the window so no
+                // border line shows against the screen edges
+                x: notifWin.shift
+                y: -1
+                width: parent.width + 1
+                height: parent.height + 1
+                bottomLeftRadius: 18
+                color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
+                border.width: 1
+                border.color: Qt.alpha(root.flyTh.accent, 0.33)
+                transformOrigin: Item.TopRight
+                scale: mode === "expand" ? 0 : 1
+                opacity: mode === "fade" ? 0 : 1
+                readonly property string mode: notifWin.mode
+                Component.onCompleted: {
+                    if (mode === "slide")
+                        dragProxy.x = notifWin.width;
+                    dragProxy.animOn = true;
+                    scale = 1;
+                    opacity = 1;
+                    if (mode === "slide")
+                        dragProxy.x = 0;
+                }
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: cfg.notifAnim === "none" ? 0 : 280
+                        easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                        easing.overshoot: 1.4
                     }
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: cfg.notifAnim === "none" ? 0 : 280
-                            easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
-                            easing.overshoot: 1.4
+                }
+                Behavior on opacity {
+                    NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+                }
+                // closing animation, following the drag direction if any
+                Connections {
+                    target: root
+                    function onNotifLeavingChanged() {
+                        if (!root.notifLeaving)
+                            return;
+                        if (dragProxy.x < -0.5)
+                            notifCard.opacity = 0;
+                        else if (dragProxy.x > 0.5 || notifCard.mode === "slide")
+                            dragProxy.x = notifWin.width + 20;
+                        else if (notifCard.mode === "expand")
+                            notifCard.scale = 0;
+                        else
+                            notifCard.opacity = 0;
+                    }
+                }
+
+                Row {
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.margins: 16
+                    spacing: 14
+
+                    Image {
+                        id: notifImage
+                        visible: String(source) !== ""
+                        width: visible ? 48 : 0
+                        height: 48
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectCrop
+                        source: {
+                            const n = root.notif;
+                            if (!n)
+                                return "";
+                            if (String(n.image) !== "")
+                                return n.image;
+                            const ic = n.appIcon ? String(n.appIcon) : "";
+                            if (!ic)
+                                return "";
+                            // some apps (e.g. niri screenshots) pass a file
+                            // path in the icon field instead of an icon name
+                            if (ic.startsWith("file://"))
+                                return ic;
+                            if (ic.startsWith("/"))
+                                return "file://" + ic;
+                            return Quickshell.iconPath(ic, true);
                         }
                     }
-                    Behavior on opacity {
-                        NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
-                    }
-                    // closing animation (also used after a swipe, following
-                    // whichever direction the card was dragged)
-                    Connections {
-                        target: root
-                        function onNotifLeavingChanged() {
-                            if (!root.notifLeaving)
-                                return;
-                            if (dragWrap.x !== 0 || notifCard.mode === "slide")
-                                dragWrap.x = dragWrap.x < 0 ? -(notifWin.width + 20) : notifWin.width + 20;
-                            else if (notifCard.mode === "expand")
-                                notifCard.scale = 0;
-                            else
-                                notifCard.opacity = 0;
+
+                    Column {
+                        id: notifCol
+                        width: cfg.notifWidth - 32 - (notifImage.visible ? 62 : 0)
+                        spacing: 4
+
+                        Text {
+                            visible: text.length > 0
+                            text: root.notif ? root.notif.appName : ""
+                            color: root.flyTh.muted
+                            font { family: root.mono; pixelSize: root.notifFs(11); letterSpacing: 2; capitalization: Font.AllUppercase }
                         }
-                    }
-
-                    Row {
-                        anchors.top: parent.top
-                        anchors.left: parent.left
-                        anchors.margins: 16
-                        spacing: 14
-
-                        Image {
-                            id: notifImage
-                            visible: String(source) !== ""
-                            width: visible ? 48 : 0
-                            height: 48
-                            asynchronous: true
-                            fillMode: Image.PreserveAspectCrop
-                            source: {
-                                const n = root.notif;
-                                if (!n)
-                                    return "";
-                                if (String(n.image) !== "")
-                                    return n.image;
-                                return n.appIcon ? Quickshell.iconPath(n.appIcon, true) : "";
-                            }
+                        Text {
+                            visible: text.length > 0
+                            width: parent.width
+                            text: root.notif ? root.notif.summary : ""
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            color: root.flyTh.fg
+                            font { family: root.mono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
                         }
-
-                        Column {
-                            id: notifCol
-                            width: cfg.notifWidth - 32 - (notifImage.visible ? 62 : 0)
-                            spacing: 4
-
-                            Text {
-                                visible: text.length > 0
-                                text: root.notif ? root.notif.appName : ""
-                                color: root.notifTh.muted
-                                font { family: root.mono; pixelSize: root.notifFs(11); letterSpacing: 2; capitalization: Font.AllUppercase }
-                            }
-                            Text {
-                                visible: text.length > 0
-                                width: parent.width
-                                text: root.notif ? root.notif.summary : ""
-                                wrapMode: Text.Wrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                color: root.notifTh.fg
-                                font { family: root.mono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
-                            }
-                            Text {
-                                visible: text.length > 0
-                                width: parent.width
-                                text: root.notif ? root.notif.body : ""
-                                wrapMode: Text.Wrap
-                                maximumLineCount: 4
-                                elide: Text.ElideRight
-                                textFormat: Text.PlainText
-                                color: root.notifTh.muted
-                                font { family: root.mono; pixelSize: root.notifFs(12) }
-                            }
+                        Text {
+                            visible: text.length > 0
+                            width: parent.width
+                            text: root.notif ? root.notif.body : ""
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 4
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            color: root.flyTh.muted
+                            font { family: root.mono; pixelSize: root.notifFs(12) }
                         }
                     }
                 }
 
-                // click to dismiss, or swipe right to fling it away
+                // click to dismiss; swipe right to fling, swipe left to
+                // stretch out of the corner and release to dismiss
                 MouseArea {
                     id: notifDragArea
                     anchors.fill: parent
-                    drag.target: dragWrap
+                    drag.target: dragProxy
                     drag.axis: Drag.XAxis
-                    drag.minimumX: -(notifWin.width + 20)
+                    drag.minimumX: -220
                     drag.maximumX: notifWin.width + 20
                     onClicked: root.dismissNotif()
                     onReleased: {
-                        if (Math.abs(dragWrap.x) > 80)
+                        if (Math.abs(dragProxy.x) > 80)
                             root.dismissNotif();
                         else
-                            dragWrap.x = 0;
+                            dragProxy.x = 0;
                     }
                 }
             }
