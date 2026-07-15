@@ -53,8 +53,6 @@ ShellRoot {
         height: 24
         radius: 12
         color: "transparent"
-        border.width: 1
-        border.color: Qt.alpha(root.muted, resetArea.containsMouse ? 0.8 : 0.3)
         anchors.verticalCenter: parent.verticalCenter
         Text {
             anchors.centerIn: parent
@@ -85,6 +83,8 @@ ShellRoot {
             property int wallsRows: 3
             property int clipsCols: 3
             property int clipsRows: 3
+            property int clipsMax: 60
+            property string animStyle: "wave"
             property real fontScale: 1.0
             property string fontFamily: ""
             property string iconTheme: ""
@@ -346,7 +346,7 @@ ShellRoot {
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
-            cliphist list | head -60`]
+            cliphist list | head -n "$1"`, "_", String(cfg.clipsMax)]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
@@ -1044,13 +1044,13 @@ ShellRoot {
                             SequentialAnimation {
                                 id: springIn
                                 PropertyAction { target: wrap; property: "opacity"; value: 0 }
-                                PropertyAction { target: wrap; property: "scale"; value: 0.4 }
-                                PropertyAction { target: wrap; property: "y"; value: 14 }
-                                PauseAnimation { duration: win.staggering ? cell.index * 35 : 0 }
+                                PropertyAction { target: wrap; property: "scale"; value: win.animFromScale }
+                                PropertyAction { target: wrap; property: "y"; value: win.animFromY }
+                                PauseAnimation { duration: win.animDelay(cell.index, cfg.appsCols) }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wrap; property: "opacity"; to: 1; duration: 180; easing.type: Easing.OutCubic }
-                                    NumberAnimation { target: wrap; property: "scale"; to: 1; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
-                                    NumberAnimation { target: wrap; property: "y"; to: 0; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
+                                    NumberAnimation { target: wrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
+                                    NumberAnimation { target: wrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                                    NumberAnimation { target: wrap; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
                                 }
                             }
 
@@ -1200,13 +1200,13 @@ ShellRoot {
                             SequentialAnimation {
                                 id: wallSpringIn
                                 PropertyAction { target: wallWrap; property: "opacity"; value: 0 }
-                                PropertyAction { target: wallWrap; property: "scale"; value: 0.4 }
-                                PropertyAction { target: wallWrap; property: "y"; value: 14 }
-                                PauseAnimation { duration: win.staggering ? wallCell.index * 35 : 0 }
+                                PropertyAction { target: wallWrap; property: "scale"; value: win.animFromScale }
+                                PropertyAction { target: wallWrap; property: "y"; value: win.animFromY }
+                                PauseAnimation { duration: win.animDelay(wallCell.index, cfg.wallsCols) }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 1; duration: 180; easing.type: Easing.OutCubic }
-                                    NumberAnimation { target: wallWrap; property: "scale"; to: 1; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: 0; duration: 400; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
+                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
+                                    NumberAnimation { target: wallWrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                                    NumberAnimation { target: wallWrap; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
                                 }
                             }
 
@@ -1328,7 +1328,12 @@ ShellRoot {
                                             return Math.max(70, Math.min(320, Math.round(240 * ih / iw)));
                                         }
                                         const maxLines = Math.max(2, Math.floor((240 - 26) / root.fs(19)));
-                                        const lines = Math.min(maxLines, Math.max(2, Math.ceil(c.preview.length / 24)));
+                                        // estimate wrapped lines per explicit line,
+                                        // with headroom so text isn't cut early
+                                        let est = 0;
+                                        for (const l of c.preview.split("\n"))
+                                            est += Math.max(1, Math.ceil(l.length / 20));
+                                        const lines = Math.min(maxLines, Math.max(2, est + 2));
                                         return 26 + lines * root.fs(19);
                                     }
                                     width: 240
@@ -1408,13 +1413,13 @@ ShellRoot {
                                     SequentialAnimation {
                                         id: clipSpringIn
                                         PropertyAction { target: clipTile; property: "opacity"; value: 0 }
-                                        PropertyAction { target: clipTile; property: "scale"; value: 0.7 }
-                                        PropertyAction { target: clipTile; property: "y"; value: 10 }
-                                        PauseAnimation { duration: win.staggering ? clipCell.slot * 30 : 0 }
+                                        PropertyAction { target: clipTile; property: "scale"; value: win.animFromScale }
+                                        PropertyAction { target: clipTile; property: "y"; value: win.animFromY }
+                                        PauseAnimation { duration: win.animDelay(clipCell.slot, cfg.clipsCols) }
                                         ParallelAnimation {
-                                            NumberAnimation { target: clipTile; property: "opacity"; to: 1; duration: 160; easing.type: Easing.OutCubic }
-                                            NumberAnimation { target: clipTile; property: "scale"; to: 1; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
-                                            NumberAnimation { target: clipTile; property: "y"; to: 0; duration: 360; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                                            NumberAnimation { target: clipTile; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
+                                            NumberAnimation { target: clipTile; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 1.6 }
+                                            NumberAnimation { target: clipTile; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 1.6 }
                                         }
                                     }
                                     SequentialAnimation {
@@ -1433,16 +1438,13 @@ ShellRoot {
 
                 // expanded clip: grows out of the selected tile while the
                 // rest of the grid animates away (no dimming overlay)
-                Rectangle {
+                Item {
                     id: expandCard
                     visible: win.expandedClip !== null
+                    readonly property bool isImg: win.expandedClip !== null && win.expandedClip.image === true
                     anchors.centerIn: parent
-                    width: 560
+                    width: isImg ? 920 : 560
                     height: expandCol.height + 44
-                    radius: 16
-                    color: Qt.rgba(0.07, 0.065, 0.055, 0.96)
-                    border.width: 1
-                    border.color: root.accent
                     transform: Translate { id: expandTx }
 
                     ParallelAnimation {
@@ -1493,21 +1495,29 @@ ShellRoot {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.top
                         anchors.topMargin: 22
-                        width: 512
+                        width: parent.width - 48
                         spacing: 14
 
                         ClippingRectangle {
-                            visible: win.expandedClip !== null && win.expandedClip.image === true
-                            width: 512
-                            height: visible ? 288 : 0
-                            radius: 10
-                            color: Qt.alpha(root.accent, 0.06)
+                            visible: expandCard.isImg
+                            width: parent.width
+                            // real aspect ratio, as large as fits
+                            height: {
+                                if (!expandCard.isImg)
+                                    return 0;
+                                const d = (win.expandedClip.dims || "").split("x");
+                                const iw = parseInt(d[0]) || 16;
+                                const ih = parseInt(d[1]) || 9;
+                                return Math.min(620, Math.round(width * ih / iw));
+                            }
+                            radius: 12
+                            color: "transparent"
 
                             Image {
                                 anchors.fill: parent
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectFit
-                                sourceSize: Qt.size(1024, 576)
+                                sourceSize: Qt.size(1840, 1240)
                                 source: {
                                     const c = win.expandedClip;
                                     return c && c.image && c.thumb ? "file://" + c.thumb : "";
@@ -1516,7 +1526,7 @@ ShellRoot {
                         }
                         Text {
                             visible: win.expandedClip !== null && win.expandedClip.image !== true
-                            width: 512
+                            width: parent.width
                             text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
                             wrapMode: Text.Wrap
                             elide: Text.ElideRight
@@ -1526,7 +1536,7 @@ ShellRoot {
                         }
 
                         Rectangle {
-                            width: 512
+                            width: parent.width
                             height: 1
                             color: Qt.alpha(root.accent, 0.25)
                         }
@@ -1536,7 +1546,7 @@ ShellRoot {
 
                             Item {
                                 required property var modelData
-                                width: 512
+                                width: expandCol.width
                                 height: root.fs(20)
 
                                 Text {
@@ -1597,6 +1607,8 @@ ShellRoot {
                             { key: "appsGrid", label: "Apps grid" },
                             { key: "wallsGrid", label: "Wallpaper grid" },
                             { key: "clipsGrid", label: "Clipboard grid" },
+                            { key: "clipsMax", label: "Clipboard entries" },
+                            { key: "animStyle", label: "Animation" },
                             { key: "fontScale", label: "Font size" },
                             { key: "dimOpacity", label: "Opacity" },
                             { key: "revealOrigin", label: "Circle origin" },
@@ -1943,6 +1955,8 @@ ShellRoot {
             case "appsGrid": return cfg.appsCols + " × " + cfg.appsRows;
             case "wallsGrid": return cfg.wallsCols + " × " + cfg.wallsRows;
             case "clipsGrid": return cfg.clipsCols + " × " + clipRowsC;
+            case "clipsMax": return "" + cfg.clipsMax;
+            case "animStyle": return cfg.animStyle;
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "revealOrigin": return cfg.revealOrigin;
@@ -1982,6 +1996,19 @@ ShellRoot {
                     else if (clipRowsC > 2) { cfg.clipsRows = clipRowsC - 1; cfg.clipsCols = 4; }
                 }
                 break;
+            case "clipsMax":
+                cfg.clipsMax = Math.max(20, Math.min(200, cfg.clipsMax + dir * 20));
+                clipScan.running = false;
+                clipScan.running = true;
+                break;
+            case "animStyle": {
+                const styles = ["wave", "pop", "fade", "slide", "none"];
+                let i = styles.indexOf(cfg.animStyle);
+                if (i < 0)
+                    i = 0;
+                cfg.animStyle = styles[((i + dir) % styles.length + styles.length) % styles.length];
+                break;
+            }
             case "fontScale":
                 cfg.fontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.fontScale + dir * 0.1) * 100) / 100));
                 break;
@@ -2015,6 +2042,12 @@ ShellRoot {
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
             case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
+            case "clipsMax":
+                cfg.clipsMax = 60;
+                clipScan.running = false;
+                clipScan.running = true;
+                break;
+            case "animStyle": cfg.animStyle = "wave"; break;
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "revealOrigin": cfg.revealOrigin = "center"; break;
@@ -2138,6 +2171,26 @@ ShellRoot {
                 if (currentFrame > root.wallpapers.length + win.wallPageSize + 4)
                     win.warmingWalls = false;
             }
+        }
+
+        // ---------- tile entry animation styles ----------
+        // wave: staggered spring cascade (default). pop: all tiles spring at
+        // once. fade: soft staggered fade. slide: rows slide up. none: instant.
+        readonly property string animStyle: cfg.animStyle
+        readonly property real animFromScale: animStyle === "wave" || animStyle === "pop" ? 0.4 : 1
+        readonly property int animFromY: animStyle === "wave" ? 14 : animStyle === "slide" ? 46 : animStyle === "fade" ? 6 : 0
+        readonly property int animDur: animStyle === "fade" ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
+        readonly property int animFadeDur: animStyle === "none" ? 0 : 180
+        readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
+        function animDelay(slot: int, cols: int): int {
+            if (!staggering)
+                return 0;
+            switch (animStyle) {
+            case "wave": return slot * 35;
+            case "slide": return Math.floor(slot / cols) * 60;
+            case "fade": return slot * 15;
+            }
+            return 0;
         }
 
         // Tile stagger applies when a pane opens, not on every keystroke —
