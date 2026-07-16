@@ -173,25 +173,33 @@ ShellRoot {
         property real rw: 100
         property real rh: 50
         property real rr: 18
+        // Effective radius never exceeds half the box, so a card shrinking to
+        // nothing (fade/scale exit) collapses to a genuine ~1px region instead
+        // of leaving the min-radius corner ellipses behind as a small blurred
+        // square. The body height is clamped to ≥1 so the region is never
+        // empty (an empty blurRegion means "blur the whole surface").
+        readonly property real er: Math.max(0, Math.min(rr, rw / 2, rh / 2))
         x: rx
-        y: ry + rr
+        y: ry + er
         width: rw
-        height: Math.max(0, rh - 2 * rr)
+        height: Math.max(1, rh - 2 * er)
         regions: [
-            Region { x: rb.rx + rb.rr; y: rb.ry; width: Math.max(0, rb.rw - 2 * rb.rr); height: rb.rr },
-            Region { x: rb.rx + rb.rr; y: rb.ry + rb.rh - rb.rr; width: Math.max(0, rb.rw - 2 * rb.rr); height: rb.rr },
-            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry; width: 2 * rb.rr; height: 2 * rb.rr },
-            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.rr; y: rb.ry; width: 2 * rb.rr; height: 2 * rb.rr },
-            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry + rb.rh - 2 * rb.rr; width: 2 * rb.rr; height: 2 * rb.rr },
-            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.rr; y: rb.ry + rb.rh - 2 * rb.rr; width: 2 * rb.rr; height: 2 * rb.rr }
+            Region { x: rb.rx + rb.er; y: rb.ry; width: Math.max(0, rb.rw - 2 * rb.er); height: rb.er },
+            Region { x: rb.rx + rb.er; y: rb.ry + rb.rh - rb.er; width: Math.max(0, rb.rw - 2 * rb.er); height: rb.er },
+            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry; width: 2 * rb.er; height: 2 * rb.er },
+            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.er; y: rb.ry; width: 2 * rb.er; height: 2 * rb.er },
+            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry + rb.rh - 2 * rb.er; width: 2 * rb.er; height: 2 * rb.er },
+            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.er; y: rb.ry + rb.rh - 2 * rb.er; width: 2 * rb.er; height: 2 * rb.er }
         ]
     }
 
     // One notification card: a free-floating pill that slides/expands in,
     // stacks below its newer siblings, and is swipeable in both directions.
+    // Only ever used as a cardRep delegate.
     component NotifCard: Rectangle {
         id: nc
-        property var others: []
+        required property int index
+        property var rep: null
         property var notifObj: null
         // snapshot of the notification's content: keeps the card intact
         // through the exit animation even if the sender closes the object
@@ -201,7 +209,6 @@ ShellRoot {
         property bool expanded: false
         property int seq: 0
         property bool inst: false // apply poses without animating
-        property real shift: 0 // x offset from rest (entry/exit/drag return)
         property real cardScale: 1
         property real cardOpacity: 1
         readonly property string mode: cfg.notifAnim
@@ -226,16 +233,16 @@ ShellRoot {
             expanded = false;
             leaving = false;
             exitTimer.stop();
-            // entry pose by style, applied instantly, then released
+            // entry pose by style, applied instantly, then released so the
+            // Behaviors animate from the pose to the rest state
             inst = true;
-            dragProxy.x = 0;
-            shift = mode === "slide" ? width + 40 : 0;
+            dragProxy.x = mode === "slide" ? width + 40 : 0;
             cardScale = mode === "expand" ? 0 : 1;
             cardOpacity = (mode === "fade" || mode === "none") ? 0 : 1;
             active = true;
             Qt.callLater(() => {
                 inst = false;
-                shift = 0;
+                dragProxy.x = 0;
                 cardScale = 1;
                 cardOpacity = 1;
             });
@@ -245,10 +252,11 @@ ShellRoot {
             if (leaving || !active)
                 return;
             leaving = true;
+            expanded = false;
             if (dir > 0 || (dir === 0 && mode === "slide"))
-                shift = width + 60;
+                dragProxy.x = width + 60;
             else if (dir < 0) {
-                shift = -(restX + width + 20);
+                dragProxy.x = -(restX + width + 20);
                 cardOpacity = 0;
             } else if (mode === "expand")
                 cardScale = 0;
@@ -272,9 +280,10 @@ ShellRoot {
             onTriggered: nc.finalize()
         }
         Timer {
-            // per-card timeout, paused while expanded or held
+            // per-card timeout, paused only while the pointer is over the card
+            // (hovering to read it); leaving the card restarts the countdown.
             interval: nc.view.timeout > 0 ? nc.view.timeout : cfg.notifTimeout
-            running: nc.active && !nc.leaving && !nc.expanded && !dragArea.pressed
+            running: nc.active && !nc.leaving && !dragArea.containsMouse
             onTriggered: nc.dismiss(0)
         }
         // sender closed it (or another daemon action) — animate out
@@ -300,39 +309,38 @@ ShellRoot {
         scale: cardScale
         opacity: cardOpacity
 
+        // x = restX + dragProxy.x. Keeping the horizontal Behavior on
+        // dragProxy.x (not on x) means x snaps when restX changes as the
+        // layer surface settles its width — that width settle was what made
+        // every entry read as a slide regardless of the animation setting.
         readonly property real restX: parent.width - cfg.notifWidth - 16
-        x: restX + (dragArea.drag.active ? dragProxy.x : shift)
-        // newest card on top; older ones stack downward and reflow
+        x: restX + dragProxy.x
+        // newest card on top; older active ones stack downward and reflow
         y: {
             let yy = 14;
-            for (const o of others)
-                if (o.active && o.seq > seq)
-                    yy += o.cardH + 12;
+            if (nc.rep)
+                for (let i = 0; i < nc.rep.count; i++) {
+                    const o = nc.rep.itemAt(i);
+                    if (o && o !== nc && o.active && o.seq > nc.seq)
+                        yy += o.cardH + 12;
+                }
             return yy;
-        }
-        Behavior on x {
-            enabled: !nc.inst && !dragArea.drag.active
-            NumberAnimation {
-                duration: 280
-                easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
-                easing.overshoot: 1.2
-            }
         }
         Behavior on y {
             enabled: !nc.inst
-            NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 260; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: nc.mode === "none" ? 0 : 260; easing.type: Easing.OutCubic }
         }
         Behavior on cardScale {
             enabled: !nc.inst
             NumberAnimation {
-                duration: cfg.notifAnim === "none" ? 0 : 300
-                easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                duration: nc.mode === "none" ? 0 : 320
+                easing.type: nc.leaving ? Easing.InCubic : Easing.OutBack
                 easing.overshoot: 1.3
             }
         }
         Behavior on cardOpacity {
             enabled: !nc.inst
-            NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: nc.mode === "none" ? 0 : 220; easing.type: Easing.OutCubic }
         }
 
         Row {
@@ -398,21 +406,27 @@ ShellRoot {
                     width: parent.width
                     text: nc.view.summary
                     wrapMode: Text.Wrap
-                    maximumLineCount: nc.expanded ? 8 : 2
+                    // fixed cap so the title never reflows on expand (line-count
+                    // changes can't animate and would look like a jump)
+                    maximumLineCount: 2
                     elide: Text.ElideRight
                     color: root.flyTh.fg
                     font { family: root.flyMono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
                 }
-                // body clips to ~4 lines; clicking the card grows it to the
-                // full text, animated
+                // body clips to ~4 lines; clicking the card grows the clip to
+                // the full text. The text is fully laid out at all times and
+                // only the clip height animates, so it reveals smoothly with
+                // no reflow jump.
                 Item {
+                    id: bodyClip
                     width: parent.width
                     clip: true
                     visible: bodyText.text.length > 0
                     readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : root.notifFs(16)
-                    height: visible ? (nc.expanded ? bodyText.paintedHeight : Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))) : 0
+                    readonly property real collapsedH: Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))
+                    height: visible ? (nc.expanded ? bodyText.paintedHeight : collapsedH) : 0
                     Behavior on height {
-                        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: 360; easing.type: Easing.InOutCubic }
                     }
 
                     Text {
@@ -430,17 +444,34 @@ ShellRoot {
         }
 
         // click expands the text; swiping either way moves the card and
-        // dismisses past the threshold
+        // dismisses past the threshold. dragProxy.x is the single horizontal
+        // offset for entry, exit and drag-return; bounce is built into the
+        // entry/return easing, the exit eases out plainly.
         Item {
             id: dragProxy
+            Behavior on x {
+                enabled: !nc.inst && !dragArea.drag.active
+                NumberAnimation {
+                    duration: nc.mode === "none" ? 0 : 300
+                    easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
+                    easing.overshoot: 1.15
+                }
+            }
         }
         MouseArea {
             id: dragArea
             anchors.fill: parent
+            hoverEnabled: true
             drag.target: dragProxy
             drag.axis: Drag.XAxis
+            drag.threshold: 6
             onPressed: () => dragProxy.x = 0
-            onClicked: () => nc.expanded = !nc.expanded
+            // a click (no real drag) toggles the expanded body; a drag past
+            // the threshold dismisses
+            onClicked: () => {
+                if (Math.abs(dragProxy.x) < 6)
+                    nc.expanded = !nc.expanded;
+            }
             onReleased: () => {
                 if (nc.leaving)
                     return;
@@ -448,7 +479,8 @@ ShellRoot {
                     nc.dismiss(1);
                 else if (dragProxy.x < -90)
                     nc.dismiss(-1);
-                // otherwise x falls back to rest and springs home
+                else
+                    dragProxy.x = 0; // springs home
             }
         }
     }
@@ -513,12 +545,12 @@ ShellRoot {
             property var flyouts: ({ volume: true, notifs: true })
             property real volWidth: 340
             property string volAnim: "slide"
-            property int volTimeout: 1600
+            property int volTimeout: 1500
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
             property real notifWidth: 420
             property string notifAnim: "expand"
-            property bool notifBounce: false
+            property int notifMax: 3
         }
     }
     function saveSettings() {
@@ -1221,8 +1253,18 @@ ShellRoot {
             // cached thumbnails stay valid.
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                cliphist decode "$1" | wl-copy
-                notify-send -a launcher -i edit-copy "Copied to clipboard" "$4"
+                tmp=$(mktemp)
+                cliphist decode "$1" > "$tmp"
+                wl-copy < "$tmp"
+                # the notification body carries the full copied text (images
+                # get the description passed in as $4)
+                if [ "$2" = "img" ]; then
+                    body="$4"
+                else
+                    body=$(head -c 4000 "$tmp")
+                fi
+                rm -f "$tmp"
+                notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
                 sleep 0.3
                 nid=$(cliphist list | head -n 1 | cut -f1)
                 echo "$nid"
@@ -2295,7 +2337,7 @@ ShellRoot {
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
                     SettingRow { key: "notifFontScale"; label: "Notification font size" }
                     SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: 130 }
-                    SettingRow { key: "notifBounce"; label: "Notification bounce" }
+                    SettingRow { key: "notifMax"; label: "Max notifications" }
                     SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
                     SettingRow { key: "flyOpacity"; label: "Opacity" }
 
@@ -2768,7 +2810,7 @@ ShellRoot {
             case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
-            case "notifBounce": return cfg.notifBounce ? "on" : "off";
+            case "notifMax": return "" + cfg.notifMax;
             case "notifWidth": return cfg.notifWidth + " px";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
@@ -2862,6 +2904,9 @@ ShellRoot {
             case "volTimeout":
                 cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
                 break;
+            case "notifMax":
+                cfg.notifMax = Math.max(1, Math.min(5, cfg.notifMax + dir));
+                break;
             case "flyFontFamily": {
                 const list = [""].concat(root.fontFamilies);
                 let i = list.indexOf(cfg.flyFontFamily);
@@ -2870,9 +2915,6 @@ ShellRoot {
                 cfg.flyFontFamily = list[((i + dir) % list.length + list.length) % list.length];
                 break;
             }
-            case "notifBounce":
-                cfg.notifBounce = !cfg.notifBounce;
-                break;
             case "notifWidth":
                 cfg.notifWidth = Math.max(320, Math.min(600, cfg.notifWidth + dir * 20));
                 break;
@@ -2940,8 +2982,8 @@ ShellRoot {
             case "flyTheme": cfg.flyTheme = "amber"; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
-            case "volTimeout": cfg.volTimeout = 1600; break;
-            case "notifBounce": cfg.notifBounce = false; break;
+            case "volTimeout": cfg.volTimeout = 1500; break;
+            case "notifMax": cfg.notifMax = 3; break;
             case "notifWidth": cfg.notifWidth = 420; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
@@ -3171,6 +3213,51 @@ ShellRoot {
         }
     }
 
+    // Warm the app-icon pixmap cache shortly after the daemon starts, so the
+    // very first launcher open renders icons immediately instead of briefly
+    // showing the two-letter fallback while the SVGs decode. A tiny
+    // transparent overlay surface is enough to drive the image provider and
+    // populate the process-global cache; it unloads once the cache is warm.
+    // (The in-window warm-up only spans a couple of frames before the reveal,
+    // too short for the async decodes to finish on a cold first open.)
+    property bool bootWarmIcons: false
+    Timer { interval: 900; running: true; onTriggered: root.bootWarmIcons = true }
+    Timer { interval: 30000; running: true; onTriggered: root.bootWarmIcons = false }
+    LazyLoader {
+        active: root.bootWarmIcons
+        PanelWindow {
+            anchors.top: true
+            anchors.left: true
+            implicitWidth: 1
+            implicitHeight: 1
+            color: "transparent"
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "launcher-warm"
+            mask: Region {} // click-through, takes no input
+
+            Item {
+                anchors.fill: parent
+                Repeater {
+                    model: root.allApps
+                    Image {
+                        required property var modelData
+                        width: 1
+                        height: 1
+                        asynchronous: true
+                        sourceSize: Qt.size(88, 88)
+                        source: {
+                            const name = modelData.icon;
+                            if (!name)
+                                return "";
+                            return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ================= OSDs (persistent) =================
     // Both flyouts are persistent windows of fixed size; the cards animate
     // inside them. niri's geometry-corner-radius does not clip layer-surface
@@ -3219,13 +3306,18 @@ ShellRoot {
             interval: cfg.volTimeout
             onTriggered: volOsd.leaving = true
         }
+        // Fallback unmap. Normally the window unmaps the instant the exit
+        // animation reports the card gone (see volCard's watchers), which
+        // avoids a lingering blurred remnant after the pill has left; this
+        // just guarantees teardown if no frame reports it.
         Timer {
-            interval: 400
+            interval: 500
             running: volOsd.leaving
-            onTriggered: {
-                volOsd.show = false;
-                volOsd.leaving = false;
-            }
+            onTriggered: volOsd.finishHide()
+        }
+        function finishHide() {
+            show = false;
+            leaving = false;
         }
 
         // Always loaded, only mapped while showing: mapping a pre-built
@@ -3248,12 +3340,14 @@ ShellRoot {
             mask: Region {}
 
             BackgroundEffect.blurRegion: RoundedBlur {
+                // rr un-clamped at the low end so the region collapses to
+                // ~1px (invisible) as the pill fades/scales out
                 readonly property real s: (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity
                 rx: volCard.x + (volCard.width - volCard.width * s) / 2 + 2
                 ry: volCard.y + (volCard.height - volCard.height * s) / 2 + 2
                 rw: Math.max(1, volCard.width * s - 4)
                 rh: Math.max(1, volCard.height * s - 4)
-                rr: Math.max(2, 26 * s)
+                rr: 26 * s
             }
 
             Rectangle {
@@ -3280,6 +3374,11 @@ ShellRoot {
                 border.color: Qt.alpha(root.flyTh.accent, 0.33)
                 opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
                 scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
+                // unmap the window the instant the pill has left, so no
+                // blurred remnant lingers between the anim ending and the
+                // fallback timer (fixes the "small square" on non-slide exits)
+                onOpacityChanged: if (volOsd.leaving && opacity <= 0.02) volOsd.finishHide()
+                onYChanged: if (volOsd.leaving && volWin.mode === "slide" && y >= parent.height - 2) volOsd.finishHide()
                 Behavior on opacity {
                     NumberAnimation { duration: volWin.mode === "none" ? 0 : 200; easing.type: Easing.OutCubic }
                 }
@@ -3313,11 +3412,13 @@ ShellRoot {
     }
 
     // ---------- notification flyouts ----------
-    // Up to three pill cards stacked below the top-right corner, hosted in
-    // one fixed-size window. Cards are assigned to free slots, so existing
-    // cards never rebuild when another notification arrives; stacking order
-    // is by arrival, newest on top. Click expands the body text; swiping
-    // left or right moves the card and dismisses past the threshold.
+    // A stack of pill cards below the top-right corner, hosted in one
+    // fixed-size window. Cards are assigned to free slots, so existing cards
+    // never rebuild when another notification arrives; stacking order is by
+    // arrival, newest on top. Click expands the body text; swiping left or
+    // right moves the card and dismisses past the threshold. Five slots
+    // exist; cfg.notifMax caps how many are used at once.
+    readonly property int notifSlots: 5
     function notifFs(px: int): int {
         return Math.round(px * cfg.notifFontScale);
     }
@@ -3340,7 +3441,16 @@ ShellRoot {
 
     PanelWindow {
         id: notifWin
-        visible: cardA.active || cardB.active || cardC.active
+        property bool anyActive: false
+        function refreshActive() {
+            let a = false;
+            for (let i = 0; i < cardRep.count; i++) {
+                const c = cardRep.itemAt(i);
+                if (c && c.active) { a = true; break; }
+            }
+            anyActive = a;
+        }
+        visible: anyActive
         anchors.top: true
         anchors.right: true
         // fixed size: cards animate inside; the left slack is swipe travel
@@ -3352,58 +3462,100 @@ ShellRoot {
         WlrLayershell.namespace: "launcher-notif-osd"
 
         function accept(n) {
-            const slots = [cardA, cardB, cardC];
-            let s = slots.find(c => !c.active);
-            if (!s) {
-                // all full: the oldest makes way immediately
-                s = slots.reduce((a, b) => a.seq < b.seq ? a : b);
-                s.finalize();
+            const max = Math.max(1, Math.min(root.notifSlots, cfg.notifMax));
+            let free = null, oldest = null;
+            for (let i = 0; i < max; i++) {
+                const c = cardRep.itemAt(i);
+                if (!c)
+                    continue;
+                if (!c.active && !c.leaving) {
+                    free = c;
+                    break;
+                }
+                if (!oldest || c.seq < oldest.seq)
+                    oldest = c;
             }
+            const s = free || oldest;
+            if (!s)
+                return;
+            if (!free)
+                s.finalize();
             s.assign(n);
+            refreshActive();
         }
 
         // input only over the cards; everything else clicks through
         mask: Region {
-            regions: [
-                Region { x: cardA.x; y: cardA.y; width: cardA.active ? cardA.width : 0; height: cardA.active ? cardA.height : 0 },
-                Region { x: cardB.x; y: cardB.y; width: cardB.active ? cardB.width : 0; height: cardB.active ? cardB.height : 0 },
-                Region { x: cardC.x; y: cardC.y; width: cardC.active ? cardC.width : 0; height: cardC.active ? cardC.height : 0 }
-            ]
+            regions: [maskRep0, maskRep1, maskRep2, maskRep3, maskRep4]
+            Region { id: maskRep0; readonly property var c: cardRep.itemAt(0); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
+            Region { id: maskRep1; readonly property var c: cardRep.itemAt(1); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
+            Region { id: maskRep2; readonly property var c: cardRep.itemAt(2); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
+            Region { id: maskRep3; readonly property var c: cardRep.itemAt(3); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
+            Region { id: maskRep4; readonly property var c: cardRep.itemAt(4); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
         }
         BackgroundEffect.blurRegion: Region {
-            regions: [
-                RoundedBlur {
-                    readonly property var c: cardA
-                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
-                    rx: c.x + (c.width - c.width * s) / 2 + 2
-                    ry: c.y + 2
-                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
-                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
-                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
-                },
-                RoundedBlur {
-                    readonly property var c: cardB
-                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
-                    rx: c.x + (c.width - c.width * s) / 2 + 2
-                    ry: c.y + 2
-                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
-                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
-                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
-                },
-                RoundedBlur {
-                    readonly property var c: cardC
-                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
-                    rx: c.x + (c.width - c.width * s) / 2 + 2
-                    ry: c.y + 2
-                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
-                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
-                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
-                }
-            ]
+            regions: [blur0, blur1, blur2, blur3, blur4]
+            // rr is left un-clamped at the low end so RoundedBlur collapses
+            // to ~1px on fade/scale exit instead of leaving a small square
+            RoundedBlur {
+                id: blur0
+                readonly property var c: cardRep.itemAt(0)
+                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+                ry: c ? c.y + 2 : 0
+                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+                rr: 18 * s
+            }
+            RoundedBlur {
+                id: blur1
+                readonly property var c: cardRep.itemAt(1)
+                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+                ry: c ? c.y + 2 : 0
+                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+                rr: 18 * s
+            }
+            RoundedBlur {
+                id: blur2
+                readonly property var c: cardRep.itemAt(2)
+                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+                ry: c ? c.y + 2 : 0
+                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+                rr: 18 * s
+            }
+            RoundedBlur {
+                id: blur3
+                readonly property var c: cardRep.itemAt(3)
+                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+                ry: c ? c.y + 2 : 0
+                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+                rr: 18 * s
+            }
+            RoundedBlur {
+                id: blur4
+                readonly property var c: cardRep.itemAt(4)
+                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+                ry: c ? c.y + 2 : 0
+                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+                rr: 18 * s
+            }
         }
 
-        NotifCard { id: cardA; others: [cardB, cardC] }
-        NotifCard { id: cardB; others: [cardA, cardC] }
-        NotifCard { id: cardC; others: [cardA, cardB] }
+        Repeater {
+            id: cardRep
+            model: root.notifSlots
+            NotifCard {
+                rep: cardRep
+                onActiveChanged: notifWin.refreshActive()
+            }
+        }
     }
 }
