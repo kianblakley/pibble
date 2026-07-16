@@ -8,6 +8,9 @@
 repo="$(dirname "$(readlink -f "$0")")"
 settings="$HOME/.local/state/quickshell/by-shell/b3c79d9b1b83e8627e01e1689066fbb2/settings.json"
 theme=$(sed -n 's/.*"iconTheme": *"\([^"]*\)".*/\1/p' "$settings" 2>/dev/null | head -1)
+# no explicit choice: follow the system (GTK) icon theme, since Qt inside a
+# bare layer-shell session can't detect it and would fall back to hicolor
+[ -z "$theme" ] && theme=$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null | tr -d "'")
 [ -n "$theme" ] && export QS_ICON_THEME="$theme"
 
 # ipc calls fail on ambiguity if duplicate daemons exist; always talk to the

@@ -187,22 +187,270 @@ ShellRoot {
         ]
     }
 
-    // Same idea for a card attached to the top-right corner: only its
-    // bottom-left corner is rounded.
-    component CornerBlur: Region {
-        id: cb
-        property real rx: 0
-        property real rw: 100
-        property real rh: 50
-        property real rr: 18
-        x: rx + rr
-        y: 0
-        width: Math.max(0, rw - rr)
-        height: rh
-        regions: [
-            Region { x: cb.rx; y: 0; width: cb.rr; height: Math.max(0, cb.rh - cb.rr) },
-            Region { shape: RegionShape.Ellipse; x: cb.rx; y: cb.rh - 2 * cb.rr; width: 2 * cb.rr; height: 2 * cb.rr }
-        ]
+    // One notification card: a free-floating pill that slides/expands in,
+    // stacks below its newer siblings, and is swipeable in both directions.
+    component NotifCard: Rectangle {
+        id: nc
+        property var others: []
+        property var notifObj: null
+        // snapshot of the notification's content: keeps the card intact
+        // through the exit animation even if the sender closes the object
+        property var view: ({ own: false, glyph: "", app: "", summary: "", body: "", image: "", appIcon: "", timeout: 0 })
+        property bool active: false
+        property bool leaving: false
+        property bool expanded: false
+        property int seq: 0
+        property bool inst: false // apply poses without animating
+        property real shift: 0 // x offset from rest (entry/exit/drag return)
+        property real cardScale: 1
+        property real cardOpacity: 1
+        readonly property string mode: cfg.notifAnim
+
+        function assign(n) {
+            notifObj = n;
+            const ic = String(n.appIcon ?? "");
+            const sl = String(n.summary ?? "").toLowerCase();
+            view = {
+                own: n.appName === "launcher",
+                // the icon name may arrive resolved (path/url), so match loosely
+                glyph: ic.includes("error") || sl.includes("fail") || sl.includes("not found") ? "!"
+                    : ic.includes("copy") || sl.includes("copied") ? "⧉" : "✱",
+                app: n.appName ?? "",
+                summary: n.summary ?? "",
+                body: n.body ?? "",
+                image: String(n.image ?? ""),
+                appIcon: ic,
+                timeout: n.expireTimeout
+            };
+            seq = ++root.notifSeq;
+            expanded = false;
+            leaving = false;
+            exitTimer.stop();
+            // entry pose by style, applied instantly, then released
+            inst = true;
+            dragProxy.x = 0;
+            shift = mode === "slide" ? width + 40 : 0;
+            cardScale = mode === "expand" ? 0 : 1;
+            cardOpacity = (mode === "fade" || mode === "none") ? 0 : 1;
+            active = true;
+            Qt.callLater(() => {
+                inst = false;
+                shift = 0;
+                cardScale = 1;
+                cardOpacity = 1;
+            });
+        }
+        // dir: -1 swiped left, 1 swiped right, 0 timeout/programmatic
+        function dismiss(dir: int) {
+            if (leaving || !active)
+                return;
+            leaving = true;
+            if (dir > 0 || (dir === 0 && mode === "slide"))
+                shift = width + 60;
+            else if (dir < 0) {
+                shift = -(restX + width + 20);
+                cardOpacity = 0;
+            } else if (mode === "expand")
+                cardScale = 0;
+            else
+                cardOpacity = 0;
+            exitTimer.restart();
+        }
+        function finalize() {
+            exitTimer.stop();
+            if (notifObj)
+                notifObj.expire();
+            notifObj = null;
+            active = false;
+            leaving = false;
+            expanded = false;
+        }
+
+        Timer {
+            id: exitTimer
+            interval: 340
+            onTriggered: nc.finalize()
+        }
+        Timer {
+            // per-card timeout, paused while expanded or held
+            interval: nc.view.timeout > 0 ? nc.view.timeout : cfg.notifTimeout
+            running: nc.active && !nc.leaving && !nc.expanded && !dragArea.pressed
+            onTriggered: nc.dismiss(0)
+        }
+        // sender closed it (or another daemon action) — animate out
+        Connections {
+            target: nc.notifObj
+            ignoreUnknownSignals: true
+            function onClosed() {
+                nc.notifObj = null;
+                if (nc.active && !nc.leaving)
+                    nc.dismiss(0);
+            }
+        }
+
+        visible: active
+        width: cfg.notifWidth
+        readonly property real cardH: Math.max(66, contentRow.height + 26)
+        height: cardH
+        radius: 20
+        color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
+        border.width: 1
+        border.color: Qt.alpha(root.flyTh.accent, 0.33)
+        transformOrigin: Item.Top
+        scale: cardScale
+        opacity: cardOpacity
+
+        readonly property real restX: parent.width - cfg.notifWidth - 16
+        x: restX + (dragArea.drag.active ? dragProxy.x : shift)
+        // newest card on top; older ones stack downward and reflow
+        y: {
+            let yy = 14;
+            for (const o of others)
+                if (o.active && o.seq > seq)
+                    yy += o.cardH + 12;
+            return yy;
+        }
+        Behavior on x {
+            enabled: !nc.inst && !dragArea.drag.active
+            NumberAnimation {
+                duration: 280
+                easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                easing.overshoot: 1.2
+            }
+        }
+        Behavior on y {
+            enabled: !nc.inst
+            NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 260; easing.type: Easing.OutCubic }
+        }
+        Behavior on cardScale {
+            enabled: !nc.inst
+            NumberAnimation {
+                duration: cfg.notifAnim === "none" ? 0 : 300
+                easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
+                easing.overshoot: 1.3
+            }
+        }
+        Behavior on cardOpacity {
+            enabled: !nc.inst
+            NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+        }
+
+        Row {
+            id: contentRow
+            x: 18
+            y: 13
+            width: parent.width - 36
+            spacing: 14
+
+            // the launcher's own notifications use themed glyph badges;
+            // other apps get their image or icon-theme icon
+            Rectangle {
+                visible: nc.view.own
+                width: visible ? 44 : 0
+                height: 44
+                radius: 22
+                color: Qt.alpha(root.flyTh.accent, 0.14)
+                border.width: 1
+                border.color: Qt.alpha(root.flyTh.accent, 0.4)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: nc.view.glyph
+                    color: root.flyTh.accent
+                    font { family: root.flyMono; pixelSize: root.notifFs(20); weight: Font.Bold }
+                }
+            }
+            Image {
+                id: notifImage
+                visible: !nc.view.own && String(source) !== ""
+                width: visible ? 48 : 0
+                height: 48
+                asynchronous: true
+                fillMode: Image.PreserveAspectCrop
+                source: {
+                    const v = nc.view;
+                    if (v.image)
+                        return v.image;
+                    if (!v.appIcon)
+                        return "";
+                    // some apps (e.g. niri screenshots) pass a file path in
+                    // the icon field instead of an icon name
+                    if (v.appIcon.startsWith("file://"))
+                        return v.appIcon;
+                    if (v.appIcon.startsWith("/"))
+                        return "file://" + v.appIcon;
+                    return Quickshell.iconPath(v.appIcon, true);
+                }
+            }
+
+            Column {
+                width: contentRow.width - (nc.view.own ? 58 : (notifImage.visible ? 62 : 0))
+                spacing: 4
+
+                Text {
+                    visible: text.length > 0
+                    text: nc.view.app
+                    color: root.flyTh.muted
+                    font { family: root.flyMono; pixelSize: root.notifFs(11); letterSpacing: 2; capitalization: Font.AllUppercase }
+                }
+                Text {
+                    visible: text.length > 0
+                    width: parent.width
+                    text: nc.view.summary
+                    wrapMode: Text.Wrap
+                    maximumLineCount: nc.expanded ? 8 : 2
+                    elide: Text.ElideRight
+                    color: root.flyTh.fg
+                    font { family: root.flyMono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
+                }
+                // body clips to ~4 lines; clicking the card grows it to the
+                // full text, animated
+                Item {
+                    width: parent.width
+                    clip: true
+                    visible: bodyText.text.length > 0
+                    readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : root.notifFs(16)
+                    height: visible ? (nc.expanded ? bodyText.paintedHeight : Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))) : 0
+                    Behavior on height {
+                        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+                    }
+
+                    Text {
+                        id: bodyText
+                        width: parent.width
+                        text: nc.view.body
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 24
+                        textFormat: Text.PlainText
+                        color: root.flyTh.muted
+                        font { family: root.flyMono; pixelSize: root.notifFs(12) }
+                    }
+                }
+            }
+        }
+
+        // click expands the text; swiping either way moves the card and
+        // dismisses past the threshold
+        Item {
+            id: dragProxy
+        }
+        MouseArea {
+            id: dragArea
+            anchors.fill: parent
+            drag.target: dragProxy
+            drag.axis: Drag.XAxis
+            onPressed: () => dragProxy.x = 0
+            onClicked: () => nc.expanded = !nc.expanded
+            onReleased: () => {
+                if (nc.leaving)
+                    return;
+                if (dragProxy.x > 90)
+                    nc.dismiss(1);
+                else if (dragProxy.x < -90)
+                    nc.dismiss(-1);
+                // otherwise x falls back to rest and springs home
+            }
+        }
     }
 
     readonly property string defaultWallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
@@ -259,11 +507,13 @@ ShellRoot {
             property string revealOrigin: "center"
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
             // flyouts (volume + notification OSDs)
-            property string flyTheme: "follow"
+            property string flyTheme: "amber"
             property real flyOpacity: 0.4
+            property string flyFontFamily: ""
+            property var flyouts: ({ volume: true, notifs: true })
             property real volWidth: 340
             property string volAnim: "slide"
-            property bool volBounce: false
+            property int volTimeout: 1600
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
             property real notifWidth: 420
@@ -309,6 +559,10 @@ ShellRoot {
         return activeTheme;
     }
     readonly property var flyTh: themeColors(cfg.flyTheme)
+    readonly property string flyMono: cfg.flyFontFamily || mono
+    function flyoutOn(name: string): bool {
+        return (cfg.flyouts ?? {})[name] !== false;
+    }
 
     function fs(px: int): int {
         return Math.round(px * cfg.fontScale);
@@ -331,6 +585,12 @@ ShellRoot {
         // heal settings from the old list-style clipboard pane
         if (cfg.clipsRows > 4 || cfg.clipsRows < 2) {
             cfg.clipsRows = 3;
+            saveSettings();
+        }
+        // the "follow" flyout theme option was removed; pin to the launcher
+        // theme it was following at the time
+        if (cfg.flyTheme === "follow") {
+            cfg.flyTheme = root.themes.some(t => t.id === cfg.theme) ? cfg.theme : "amber";
             saveSettings();
         }
     }
@@ -740,8 +1000,10 @@ ShellRoot {
             }
         }
         function cyclePane(dir: int) {
+            // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                setPane(homePane());
+                const tabs = ["general", "flyouts"];
+                settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
             let i = activePanes.indexOf(pane);
@@ -877,11 +1139,29 @@ ShellRoot {
         }
 
         // ---------- actions ----------
+        // Launch through gtk-launch (GLib): quickshell's own Exec parser
+        // follows the desktop-entry spec strictly, where single quotes are
+        // not quoting characters — entries like `Exec=kitty bash -lc '...'`
+        // get split mid-quote and crash on startup. GLib parses shell-style
+        // (like every GTK-based launcher), and also honors Path= and
+        // DBusActivatable. Falls back to the entry's own execute() if
+        // gtk-launch can't find the id.
+        property var launchEntry: null
+        Process {
+            id: appLaunch
+            onExited: exitCode => {
+                if (exitCode !== 0 && win.launchEntry)
+                    win.launchEntry.execute();
+                win.launchEntry = null;
+            }
+        }
         function launch(entry) {
             if (!entry)
                 return;
             root.recordLaunch(entry);
-            entry.execute();
+            launchEntry = entry;
+            appLaunch.command = ["bash", "-c", 'command -v gtk-launch >/dev/null || exit 42; exec gtk-launch "$1"', "_", entry.id];
+            appLaunch.running = true;
             exit();
         }
 
@@ -1140,23 +1420,6 @@ ShellRoot {
                 }
             }
 
-            // scroll wheel walks the grids (down the column, across pages)
-            WheelHandler {
-                property real acc: 0
-                target: null
-                onWheel: event => {
-                    acc += event.angleDelta.y;
-                    while (acc >= 120) {
-                        win.navigate(0, -1);
-                        acc -= 120;
-                    }
-                    while (acc <= -120) {
-                        win.navigate(0, 1);
-                        acc += 120;
-                    }
-                }
-            }
-
             // Idle state: big clock + date. The outer gate holds the clock
             // back until the blur hole is large enough to accommodate it.
             Item {
@@ -1311,7 +1574,10 @@ ShellRoot {
                                             fillMode: Image.PreserveAspectFit
                                             source: {
                                                 const name = cell.shownEntry ? cell.shownEntry.icon : "";
-                                                return name ? Quickshell.iconPath(name, true) : "";
+                                                if (!name)
+                                                    return "";
+                                                // some entries put a file path in Icon=
+                                                return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
                                             }
                                             visible: status === Image.Ready
                                         }
@@ -1682,7 +1948,7 @@ ShellRoot {
                                             const c = clipCell.shownClip;
                                             if (!c)
                                                 return "";
-                                            return c.image ? c.kind + " · " + c.dims : c.bytes + " chars";
+                                            return c.image ? c.dims : c.bytes + " chars";
                                         }
                                         color: root.fg
                                         font { family: root.mono; pixelSize: root.fs(12) }
@@ -2024,14 +2290,86 @@ ShellRoot {
 
                     SettingRow { key: "volWidth"; label: "Volume size" }
                     SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: 130 }
-                    SettingRow { key: "volBounce"; label: "Volume bounce" }
+                    SettingRow { key: "volTimeout"; label: "Volume timeout" }
                     SettingRow { key: "notifWidth"; label: "Notification size" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "notifFontScale"; label: "Notification font" }
+                    SettingRow { key: "notifFontScale"; label: "Notification font size" }
                     SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: 130 }
                     SettingRow { key: "notifBounce"; label: "Notification bounce" }
+                    SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
                     SettingRow { key: "flyOpacity"; label: "Opacity" }
-                    ThemeRow { cfgKey: "flyTheme"; includeFollow: true }
+
+                    // enabled flyouts (unloading notifications releases the
+                    // org.freedesktop.Notifications DBus name for other daemons)
+                    Item {
+                        width: 780
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Flyouts"
+                        }
+                        SReset {
+                            key: "flyouts"
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34
+                            spacing: 8
+                            height: parent.height
+
+                            Repeater {
+                                model: [
+                                    { id: "volume", label: "volume" },
+                                    { id: "notifs", label: "notifications" }
+                                ]
+
+                                Item {
+                                    id: flyChip
+                                    required property var modelData
+                                    readonly property bool on: root.flyoutOn(modelData.id)
+                                    width: flyBox.width + 6 + flyChipText.implicitWidth
+                                    height: 28
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    Rectangle {
+                                        id: flyBox
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 18
+                                        radius: 4
+                                        color: flyChip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
+                                        border.width: 1
+                                        border.color: flyChip.on ? root.accent : Qt.alpha(root.muted, 0.6)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: flyChip.on
+                                            text: "✓"
+                                            color: "#141210"
+                                            font { pixelSize: 13; weight: Font.Bold }
+                                        }
+                                    }
+                                    Text {
+                                        id: flyChipText
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: flyBox.right
+                                        anchors.leftMargin: 6
+                                        text: flyChip.modelData.label
+                                        color: flyChip.on ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(12) }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: win.toggleFlyout(flyChip.modelData.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ThemeRow { cfgKey: "flyTheme" }
                 }
 
                 Column {
@@ -2380,6 +2718,29 @@ ShellRoot {
                     }
                 }
             }
+
+            // Scroll wheel walks the grids (down the column, across pages).
+            // Topmost sibling: MouseAreas below (background, tiles) consume
+            // wheel events, so the handler must intercept before them. An
+            // Item with only a WheelHandler doesn't block clicks or hover.
+            Item {
+                anchors.fill: parent
+                WheelHandler {
+                    property real acc: 0
+                    target: null
+                    onWheel: event => {
+                        acc += event.angleDelta.y;
+                        while (acc >= 120) {
+                            win.navigate(0, -1);
+                            acc -= 120;
+                        }
+                        while (acc <= -120) {
+                            win.navigate(0, 1);
+                            acc += 120;
+                        }
+                    }
+                }
+            }
         }
 
         function cycleIconTheme(dir: int) {
@@ -2404,8 +2765,9 @@ ShellRoot {
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
             case "flyOpacity": return Math.round(cfg.flyOpacity * 100) + "%";
+            case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
-            case "volBounce": return cfg.volBounce ? "on" : "off";
+            case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
             case "notifBounce": return cfg.notifBounce ? "on" : "off";
             case "notifWidth": return cfg.notifWidth + " px";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
@@ -2415,7 +2777,6 @@ ShellRoot {
             return "";
         }
         readonly property var originChoices: ["center", "top-left", "top-right", "bottom-left", "bottom-right"]
-        readonly property var osdThemeChoices: ["follow", "amber", "frost", "moss", "rose", "mono", "dynamic"]
         function cycleChoice(cur: string, list, dir: int): string {
             let i = list.indexOf(cur);
             if (i < 0)
@@ -2498,9 +2859,17 @@ ShellRoot {
             case "volAnim":
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
                 break;
-            case "volBounce":
-                cfg.volBounce = !cfg.volBounce;
+            case "volTimeout":
+                cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
                 break;
+            case "flyFontFamily": {
+                const list = [""].concat(root.fontFamilies);
+                let i = list.indexOf(cfg.flyFontFamily);
+                if (i < 0)
+                    i = 0;
+                cfg.flyFontFamily = list[((i + dir) % list.length + list.length) % list.length];
+                break;
+            }
             case "notifBounce":
                 cfg.notifBounce = !cfg.notifBounce;
                 break;
@@ -2517,6 +2886,13 @@ ShellRoot {
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["expand", "slide", "fade", "none"], dir);
                 break;
             }
+            root.saveSettings();
+        }
+
+        function toggleFlyout(f: string) {
+            const fly = Object.assign({ volume: true, notifs: true }, cfg.flyouts);
+            fly[f] = fly[f] === false;
+            cfg.flyouts = fly;
             root.saveSettings();
         }
 
@@ -2560,9 +2936,11 @@ ShellRoot {
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 340; break;
             case "flyOpacity": cfg.flyOpacity = 0.4; break;
-            case "flyTheme": cfg.flyTheme = "follow"; break;
+            case "flyFontFamily": cfg.flyFontFamily = ""; break;
+            case "flyTheme": cfg.flyTheme = "amber"; break;
+            case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
-            case "volBounce": cfg.volBounce = false; break;
+            case "volTimeout": cfg.volTimeout = 1600; break;
             case "notifBounce": cfg.notifBounce = false; break;
             case "notifWidth": cfg.notifWidth = 420; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
@@ -2761,7 +3139,9 @@ ShellRoot {
                     sourceSize: Qt.size(88, 88)
                     source: {
                         const name = modelData.icon;
-                        return name ? Quickshell.iconPath(name, true) : "";
+                        if (!name)
+                            return "";
+                        return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
                     }
                 }
             }
@@ -2792,8 +3172,13 @@ ShellRoot {
     }
 
     // ================= OSDs (persistent) =================
+    // Both flyouts are persistent windows of fixed size; the cards animate
+    // inside them. niri's geometry-corner-radius does not clip layer-surface
+    // blur (verified on 26.04-git 2809), so the blur is shaped client-side
+    // with ellipse scanline regions, inset 2px so the region edge hides
+    // under the card's antialiased border.
 
-    // ---------- volume OSD: slides up from the bottom edge ----------
+    // ---------- volume OSD: pill sliding up from the bottom edge ----------
     PwObjectTracker {
         objects: [Pipewire.defaultAudioSink]
     }
@@ -2815,335 +3200,210 @@ ShellRoot {
         id: volOsd
         property bool show: false
         property bool leaving: false
-        property bool linger: false
+        property bool entered: false
         function ping() {
+            if (!root.flyoutOn("volume"))
+                return;
             leaving = false;
-            linger = true;
-            lingerTimer.restart();
-            show = true;
+            if (!show) {
+                show = true;
+                // entered flips a tick later so the first frame renders the
+                // hidden pose and the entry actually animates
+                entered = false;
+                Qt.callLater(() => entered = true);
+            }
             volHide.restart();
         }
         Timer {
             id: volHide
-            interval: 1600
+            interval: cfg.volTimeout
             onTriggered: volOsd.leaving = true
         }
         Timer {
-            interval: 380
+            interval: 400
             running: volOsd.leaving
             onTriggered: {
                 volOsd.show = false;
                 volOsd.leaving = false;
             }
         }
-        // keep the window alive between bursts of volume changes so rapid
-        // presses never pay the window-recreate cost
-        Timer {
-            id: lingerTimer
-            interval: 8000
-            onTriggered: volOsd.linger = false
-        }
 
-        LazyLoader {
-            active: volOsd.show || volOsd.linger
-
-            PanelWindow {
-                id: volWin
-                readonly property string mode: cfg.volAnim
-                // booted delays the "on screen" state one tick so the very
-                // first appearance animates in rather than starting shown
-                property bool booted: false
-                readonly property bool onScreen: booted && volOsd.show && !volOsd.leaving
-                Component.onCompleted: Qt.callLater(() => booted = true)
-
-                anchors.bottom: true
-                implicitWidth: cfg.volWidth
-                implicitHeight: 56
-                // the surface is exactly the pill: niri rounds and clips the
-                // blur to it via geometry-corner-radius, and the slide is a
-                // layer-margin animation
-                margins.bottom: mode === "slide" ? (onScreen ? 90 : -64) : 90
-                Behavior on margins.bottom {
-                    NumberAnimation {
-                        duration: cfg.volAnim === "none" ? 0 : 320
-                        easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
-                        easing.overshoot: 1.3
-                    }
-                }
-                color: "transparent"
-                exclusionMode: ExclusionMode.Ignore
-                WlrLayershell.layer: WlrLayer.Overlay
-                WlrLayershell.namespace: "launcher-vol-osd"
-                BackgroundEffect.blurRegion: Region {
-                    readonly property real rs: volWin.mode === "pop" ? volCard.scale
-                        : volWin.mode === "fade" ? volCard.opacity : 1
-                    x: (volWin.width - volWin.width * rs) / 2
-                    y: (volWin.height - volWin.height * rs) / 2
-                    width: Math.max(1, volWin.width * rs)
-                    height: Math.max(1, volWin.height * rs)
-                }
-
-                Rectangle {
-                    id: volCard
-                    anchors.fill: parent
-                    radius: 28
-                    color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
-                    border.width: 1
-                    border.color: Qt.alpha(root.flyTh.accent, 0.33)
-                    opacity: volWin.mode === "fade" || volWin.mode === "pop" ? (volWin.onScreen ? 1 : 0) : 1
-                    scale: volWin.mode === "pop" ? (volWin.onScreen ? 1 : 0.8) : 1
-                    Behavior on opacity {
-                        NumberAnimation { duration: cfg.volAnim === "none" ? 0 : 200; easing.type: Easing.OutCubic }
-                    }
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: cfg.volAnim === "none" ? 0 : 240
-                            easing.type: cfg.volBounce ? Easing.OutBack : Easing.OutCubic
-                            easing.overshoot: 1.6
-                        }
-                    }
-
-                    // just a pill with a bar
-                    Item {
-                        anchors.centerIn: parent
-                        width: parent.width - 60
-                        height: 8
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 4
-                            color: Qt.alpha(root.flyTh.accent, 0.15)
-                        }
-                        Rectangle {
-                            width: parent.width * Math.min(1, root.vol)
-                            height: parent.height
-                            radius: 4
-                            color: root.sinkMuted ? Qt.alpha(root.flyTh.muted, 0.8) : root.flyTh.accent
-                            Behavior on width {
-                                NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------- notification OSD: expands out of the top-right corner ----------
-    property var notif: null
-    property bool notifLeaving: false
-    NotificationServer {
-        id: notifServer
-        bodySupported: true
-        imageSupported: true
-        onNotification: n => {
-            n.tracked = true;
-            root.notifLeaving = false;
-            root.notif = n;
-            notifHide.restart();
-        }
-    }
-    function notifFs(px: int): int {
-        return Math.round(px * cfg.notifFontScale);
-    }
-    Timer {
-        id: notifHide
-        interval: root.notif && root.notif.expireTimeout > 0 ? root.notif.expireTimeout : cfg.notifTimeout
-        onTriggered: root.dismissNotif()
-    }
-    Timer {
-        interval: 300
-        running: root.notifLeaving
-        onTriggered: {
-            if (root.notif)
-                root.notif.expire();
-            root.notif = null;
-            root.notifLeaving = false;
-        }
-    }
-    function dismissNotif() {
-        if (notif && !notifLeaving)
-            notifLeaving = true;
-    }
-
-    LazyLoader {
-        active: root.notif !== null
-
+        // Always loaded, only mapped while showing: mapping a pre-built
+        // window costs a frame or two, unlike the full rebuild a LazyLoader
+        // pays, so rapid volume changes never lag. The card moves inside the
+        // fixed window; layer margins never animate (margin changes need a
+        // compositor round trip per step and stutter).
         PanelWindow {
-            id: notifWin
-            readonly property string mode: cfg.notifAnim
-            // drag right translates the card; drag left stretches the window
-            // (and card) leftward while the right edge stays on the screen edge
-            readonly property real stretch: Math.max(0, -dragProxy.x)
-            readonly property real shift: Math.max(0, dragProxy.x)
-            anchors.top: true
-            anchors.right: true
-            implicitWidth: cfg.notifWidth + stretch
-            implicitHeight: notifCol.height + 30
+            id: volWin
+            readonly property string mode: cfg.volAnim
+            visible: volOsd.show || volOsd.leaving
+            anchors.bottom: true
+            implicitWidth: cfg.volWidth + 8
+            implicitHeight: 180
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "launcher-notif-osd"
-            BackgroundEffect.blurRegion: Region {
-                readonly property real rs: notifWin.mode === "expand" ? notifCard.scale
-                    : notifWin.mode === "fade" ? notifCard.opacity : 1
-                x: notifWin.width * (1 - rs) + notifWin.shift
-                y: 0
-                width: Math.max(1, notifWin.width * rs)
-                height: Math.max(1, notifWin.height * rs)
-            }
+            WlrLayershell.namespace: "launcher-vol-osd"
+            // the OSD never takes input
+            mask: Region {}
 
-            // invisible drag value holder
-            Item {
-                id: dragProxy
-                property bool animOn: false
-                Behavior on x {
-                    enabled: dragProxy.animOn && !notifDragArea.drag.active
-                    NumberAnimation {
-                        duration: cfg.notifAnim === "none" ? 0 : 220
-                        easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
-                        easing.overshoot: 1.3
-                    }
-                }
+            BackgroundEffect.blurRegion: RoundedBlur {
+                readonly property real s: (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity
+                rx: volCard.x + (volCard.width - volCard.width * s) / 2 + 2
+                ry: volCard.y + (volCard.height - volCard.height * s) / 2 + 2
+                rw: Math.max(1, volCard.width * s - 4)
+                rh: Math.max(1, volCard.height * s - 4)
+                rr: Math.max(2, 26 * s)
             }
 
             Rectangle {
-                id: notifCard
-                // top and right borders hang 1px outside the window so no
-                // border line shows against the screen edges
-                x: notifWin.shift
-                y: -1
-                width: parent.width + 1
-                height: parent.height + 1
-                bottomLeftRadius: 18
+                id: volCard
+                readonly property bool on: volOsd.show && !volOsd.leaving && volOsd.entered
+                x: (parent.width - width) / 2
+                width: cfg.volWidth
+                height: 56
+                radius: 28
+                // rests 90px above the screen bottom; the slide exit drops it
+                // past the window (= screen) bottom edge. Bounce is built in:
+                // the exit overshoot lands off-screen, so only the entry
+                // shows it.
+                y: volWin.mode === "slide" ? (on ? parent.height - 146 : parent.height) : parent.height - 146
+                Behavior on y {
+                    NumberAnimation {
+                        duration: volWin.mode === "slide" ? 340 : 0
+                        easing.type: Easing.OutBack
+                        easing.overshoot: 1.2
+                    }
+                }
                 color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
                 border.width: 1
                 border.color: Qt.alpha(root.flyTh.accent, 0.33)
-                transformOrigin: Item.TopRight
-                scale: mode === "expand" ? 0 : 1
-                opacity: mode === "fade" ? 0 : 1
-                readonly property string mode: notifWin.mode
-                Component.onCompleted: {
-                    if (mode === "slide")
-                        dragProxy.x = notifWin.width;
-                    dragProxy.animOn = true;
-                    scale = 1;
-                    opacity = 1;
-                    if (mode === "slide")
-                        dragProxy.x = 0;
+                opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
+                scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
+                Behavior on opacity {
+                    NumberAnimation { duration: volWin.mode === "none" ? 0 : 200; easing.type: Easing.OutCubic }
                 }
                 Behavior on scale {
-                    NumberAnimation {
-                        duration: cfg.notifAnim === "none" ? 0 : 280
-                        easing.type: cfg.notifBounce ? Easing.OutBack : Easing.OutCubic
-                        easing.overshoot: 1.4
-                    }
-                }
-                Behavior on opacity {
-                    NumberAnimation { duration: cfg.notifAnim === "none" ? 0 : 220; easing.type: Easing.OutCubic }
-                }
-                // closing animation, following the drag direction if any
-                Connections {
-                    target: root
-                    function onNotifLeavingChanged() {
-                        if (!root.notifLeaving)
-                            return;
-                        if (dragProxy.x < -0.5)
-                            notifCard.opacity = 0;
-                        else if (dragProxy.x > 0.5 || notifCard.mode === "slide")
-                            dragProxy.x = notifWin.width + 20;
-                        else if (notifCard.mode === "expand")
-                            notifCard.scale = 0;
-                        else
-                            notifCard.opacity = 0;
-                    }
+                    NumberAnimation { duration: volWin.mode === "none" ? 0 : 240; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
                 }
 
-                Row {
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.margins: 16
-                    spacing: 14
+                // just a pill with a bar
+                Item {
+                    anchors.centerIn: parent
+                    width: parent.width - 60
+                    height: 8
 
-                    Image {
-                        id: notifImage
-                        visible: String(source) !== ""
-                        width: visible ? 48 : 0
-                        height: 48
-                        asynchronous: true
-                        fillMode: Image.PreserveAspectCrop
-                        source: {
-                            const n = root.notif;
-                            if (!n)
-                                return "";
-                            if (String(n.image) !== "")
-                                return n.image;
-                            const ic = n.appIcon ? String(n.appIcon) : "";
-                            if (!ic)
-                                return "";
-                            // some apps (e.g. niri screenshots) pass a file
-                            // path in the icon field instead of an icon name
-                            if (ic.startsWith("file://"))
-                                return ic;
-                            if (ic.startsWith("/"))
-                                return "file://" + ic;
-                            return Quickshell.iconPath(ic, true);
-                        }
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 4
+                        color: Qt.alpha(root.flyTh.accent, 0.15)
                     }
-
-                    Column {
-                        id: notifCol
-                        width: cfg.notifWidth - 32 - (notifImage.visible ? 62 : 0)
-                        spacing: 4
-
-                        Text {
-                            visible: text.length > 0
-                            text: root.notif ? root.notif.appName : ""
-                            color: root.flyTh.muted
-                            font { family: root.mono; pixelSize: root.notifFs(11); letterSpacing: 2; capitalization: Font.AllUppercase }
+                    Rectangle {
+                        width: parent.width * Math.min(1, root.vol)
+                        height: parent.height
+                        radius: 4
+                        color: root.sinkMuted ? Qt.alpha(root.flyTh.muted, 0.8) : root.flyTh.accent
+                        Behavior on width {
+                            NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
                         }
-                        Text {
-                            visible: text.length > 0
-                            width: parent.width
-                            text: root.notif ? root.notif.summary : ""
-                            wrapMode: Text.Wrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            color: root.flyTh.fg
-                            font { family: root.mono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
-                        }
-                        Text {
-                            visible: text.length > 0
-                            width: parent.width
-                            text: root.notif ? root.notif.body : ""
-                            wrapMode: Text.Wrap
-                            maximumLineCount: 4
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            color: root.flyTh.muted
-                            font { family: root.mono; pixelSize: root.notifFs(12) }
-                        }
-                    }
-                }
-
-                // click to dismiss; swipe right to fling, swipe left to
-                // stretch out of the corner and release to dismiss
-                MouseArea {
-                    id: notifDragArea
-                    anchors.fill: parent
-                    drag.target: dragProxy
-                    drag.axis: Drag.XAxis
-                    drag.minimumX: -220
-                    drag.maximumX: notifWin.width + 20
-                    onClicked: root.dismissNotif()
-                    onReleased: {
-                        if (Math.abs(dragProxy.x) > 80)
-                            root.dismissNotif();
-                        else
-                            dragProxy.x = 0;
                     }
                 }
             }
         }
+    }
+
+    // ---------- notification flyouts ----------
+    // Up to three pill cards stacked below the top-right corner, hosted in
+    // one fixed-size window. Cards are assigned to free slots, so existing
+    // cards never rebuild when another notification arrives; stacking order
+    // is by arrival, newest on top. Click expands the body text; swiping
+    // left or right moves the card and dismisses past the threshold.
+    function notifFs(px: int): int {
+        return Math.round(px * cfg.notifFontScale);
+    }
+    property int notifSeq: 0
+
+    // Own org.freedesktop.Notifications only while the flyout is enabled;
+    // unloading releases the name for another daemon to claim.
+    LazyLoader {
+        active: root.flyoutOn("notifs")
+
+        NotificationServer {
+            bodySupported: true
+            imageSupported: true
+            onNotification: n => {
+                n.tracked = true;
+                notifWin.accept(n);
+            }
+        }
+    }
+
+    PanelWindow {
+        id: notifWin
+        visible: cardA.active || cardB.active || cardC.active
+        anchors.top: true
+        anchors.right: true
+        // fixed size: cards animate inside; the left slack is swipe travel
+        implicitWidth: cfg.notifWidth + 240
+        implicitHeight: 1290
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "launcher-notif-osd"
+
+        function accept(n) {
+            const slots = [cardA, cardB, cardC];
+            let s = slots.find(c => !c.active);
+            if (!s) {
+                // all full: the oldest makes way immediately
+                s = slots.reduce((a, b) => a.seq < b.seq ? a : b);
+                s.finalize();
+            }
+            s.assign(n);
+        }
+
+        // input only over the cards; everything else clicks through
+        mask: Region {
+            regions: [
+                Region { x: cardA.x; y: cardA.y; width: cardA.active ? cardA.width : 0; height: cardA.active ? cardA.height : 0 },
+                Region { x: cardB.x; y: cardB.y; width: cardB.active ? cardB.width : 0; height: cardB.active ? cardB.height : 0 },
+                Region { x: cardC.x; y: cardC.y; width: cardC.active ? cardC.width : 0; height: cardC.active ? cardC.height : 0 }
+            ]
+        }
+        BackgroundEffect.blurRegion: Region {
+            regions: [
+                RoundedBlur {
+                    readonly property var c: cardA
+                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
+                    rx: c.x + (c.width - c.width * s) / 2 + 2
+                    ry: c.y + 2
+                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
+                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
+                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
+                },
+                RoundedBlur {
+                    readonly property var c: cardB
+                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
+                    rx: c.x + (c.width - c.width * s) / 2 + 2
+                    ry: c.y + 2
+                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
+                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
+                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
+                },
+                RoundedBlur {
+                    readonly property var c: cardC
+                    readonly property real s: (c.mode === "expand" ? c.scale : 1) * c.opacity
+                    rx: c.x + (c.width - c.width * s) / 2 + 2
+                    ry: c.y + 2
+                    rw: c.active ? Math.max(1, c.width * s - 4) : 1
+                    rh: c.active ? Math.max(1, c.height * s - 4) : 1
+                    rr: c.active ? Math.min(18, Math.max(2, 18 * s)) : 0
+                }
+            ]
+        }
+
+        NotifCard { id: cardA; others: [cardB, cardC] }
+        NotifCard { id: cardB; others: [cardA, cardC] }
+        NotifCard { id: cardC; others: [cardA, cardB] }
     }
 }
