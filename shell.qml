@@ -217,11 +217,9 @@ ShellRoot {
 
     // One notification card: a free-floating pill that slides/expands in,
     // stacks below its newer siblings, and is swipeable in both directions.
-    // Only ever used as a cardRep delegate.
     component NotifCard: Rectangle {
         id: nc
-        required property int index
-        property var rep: null
+        property var siblings: []
         property var notifObj: null
         // snapshot of the notification's content: keeps the card intact
         // through the exit animation even if the sender closes the object
@@ -363,12 +361,9 @@ ShellRoot {
         // newest card on top; older active ones stack downward and reflow
         y: {
             let yy = 14;
-            if (nc.rep)
-                for (let i = 0; i < nc.rep.count; i++) {
-                    const o = nc.rep.itemAt(i);
-                    if (o && o !== nc && o.active && o.seq > nc.seq)
-                        yy += o.cardH + 12;
-                }
+            for (const o of nc.siblings)
+                if (o !== nc && o.active && o.seq > nc.seq)
+                    yy += o.cardH + 12;
             return yy;
         }
         Behavior on y {
@@ -3499,41 +3494,48 @@ ShellRoot {
 
                 // equalizer visualizer variants (mirror / spectrum / flicker):
                 // 12 bars mirrored above and below a horizontal centre axis,
-                // following the flyout accent colour (neutral when muted / 0)
+                // following the flyout accent colour (neutral when muted / 0).
+                // The bars span the card width (like the pill's bar) so the
+                // size setting stretches them horizontally. No per-bar height
+                // Behaviors: the ~90ms tick already paces the motion, and
+                // animating 24 bars at 60fps kept the compositor re-blurring
+                // the backdrop every frame, which showed up as input lag.
                 Row {
+                    id: eqRow
                     visible: volWin.eq
                     anchors.centerIn: parent
-                    spacing: 4
+                    readonly property real avail: volCard.width - 48
+                    readonly property real barW: Math.max(3, avail / 12 * 0.62)
+                    spacing: (avail - barW * 12) / 11
 
                     Repeater {
                         model: 12
                         Item {
                             id: eqBar
                             required property int index
-                            width: 6
+                            width: eqRow.barW
                             height: 60
                             readonly property real half: volWin.volBarHalf(index)
+                            readonly property real rad: Math.min(4, eqRow.barW / 2)
                             readonly property color barColor: (root.sinkMuted || root.vol <= 0)
                                 ? root.flyTh.muted : root.flyTh.accent
 
                             Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 anchors.bottom: parent.verticalCenter
-                                width: 6
-                                radius: 3
+                                width: eqRow.barW
+                                radius: eqBar.rad
                                 height: eqBar.half
                                 color: eqBar.barColor
-                                Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                             }
                             Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 anchors.top: parent.verticalCenter
-                                width: 6
-                                radius: 3
+                                width: eqRow.barW
+                                radius: eqBar.rad
                                 height: eqBar.half
                                 color: eqBar.barColor
                                 opacity: 0.55
-                                Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                             }
                         }
                     }
@@ -3572,14 +3574,15 @@ ShellRoot {
 
     PanelWindow {
         id: notifWin
+        // Fixed card instances referenced by id. An earlier Repeater version
+        // referenced cards via cardRep.itemAt(i) inside the mask/blur region
+        // bindings, but itemAt() is not reactive and returns null while the
+        // delegates are still being created, so those regions stayed empty —
+        // which dropped the blur (no xray) and the input mask (no clicks).
+        readonly property var cards: [cardA, cardB, cardC, cardD, cardE]
         property bool anyActive: false
         function refreshActive() {
-            let a = false;
-            for (let i = 0; i < cardRep.count; i++) {
-                const c = cardRep.itemAt(i);
-                if (c && c.active) { a = true; break; }
-            }
-            anyActive = a;
+            anyActive = cards.some(c => c.active);
         }
         visible: anyActive
         anchors.top: true
@@ -3596,9 +3599,7 @@ ShellRoot {
             const max = Math.max(1, Math.min(root.notifSlots, cfg.notifMax));
             let free = null, oldest = null;
             for (let i = 0; i < max; i++) {
-                const c = cardRep.itemAt(i);
-                if (!c)
-                    continue;
+                const c = cards[i];
                 if (!c.active && !c.leaving) {
                     free = c;
                     break;
@@ -3615,34 +3616,32 @@ ShellRoot {
             refreshActive();
         }
 
-        // input only over the cards; everything else clicks through.
-        // Children are the region set (Region's default property is
-        // `regions`); assigning `regions:` explicitly as well produced a
-        // broken region that dropped the blur, so children only.
+        // input only over the cards; everything else clicks through
         mask: Region {
-            NotifMaskRegion { c: cardRep.itemAt(0) }
-            NotifMaskRegion { c: cardRep.itemAt(1) }
-            NotifMaskRegion { c: cardRep.itemAt(2) }
-            NotifMaskRegion { c: cardRep.itemAt(3) }
-            NotifMaskRegion { c: cardRep.itemAt(4) }
+            regions: [
+                NotifMaskRegion { c: cardA },
+                NotifMaskRegion { c: cardB },
+                NotifMaskRegion { c: cardC },
+                NotifMaskRegion { c: cardD },
+                NotifMaskRegion { c: cardE }
+            ]
         }
+        // one rounded region per card; inactive slots stay a harmless 1px
+        // (never 0-area, which would read as "blur the whole surface")
         BackgroundEffect.blurRegion: Region {
-            // one rounded region per card; inactive slots stay a harmless 1px
-            // (never 0-area, which would read as "blur the whole surface")
-            NotifBlurRegion { c: cardRep.itemAt(0) }
-            NotifBlurRegion { c: cardRep.itemAt(1) }
-            NotifBlurRegion { c: cardRep.itemAt(2) }
-            NotifBlurRegion { c: cardRep.itemAt(3) }
-            NotifBlurRegion { c: cardRep.itemAt(4) }
+            regions: [
+                NotifBlurRegion { c: cardA },
+                NotifBlurRegion { c: cardB },
+                NotifBlurRegion { c: cardC },
+                NotifBlurRegion { c: cardD },
+                NotifBlurRegion { c: cardE }
+            ]
         }
 
-        Repeater {
-            id: cardRep
-            model: root.notifSlots
-            NotifCard {
-                rep: cardRep
-                onActiveChanged: notifWin.refreshActive()
-            }
-        }
+        NotifCard { id: cardA; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+        NotifCard { id: cardB; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+        NotifCard { id: cardC; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+        NotifCard { id: cardD; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+        NotifCard { id: cardE; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
     }
 }
