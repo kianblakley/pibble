@@ -208,8 +208,12 @@ ShellRoot {
     component NotifBlurRegion: RoundedBlur {
         property var c: null
         readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-        rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-        ry: c ? c.y + 2 : 0
+        // An inactive slot's 1px placeholder (the union must never be empty —
+        // that reads as blur-the-whole-surface) sits tucked inside the topmost
+        // active card's region instead of at the slot's own centre, where it
+        // showed as a lone blurred dot on the desktop below the stack.
+        rx: c ? (c.active ? c.x + (c.width - c.width * s) / 2 + 2 : c.restX + 4) : 0
+        ry: c ? (c.active ? c.y + 2 : 18) : 0
         rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
         rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
         rr: 18 * s
@@ -235,6 +239,13 @@ ShellRoot {
         // (scene coords, so the card moving doesn't feed back into the drag).
         property real swipeX: 0
         property real grabX: 0
+        // written explicitly around the drag (not bound to dragHandler.active):
+        // the Behavior's enabled must already be back to true when the release
+        // handler assigns the exit/spring-back pose, and a binding on the
+        // handler's own active signal isn't guaranteed to have re-evaluated
+        // by then — which made drag-dismiss skip the exit animation and the
+        // spring-back snap instead of slide.
+        property bool dragging: false
         // gates the body-height animation on: false during spawn so the
         // collapsed body appears instantly (no expand-on-spawn), true shortly
         // after so a click animates the expand
@@ -337,6 +348,9 @@ ShellRoot {
         readonly property real cardH: Math.max(66, contentRow.height + 26)
         height: cardH
         radius: 20
+        // vertex antialiasing on the rounded outline (off by default for
+        // Rectangle, which leaves visible stair-steps on the corner curve)
+        antialiasing: true
         color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
         border.width: 1
         border.color: Qt.alpha(root.flyTh.accent, 0.33)
@@ -351,7 +365,7 @@ ShellRoot {
         readonly property real restX: parent.width - cfg.notifWidth - 16
         x: restX + swipeX
         Behavior on swipeX {
-            enabled: !nc.inst && !dragHandler.active
+            enabled: !nc.inst && !nc.dragging
             NumberAnimation {
                 duration: nc.mode === "none" ? 0 : 300
                 easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
@@ -397,6 +411,7 @@ ShellRoot {
                 width: visible ? 44 : 0
                 height: 44
                 radius: 22
+                antialiasing: true
                 color: Qt.alpha(root.flyTh.accent, 0.14)
                 border.width: 1
                 border.color: Qt.alpha(root.flyTh.accent, 0.4)
@@ -464,6 +479,8 @@ ShellRoot {
                     visible: bodyText.text.length > 0
                     readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : root.notifFs(16)
                     readonly property real collapsedH: Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))
+                    // more text than the collapsed clip shows = expandable
+                    readonly property bool truncated: bodyText.paintedHeight > collapsedH + 1
                     height: visible ? (nc.expanded ? bodyText.paintedHeight : collapsedH) : 0
                     // animate only a user-initiated expand, not the initial
                     // layout on spawn (which would look like it expands itself)
@@ -482,6 +499,19 @@ ShellRoot {
                         color: root.flyTh.muted
                         font { family: root.flyMono; pixelSize: root.notifFs(12) }
                     }
+                }
+                // "more text" cue under the clipped body: fades out while
+                // expanded and back in on collapse. Kept in the layout either
+                // way so the card height doesn't change with the fade.
+                Text {
+                    visible: bodyClip.visible && bodyClip.truncated
+                    text: "…"
+                    color: root.flyTh.muted
+                    opacity: nc.expanded ? 0 : 1
+                    Behavior on opacity {
+                        NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+                    }
+                    font { family: root.flyMono; pixelSize: root.notifFs(12); weight: Font.Bold }
                 }
             }
         }
@@ -502,14 +532,21 @@ ShellRoot {
             yAxis.enabled: false
             onActiveChanged: {
                 if (active) {
+                    nc.dragging = true;
                     nc.grabX = centroid.scenePosition.x - nc.swipeX;
-                } else if (!nc.leaving) {
-                    if (nc.swipeX > 90)
-                        nc.dismiss(1);
-                    else if (nc.swipeX < -90)
-                        nc.dismiss(-1);
-                    else
-                        nc.swipeX = 0; // springs home
+                } else {
+                    // re-enable the Behavior first: the write completes (and
+                    // its enabled binding updates) before the pose below, so
+                    // the exit slide / spring-back actually animates
+                    nc.dragging = false;
+                    if (!nc.leaving) {
+                        if (nc.swipeX > 90)
+                            nc.dismiss(1);
+                        else if (nc.swipeX < -90)
+                            nc.dismiss(-1);
+                        else
+                            nc.swipeX = 0; // slides home
+                    }
                 }
             }
             onCentroidChanged: {
@@ -564,6 +601,8 @@ ShellRoot {
             property int clipsRows: 3
             property int clipsMax: 60
             property var pages: ({ clock: true, apps: true, walls: true, clips: true })
+            // cycle order of the pages (drag the chips in settings to change)
+            property var pageOrder: ["clock", "apps", "walls", "clips"]
             property string animStyle: "wave"
             property real fontScale: 1.0
             property string fontFamily: ""
@@ -575,7 +614,7 @@ ShellRoot {
             property string wallCommand: root.defaultWallCommand
             property real dimOpacity: 0.4
             property string revealOrigin: "center"
-            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
+            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
             // flyouts (volume + notification OSDs)
             property string flyTheme: "amber"
             property real flyOpacity: 0.4
@@ -586,6 +625,10 @@ ShellRoot {
             // volume OSD content style: pill (a level bar) or one of three
             // equalizer visualizers (mirror / spectrum / flicker)
             property string volStyle: "pill"
+            // card background behind the volume OSD content (off = bars only)
+            property bool volShowCard: true
+            // numeric volume % readout on the OSD
+            property bool volShowPercent: true
             property int volTimeout: 1500
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
@@ -977,16 +1020,19 @@ ShellRoot {
             input.text = "";
             pane = homePane();
             paneBeforeSettings = homePane();
+            paneBeforePower = homePane();
             settingsTab = "general";
             selected = 0;
             wallSelected = 0;
             clipSelected = 0;
+            powerSelected = 0;
             // panes keep the opacity their last entry animation ended at;
             // reset them or the warm-up pass flashes them fully visible
             drawer.opacity = 0.004;
             wallDrawer.opacity = 0.004;
             clipDrawer.opacity = 0.004;
             settingsPane.opacity = 0.004;
+            powerPane.opacity = 0.004;
         }
 
         anchors {
@@ -1044,7 +1090,21 @@ ShellRoot {
         // Tab cycles the enabled panes; the settings pane sits outside the
         // cycle (opened via the corner button or Ctrl+S).
         property string pane: "clock"
-        readonly property var paneOrder: ["clock", "apps", "walls", "clips"]
+        // cycle order comes from settings (drag the page chips to reorder);
+        // healed so all four pages are always present exactly once
+        readonly property var paneOrder: {
+            const def = ["clock", "apps", "walls", "clips"];
+            const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : []).filter(p => def.includes(p));
+            for (const d of def)
+                if (!o.includes(d))
+                    o.push(d);
+            return o;
+        }
+        function movePage(p: string, to: int) {
+            const o = paneOrder.filter(x => x !== p);
+            o.splice(Math.max(0, Math.min(o.length, to)), 0, p);
+            cfg.pageOrder = o;
+        }
         readonly property var activePanes: {
             const pages = cfg.pages ?? {};
             const list = paneOrder.filter(p => pages[p] !== false);
@@ -1059,7 +1119,7 @@ ShellRoot {
             input.text = "";
             capturingBind = "";
             expandedClip = null;
-            pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
+            pane = (p === "settings" || p === "power" || activePanes.includes(p)) ? p : homePane();
         }
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
@@ -1072,6 +1132,37 @@ ShellRoot {
                 setPane("settings");
             }
         }
+        // power menu (shutdown / restart / sleep / logout), like settings a
+        // pane outside the cycle with its own toggle and remembered origin
+        property string paneBeforePower: "clock"
+        property int powerSelected: 0
+        readonly property var powerChoices: [
+            { id: "shutdown", label: "Shut down", glyph: "⏻" },
+            { id: "restart", label: "Restart", glyph: "⟳" },
+            { id: "sleep", label: "Sleep", glyph: "⏾" },
+            { id: "logout", label: "Log out", glyph: "↩" }
+        ]
+        function togglePower() {
+            if (pane === "power") {
+                setPane(paneBeforePower);
+            } else {
+                paneBeforePower = pane;
+                powerSelected = 0;
+                setPane("power");
+            }
+        }
+        function powerAction(id: string) {
+            const cmds = {
+                shutdown: "systemctl poweroff",
+                restart: "systemctl reboot",
+                sleep: "systemctl suspend",
+                logout: 'niri msg action quit --skip-confirmation || loginctl terminate-session "$XDG_SESSION_ID"'
+            };
+            if (!cmds[id])
+                return;
+            Quickshell.execDetached(["bash", "-c", cmds[id]]);
+            exit();
+        }
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
@@ -1079,6 +1170,8 @@ ShellRoot {
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
+            if (pane === "power")
+                return;
             let i = activePanes.indexOf(pane);
             if (i < 0)
                 i = 0;
@@ -1208,6 +1301,9 @@ ShellRoot {
                 clipSelected = dy !== 0
                     ? vMove(clipSelected, clipMatches.length, cfg.clipsCols, clipRowsC, dy)
                     : hMove(clipSelected, clipMatches.length, dx);
+            } else if (pane === "power") {
+                if (dx !== 0)
+                    powerSelected = hMove(powerSelected, powerChoices.length, dx);
             }
         }
 
@@ -1369,12 +1465,14 @@ ShellRoot {
                     expandClip(clipMatches[clipSelected] ?? null);
             } else if (pane === "apps")
                 launch(matches.length ? matches[selected] : null);
+            else if (pane === "power")
+                powerAction(powerChoices[powerSelected].id);
             else if (pane === "clock")
                 setPane("apps");
         }
 
         // ---------- keybinds ----------
-        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S" })
+        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
         property string capturingBind: ""
         function keyName(event): string {
             const special = new Map([
@@ -1493,13 +1591,32 @@ ShellRoot {
                 color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.dimOpacity)
             }
 
+            // Background click-catcher; also the scroll-wheel path. Wheel
+            // events land here from anywhere on screen: MouseAreas ignore
+            // wheel unless they connect onWheel, so tile/button areas pass
+            // scrolls down to this full-screen area. (A topmost sibling with
+            // a WheelHandler never received the events on this layer surface,
+            // so the handler lives on a MouseArea, whose delivery is proven
+            // by the click path.)
             MouseArea {
                 anchors.fill: parent
+                property real wheelAcc: 0
                 onClicked: {
                     if (win.expandedClip)
                         win.collapseClip();
                     else
                         input.forceActiveFocus();
+                }
+                onWheel: wheel => {
+                    wheelAcc += wheel.angleDelta.y;
+                    while (wheelAcc >= 120) {
+                        win.navigate(0, -1);
+                        wheelAcc -= 120;
+                    }
+                    while (wheelAcc <= -120) {
+                        win.navigate(0, 1);
+                        wheelAcc += 120;
+                    }
                 }
             }
 
@@ -2371,14 +2488,19 @@ ShellRoot {
                     }
                     spacing: 14
 
+                    // default valueWidth throughout (the values are short), so
+                    // the ‹ › buttons line up column-tight like the launcher
+                    // tab; only the font row needs a wide value
                     SettingRow { key: "volWidth"; label: "Volume size" }
-                    SettingRow { key: "volStyle"; label: "Volume style"; valueWidth: 130 }
-                    SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: 130 }
+                    SettingRow { key: "volStyle"; label: "Volume style" }
+                    SettingRow { key: "volAnim"; label: "Volume animation" }
+                    SettingRow { key: "volCardBg"; label: "Volume card" }
+                    SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
                     SettingRow { key: "notifWidth"; label: "Notification size" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
                     SettingRow { key: "notifFontScale"; label: "Notification font size" }
-                    SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: 130 }
+                    SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifMax"; label: "Max notifications" }
                     SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
                     SettingRow { key: "flyOpacity"; label: "Opacity" }
@@ -2512,7 +2634,8 @@ ShellRoot {
                         }
                     }
 
-                    // enabled pages
+                    // enabled pages: click toggles, drag left/right reorders
+                    // the cycle (leftmost chip is the home pane)
                     Item {
                         width: 780
                         height: 34
@@ -2525,11 +2648,14 @@ ShellRoot {
                             key: "pages"
                             anchors.right: parent.right
                         }
-                        Row {
+                        Item {
+                            id: pagesArea
                             anchors.right: parent.right
                             anchors.rightMargin: 34
-                            spacing: 8
-                            height: parent.height
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property int slotW: 100
+                            width: slotW * 4 - 8
+                            height: 28
 
                             Repeater {
                                 model: ["clock", "apps", "walls", "clips"]
@@ -2538,9 +2664,31 @@ ShellRoot {
                                     id: pageChip
                                     required property var modelData
                                     readonly property bool on: (cfg.pages ?? {})[modelData] !== false
-                                    width: pageBox.width + 6 + pageChipText.implicitWidth
+                                    readonly property int ord: win.paneOrder.indexOf(modelData)
+                                    width: pagesArea.slotW - 8
                                     height: 28
-                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    // slot position animates on reorder; the drag
+                                    // offset rides on top and is written raw while
+                                    // held (its Behavior re-enables before the
+                                    // release write, so letting go slides home)
+                                    property bool held: false
+                                    property real dragOff: 0
+                                    property real grabDX: 0
+                                    property real slotX: ord * pagesArea.slotW
+                                    Behavior on slotX {
+                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Behavior on dragOff {
+                                        enabled: !pageChip.held
+                                        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                    }
+                                    x: slotX + dragOff
+                                    z: held ? 2 : 0
+                                    scale: held ? 1.06 : 1
+                                    Behavior on scale {
+                                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                    }
 
                                     Rectangle {
                                         id: pageBox
@@ -2561,7 +2709,6 @@ ShellRoot {
                                         }
                                     }
                                     Text {
-                                        id: pageChipText
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.left: pageBox.right
                                         anchors.leftMargin: 6
@@ -2569,9 +2716,32 @@ ShellRoot {
                                         color: pageChip.on ? root.fg : root.muted
                                         font { family: root.mono; pixelSize: root.fs(12) }
                                     }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: win.togglePage(pageChip.modelData)
+
+                                    TapHandler {
+                                        onTapped: win.togglePage(pageChip.modelData)
+                                    }
+                                    DragHandler {
+                                        id: chipDrag
+                                        target: null
+                                        yAxis.enabled: false
+                                        onActiveChanged: {
+                                            if (active) {
+                                                pageChip.held = true;
+                                                pageChip.grabDX = centroid.scenePosition.x - pageChip.x;
+                                            } else {
+                                                pageChip.held = false;
+                                                pageChip.dragOff = 0; // slides into its slot
+                                                root.saveSettings();
+                                            }
+                                        }
+                                        onCentroidChanged: {
+                                            if (!active)
+                                                return;
+                                            pageChip.dragOff = centroid.scenePosition.x - pageChip.grabDX - pageChip.slotX;
+                                            const idx = Math.max(0, Math.min(3, Math.round(pageChip.x / pagesArea.slotW)));
+                                            if (idx !== pageChip.ord)
+                                                win.movePage(pageChip.modelData, idx);
+                                        }
                                     }
                                 }
                             }
@@ -2708,6 +2878,7 @@ ShellRoot {
                             { action: "reverseCycle", label: "Cycle pages (reverse)" },
                             { action: "launch", label: "Launch / apply" },
                             { action: "settings", label: "Settings" },
+                            { action: "power", label: "Power menu" },
                             { action: "exit", label: "Exit / back" }
                         ]
 
@@ -2765,66 +2936,142 @@ ShellRoot {
                 } // tabViewport
             }
 
-            // Settings button: pops up when hovering the bottom-right corner
+            // Power menu: four big horizontal actions. Opened from the corner
+            // power button or the power keybind (Ctrl+P by default); Escape
+            // steps back to wherever it was opened from.
+            Item {
+                id: powerPane
+                anchors.centerIn: parent
+                width: powerRow.width + 80
+                height: powerRow.height + 80
+                opacity: 0.004
+                visible: win.pane === "power"
+                Connections {
+                    target: win
+                    function onPaneChanged() {
+                        if (win.pane === "power")
+                            powerIn.restart();
+                    }
+                }
+                ParallelAnimation {
+                    id: powerIn
+                    NumberAnimation { target: powerPane; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: powerPane; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: powerPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                }
+
+                Row {
+                    id: powerRow
+                    anchors.centerIn: parent
+                    spacing: 28
+
+                    Repeater {
+                        model: win.powerChoices
+
+                        Rectangle {
+                            id: powerCard
+                            required property var modelData
+                            required property int index
+                            readonly property bool isSelected: win.powerSelected === index
+                            width: 170
+                            height: 170
+                            radius: 22
+                            antialiasing: true
+                            color: Qt.alpha(root.accent, isSelected || powerCardArea.containsMouse ? 0.2 : 0.08)
+                            border.width: isSelected ? 2 : 1
+                            border.color: isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 16
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: powerCard.modelData.glyph
+                                    color: root.accent
+                                    font { family: root.mono; pixelSize: root.fs(52) }
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: powerCard.modelData.label
+                                    color: powerCard.isSelected ? root.fg : root.muted
+                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                }
+                            }
+                            MouseArea {
+                                id: powerCardArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    win.powerSelected = powerCard.index;
+                                    win.powerAction(powerCard.modelData.id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Corner buttons (power + settings): pop up when hovering the
+            // bottom-right corner, or while their pane is open
             MouseArea {
                 id: settingsHover
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                width: 180
+                width: 260
                 height: 180
                 hoverEnabled: true
-                onClicked: win.toggleSettings()
+                readonly property bool revealed: containsMouse || win.pane === "settings" || win.pane === "power"
 
-                Rectangle {
+                Row {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 32
-                    width: 56
-                    height: 56
-                    radius: 28
-                    color: Qt.alpha(root.accent, settingsHover.containsMouse ? 0.2 : 0.11)
-                    border.width: 1
-                    border.color: Qt.alpha(root.accent, 0.33)
-                    opacity: settingsHover.containsMouse || win.pane === "settings" ? 1 : 0
-                    scale: settingsHover.containsMouse || win.pane === "settings" ? 1 : 0.5
-                    Behavior on opacity {
-                        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
-                    }
+                    spacing: 14
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⚙"
-                        color: root.fg
-                        font { pixelSize: root.fs(26) }
-                    }
-                }
-            }
+                    Repeater {
+                        model: [
+                            { glyph: "⏻", pane: "power" },
+                            { glyph: "⚙", pane: "settings" }
+                        ]
 
-            // Scroll wheel walks the grids (down the column, across pages).
-            // Topmost sibling: MouseAreas below (background, tiles) consume
-            // wheel events, so the handler must intercept before them. An
-            // Item with only a WheelHandler doesn't block clicks or hover.
-            Item {
-                anchors.fill: parent
-                WheelHandler {
-                    property real acc: 0
-                    target: null
-                    onWheel: event => {
-                        acc += event.angleDelta.y;
-                        while (acc >= 120) {
-                            win.navigate(0, -1);
-                            acc -= 120;
-                        }
-                        while (acc <= -120) {
-                            win.navigate(0, 1);
-                            acc += 120;
+                        Rectangle {
+                            id: cornerBtn
+                            required property var modelData
+                            width: 56
+                            height: 56
+                            radius: 28
+                            antialiasing: true
+                            color: Qt.alpha(root.accent, cornerBtnArea.containsMouse ? 0.2 : 0.11)
+                            border.width: 1
+                            border.color: Qt.alpha(root.accent, 0.33)
+                            opacity: settingsHover.revealed ? 1 : 0
+                            scale: settingsHover.revealed ? 1 : 0.5
+                            Behavior on opacity {
+                                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                            }
+                            Behavior on scale {
+                                NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: cornerBtn.modelData.glyph
+                                color: root.fg
+                                font { pixelSize: root.fs(26) }
+                            }
+                            MouseArea {
+                                id: cornerBtnArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: cornerBtn.modelData.pane === "power"
+                                    ? win.togglePower() : win.toggleSettings()
+                            }
                         }
                     }
                 }
             }
+
         }
 
         function cycleIconTheme(dir: int) {
@@ -2852,6 +3099,8 @@ ShellRoot {
             case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
             case "volStyle": return cfg.volStyle;
+            case "volCardBg": return cfg.volShowCard ? "on" : "off";
+            case "volPercent": return cfg.volShowPercent ? "on" : "off";
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
             case "notifMax": return "" + cfg.notifMax;
             case "notifWidth": return cfg.notifWidth + " px";
@@ -2947,6 +3196,12 @@ ShellRoot {
             case "volStyle":
                 cfg.volStyle = cycleChoice(cfg.volStyle, ["pill", "mirror", "spectrum", "flicker"], dir);
                 break;
+            case "volCardBg":
+                cfg.volShowCard = !cfg.volShowCard;
+                break;
+            case "volPercent":
+                cfg.volShowPercent = !cfg.volShowPercent;
+                break;
             case "volTimeout":
                 cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
                 break;
@@ -3001,6 +3256,7 @@ ShellRoot {
             switch (key) {
             case "pages":
                 cfg.pages = ({ clock: true, apps: true, walls: true, clips: true });
+                cfg.pageOrder = ["clock", "apps", "walls", "clips"];
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
@@ -3029,6 +3285,8 @@ ShellRoot {
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volStyle": cfg.volStyle = "pill"; break;
+            case "volCardBg": cfg.volShowCard = true; break;
+            case "volPercent": cfg.volShowPercent = true; break;
             case "volTimeout": cfg.volTimeout = 1500; break;
             case "notifMax": cfg.notifMax = 3; break;
             case "notifWidth": cfg.notifWidth = 420; break;
@@ -3073,16 +3331,21 @@ ShellRoot {
                 const ks = win.keyName(event);
                 const kb = cfg.keybinds;
                 if (ks === (kb.exit ?? "Escape")) {
-                    // layered: expanded clip -> settings -> whole app
+                    // layered: expanded clip -> settings/power -> whole app
                     if (win.expandedClip)
                         win.collapseClip();
                     else if (win.pane === "settings")
                         win.setPane(win.paneBeforeSettings);
+                    else if (win.pane === "power")
+                        win.setPane(win.paneBeforePower);
                     else
                         win.exit();
                     event.accepted = true;
                 } else if (ks === (kb.settings ?? "Ctrl+S")) {
                     win.toggleSettings();
+                    event.accepted = true;
+                } else if (ks === (kb.power ?? "Ctrl+P")) {
+                    win.togglePower();
                     event.accepted = true;
                 } else if (ks === (kb.reverseCycle ?? "Shift+Tab")) {
                     win.cyclePane(-1);
@@ -3396,34 +3659,50 @@ ShellRoot {
                 repeat: true
                 onTriggered: volWin.tick++
             }
-            // per-band base amplitudes for the "spectrum decay" visualizer
+            readonly property bool cardBg: cfg.volShowCard
+            readonly property bool pct: cfg.volShowPercent
+            // per-band base amplitude curve for the "spectrum decay"
+            // visualizer (the design's 12-band shape, sampled fractionally so
+            // any bar count follows the same curve)
             readonly property var bandWeights: [1, 0.92, 0.82, 0.72, 0.62, 0.56, 0.5, 0.55, 0.6, 0.66, 0.72, 0.78]
-            // half-height (px) of one equalizer bar (mirrored above/below the
-            // centre), per the imported Volume OSD design's three variants
-            function volBarHalf(i: int): int {
+            function bandWeight(i: int, n: int): real {
+                const p = (n > 1 ? i / (n - 1) : 0) * (bandWeights.length - 1);
+                const a = Math.floor(p);
+                const b = Math.min(bandWeights.length - 1, a + 1);
+                return bandWeights[a] + (bandWeights[b] - bandWeights[a]) * (p - a);
+            }
+            // Half-height (px) of one equalizer bar (mirrored above/below the
+            // centre), per the imported Volume OSD design's three variants.
+            // The volume factor dominates (the wobble/flicker modulation is a
+            // narrow band on top) and the amplitude spans most of the card,
+            // so a volume change reads clearly as taller/shorter bars.
+            function volBarHalf(i: int, n: int): int {
                 const eff = root.sinkMuted ? 0 : root.vol * 100;
                 if (eff <= 0)
                     return 2; // 4px floor
+                const v = Math.min(1, eff / 100);
                 const t = tick;
                 let h;
                 if (cfg.volStyle === "mirror") {
-                    const wobble = 0.45 + 0.45 * Math.sin(t * 0.35 + i * 0.85 + 2);
-                    h = Math.max(4, (eff / 100) * 46 * wobble);
+                    const wobble = 0.78 + 0.22 * Math.sin(t * 0.35 + i * 0.85 + 2);
+                    h = Math.max(4, v * 84 * wobble);
                 } else if (cfg.volStyle === "spectrum") {
-                    const osc = 0.5 + 0.5 * Math.sin(t * (0.2 + i * 0.05) + i);
-                    h = Math.max(4, bandWeights[i] * osc * (eff / 100) * 58);
+                    const osc = 0.68 + 0.32 * Math.sin(t * (0.2 + i * 0.05) + i);
+                    h = Math.max(4, bandWeight(i, n) * osc * v * 96);
                 } else { // flicker: deterministic pseudo-random hash
                     const sn = Math.sin((i * 7.13 + t * 1.7) * 12.9898) * 43758.5453;
                     const r = sn - Math.floor(sn);
-                    h = Math.max(4, (0.25 + 0.75 * r) * (eff / 100) * 58);
+                    h = Math.max(4, (0.5 + 0.5 * r) * v * 96);
                 }
                 return Math.round(h / 2);
             }
 
             BackgroundEffect.blurRegion: RoundedBlur {
                 // rr un-clamped at the low end so the region collapses to
-                // ~1px (invisible) as the card fades/scales out
-                readonly property real s: (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity
+                // ~1px (invisible) as the card fades/scales out; no card
+                // background = nothing to blur behind
+                readonly property real s: volWin.cardBg
+                    ? (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity : 0
                 rx: volCard.x + (volCard.width - volCard.width * s) / 2 + 2
                 ry: volCard.y + (volCard.height - volCard.height * s) / 2 + 2
                 rw: Math.max(1, volCard.width * s - 4)
@@ -3452,9 +3731,11 @@ ShellRoot {
                         easing.overshoot: 1.2
                     }
                 }
-                color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
-                border.width: 1
+                // the card background is optional (bars-only mode)
+                color: volWin.cardBg ? Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity) : "transparent"
+                border.width: volWin.cardBg ? 1 : 0
                 border.color: Qt.alpha(root.flyTh.accent, 0.33)
+                antialiasing: true
                 opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
                 scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
                 // unmap the window the instant the card has left, so no
@@ -3469,11 +3750,30 @@ ShellRoot {
                     NumberAnimation { duration: volWin.mode === "none" ? 0 : 240; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
                 }
 
+                // optional numeric readout on the right edge; the bar/eq
+                // content shifts left to make room. Fixed width so the layout
+                // doesn't jitter as the digit count changes.
+                Text {
+                    id: volPct
+                    visible: volWin.pct
+                    anchors.right: parent.right
+                    anchors.rightMargin: 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 42
+                    horizontalAlignment: Text.AlignRight
+                    text: Math.round(root.vol * 100) + "%"
+                    color: root.sinkMuted ? root.flyTh.muted : root.flyTh.fg
+                    font { family: root.flyMono; pixelSize: 15; weight: Font.DemiBold }
+                }
+                readonly property real pctSpace: volWin.pct ? volPct.width + 16 : 0
+
                 // "pill" style: a plain level bar
                 Item {
                     visible: !volWin.eq
-                    anchors.centerIn: parent
-                    width: parent.width - 60
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.horizontalCenterOffset: -volCard.pctSpace / 2
+                    width: parent.width - 60 - volCard.pctSpace
                     height: 8
 
                     Rectangle {
@@ -3493,30 +3793,34 @@ ShellRoot {
                 }
 
                 // equalizer visualizer variants (mirror / spectrum / flicker):
-                // 12 bars mirrored above and below a horizontal centre axis,
-                // following the flyout accent colour (neutral when muted / 0).
-                // The bars span the card width (like the pill's bar) so the
-                // size setting stretches them horizontally. No per-bar height
-                // Behaviors: the ~90ms tick already paces the motion, and
-                // animating 24 bars at 60fps kept the compositor re-blurring
-                // the backdrop every frame, which showed up as input lag.
+                // fixed-width bars (the design's 6px) mirrored above and below
+                // a horizontal centre axis, following the flyout accent colour
+                // (neutral when muted / 0). The card width sets how many bars
+                // fit — resizing adds/removes bars at the design's ~26px pitch
+                // instead of stretching them — and the row still spans edge to
+                // edge like the pill's bar. No per-bar height Behaviors: the
+                // ~90ms tick already paces the motion, and animating the bars
+                // at 60fps kept the compositor re-blurring the backdrop every
+                // frame, which showed up as input lag.
                 Row {
                     id: eqRow
                     visible: volWin.eq
-                    anchors.centerIn: parent
-                    readonly property real avail: volCard.width - 48
-                    readonly property real barW: Math.max(3, avail / 12 * 0.62)
-                    spacing: (avail - barW * 12) / 11
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.horizontalCenterOffset: -volCard.pctSpace / 2
+                    readonly property real avail: volCard.width - 48 - volCard.pctSpace
+                    readonly property real barW: 6
+                    readonly property int nBars: Math.max(4, Math.floor((avail + 20) / 26))
+                    spacing: nBars > 1 ? (avail - barW * nBars) / (nBars - 1) : 0
 
                     Repeater {
-                        model: 12
+                        model: eqRow.nBars
                         Item {
                             id: eqBar
                             required property int index
                             width: eqRow.barW
                             height: 60
-                            readonly property real half: volWin.volBarHalf(index)
-                            readonly property real rad: Math.min(4, eqRow.barW / 2)
+                            readonly property real half: volWin.volBarHalf(index, eqRow.nBars)
                             readonly property color barColor: (root.sinkMuted || root.vol <= 0)
                                 ? root.flyTh.muted : root.flyTh.accent
 
@@ -3524,7 +3828,7 @@ ShellRoot {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 anchors.bottom: parent.verticalCenter
                                 width: eqRow.barW
-                                radius: eqBar.rad
+                                radius: 3
                                 height: eqBar.half
                                 color: eqBar.barColor
                             }
@@ -3532,7 +3836,7 @@ ShellRoot {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 anchors.top: parent.verticalCenter
                                 width: eqRow.barW
-                                radius: eqBar.rad
+                                radius: 3
                                 height: eqBar.half
                                 color: eqBar.barColor
                                 opacity: 0.55
