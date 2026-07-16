@@ -193,6 +193,28 @@ ShellRoot {
         ]
     }
 
+    // Per-card input mask region: the card's bbox while it is active.
+    component NotifMaskRegion: Region {
+        property var c: null
+        x: c ? c.x : 0
+        y: c ? c.y : 0
+        width: c && c.active ? c.width : 0
+        height: c && c.active ? c.height : 0
+    }
+    // Per-card rounded blur region, tracking the card's animated pose. rr is
+    // un-clamped at the low end so it collapses to ~1px on fade/scale exit
+    // instead of leaving a small square; inactive slots stay a 1px region so
+    // the union is never empty (which would blur the whole surface).
+    component NotifBlurRegion: RoundedBlur {
+        property var c: null
+        readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
+        rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
+        ry: c ? c.y + 2 : 0
+        rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
+        rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
+        rr: 18 * s
+    }
+
     // One notification card: a free-floating pill that slides/expands in,
     // stacks below its newer siblings, and is swipeable in both directions.
     // Only ever used as a cardRep delegate.
@@ -211,6 +233,14 @@ ShellRoot {
         property bool inst: false // apply poses without animating
         property real cardScale: 1
         property real cardOpacity: 1
+        // horizontal offset from rest: entry/exit/drag. Driven by swipe
+        // (scene coords, so the card moving doesn't feed back into the drag).
+        property real swipeX: 0
+        property real grabX: 0
+        // gates the body-height animation on: false during spawn so the
+        // collapsed body appears instantly (no expand-on-spawn), true shortly
+        // after so a click animates the expand
+        property bool expandReady: false
         readonly property string mode: cfg.notifAnim
 
         function assign(n) {
@@ -232,17 +262,19 @@ ShellRoot {
             seq = ++root.notifSeq;
             expanded = false;
             leaving = false;
+            expandReady = false;
+            expandReadyTimer.restart();
             exitTimer.stop();
             // entry pose by style, applied instantly, then released so the
             // Behaviors animate from the pose to the rest state
             inst = true;
-            dragProxy.x = mode === "slide" ? width + 40 : 0;
+            swipeX = mode === "slide" ? width + 40 : 0;
             cardScale = mode === "expand" ? 0 : 1;
             cardOpacity = (mode === "fade" || mode === "none") ? 0 : 1;
             active = true;
             Qt.callLater(() => {
                 inst = false;
-                dragProxy.x = 0;
+                swipeX = 0;
                 cardScale = 1;
                 cardOpacity = 1;
             });
@@ -254,9 +286,9 @@ ShellRoot {
             leaving = true;
             expanded = false;
             if (dir > 0 || (dir === 0 && mode === "slide"))
-                dragProxy.x = width + 60;
+                swipeX = width + 60;
             else if (dir < 0) {
-                dragProxy.x = -(restX + width + 20);
+                swipeX = -(restX + width + 20);
                 cardOpacity = 0;
             } else if (mode === "expand")
                 cardScale = 0;
@@ -280,10 +312,15 @@ ShellRoot {
             onTriggered: nc.finalize()
         }
         Timer {
+            id: expandReadyTimer
+            interval: 500
+            onTriggered: nc.expandReady = true
+        }
+        Timer {
             // per-card timeout, paused only while the pointer is over the card
             // (hovering to read it); leaving the card restarts the countdown.
             interval: nc.view.timeout > 0 ? nc.view.timeout : cfg.notifTimeout
-            running: nc.active && !nc.leaving && !dragArea.containsMouse
+            running: nc.active && !nc.leaving && !hover.hovered
             onTriggered: nc.dismiss(0)
         }
         // sender closed it (or another daemon action) — animate out
@@ -309,12 +346,20 @@ ShellRoot {
         scale: cardScale
         opacity: cardOpacity
 
-        // x = restX + dragProxy.x. Keeping the horizontal Behavior on
-        // dragProxy.x (not on x) means x snaps when restX changes as the
-        // layer surface settles its width — that width settle was what made
-        // every entry read as a slide regardless of the animation setting.
+        // x = restX + swipeX. The Behavior lives on swipeX (not x) so x snaps
+        // when restX changes as the layer surface settles its width — that
+        // width settle was what made every entry read as a slide regardless
+        // of the animation setting.
         readonly property real restX: parent.width - cfg.notifWidth - 16
-        x: restX + dragProxy.x
+        x: restX + swipeX
+        Behavior on swipeX {
+            enabled: !nc.inst && !dragHandler.active
+            NumberAnimation {
+                duration: nc.mode === "none" ? 0 : 300
+                easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
+                easing.overshoot: 1.15
+            }
+        }
         // newest card on top; older active ones stack downward and reflow
         y: {
             let yy = 14;
@@ -425,7 +470,10 @@ ShellRoot {
                     readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : root.notifFs(16)
                     readonly property real collapsedH: Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))
                     height: visible ? (nc.expanded ? bodyText.paintedHeight : collapsedH) : 0
+                    // animate only a user-initiated expand, not the initial
+                    // layout on spawn (which would look like it expands itself)
                     Behavior on height {
+                        enabled: nc.expandReady
                         NumberAnimation { duration: 360; easing.type: Easing.InOutCubic }
                     }
 
@@ -443,45 +491,40 @@ ShellRoot {
             }
         }
 
-        // click expands the text; swiping either way moves the card and
-        // dismisses past the threshold. dragProxy.x is the single horizontal
-        // offset for entry, exit and drag-return; bounce is built into the
-        // entry/return easing, the exit eases out plainly.
-        Item {
-            id: dragProxy
-            Behavior on x {
-                enabled: !nc.inst && !dragArea.drag.active
-                NumberAnimation {
-                    duration: nc.mode === "none" ? 0 : 300
-                    easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
-                    easing.overshoot: 1.15
+        // Pointer handlers, not a MouseArea with drag.target: dragging the
+        // card by a proxy that is itself a child of the (moving) card fed
+        // back into the drag and stalled it. DragHandler measures the swipe
+        // in scene coordinates, so the card moving under the cursor doesn't
+        // affect the delta; TapHandler gives a clean click that the drag
+        // gesture doesn't swallow.
+        HoverHandler {
+            id: hover
+        }
+        DragHandler {
+            id: dragHandler
+            target: null
+            xAxis.enabled: true
+            yAxis.enabled: false
+            onActiveChanged: {
+                if (active) {
+                    nc.grabX = centroid.scenePosition.x - nc.swipeX;
+                } else if (!nc.leaving) {
+                    if (nc.swipeX > 90)
+                        nc.dismiss(1);
+                    else if (nc.swipeX < -90)
+                        nc.dismiss(-1);
+                    else
+                        nc.swipeX = 0; // springs home
                 }
             }
+            onCentroidChanged: {
+                if (active)
+                    nc.swipeX = centroid.scenePosition.x - nc.grabX;
+            }
         }
-        MouseArea {
-            id: dragArea
-            anchors.fill: parent
-            hoverEnabled: true
-            drag.target: dragProxy
-            drag.axis: Drag.XAxis
-            drag.threshold: 6
-            onPressed: () => dragProxy.x = 0
-            // a click (no real drag) toggles the expanded body; a drag past
-            // the threshold dismisses
-            onClicked: () => {
-                if (Math.abs(dragProxy.x) < 6)
-                    nc.expanded = !nc.expanded;
-            }
-            onReleased: () => {
-                if (nc.leaving)
-                    return;
-                if (dragProxy.x > 90)
-                    nc.dismiss(1);
-                else if (dragProxy.x < -90)
-                    nc.dismiss(-1);
-                else
-                    dragProxy.x = 0; // springs home
-            }
+        TapHandler {
+            // a tap (not a drag) toggles the expanded body
+            onTapped: nc.expanded = !nc.expanded
         }
     }
 
@@ -3484,69 +3527,25 @@ ShellRoot {
             refreshActive();
         }
 
-        // input only over the cards; everything else clicks through
+        // input only over the cards; everything else clicks through.
+        // Children are the region set (Region's default property is
+        // `regions`); assigning `regions:` explicitly as well produced a
+        // broken region that dropped the blur, so children only.
         mask: Region {
-            regions: [maskRep0, maskRep1, maskRep2, maskRep3, maskRep4]
-            Region { id: maskRep0; readonly property var c: cardRep.itemAt(0); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
-            Region { id: maskRep1; readonly property var c: cardRep.itemAt(1); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
-            Region { id: maskRep2; readonly property var c: cardRep.itemAt(2); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
-            Region { id: maskRep3; readonly property var c: cardRep.itemAt(3); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
-            Region { id: maskRep4; readonly property var c: cardRep.itemAt(4); x: c ? c.x : 0; y: c ? c.y : 0; width: c && c.active ? c.width : 0; height: c && c.active ? c.height : 0 }
+            NotifMaskRegion { c: cardRep.itemAt(0) }
+            NotifMaskRegion { c: cardRep.itemAt(1) }
+            NotifMaskRegion { c: cardRep.itemAt(2) }
+            NotifMaskRegion { c: cardRep.itemAt(3) }
+            NotifMaskRegion { c: cardRep.itemAt(4) }
         }
         BackgroundEffect.blurRegion: Region {
-            regions: [blur0, blur1, blur2, blur3, blur4]
-            // rr is left un-clamped at the low end so RoundedBlur collapses
-            // to ~1px on fade/scale exit instead of leaving a small square
-            RoundedBlur {
-                id: blur0
-                readonly property var c: cardRep.itemAt(0)
-                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-                ry: c ? c.y + 2 : 0
-                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-                rr: 18 * s
-            }
-            RoundedBlur {
-                id: blur1
-                readonly property var c: cardRep.itemAt(1)
-                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-                ry: c ? c.y + 2 : 0
-                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-                rr: 18 * s
-            }
-            RoundedBlur {
-                id: blur2
-                readonly property var c: cardRep.itemAt(2)
-                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-                ry: c ? c.y + 2 : 0
-                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-                rr: 18 * s
-            }
-            RoundedBlur {
-                id: blur3
-                readonly property var c: cardRep.itemAt(3)
-                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-                ry: c ? c.y + 2 : 0
-                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-                rr: 18 * s
-            }
-            RoundedBlur {
-                id: blur4
-                readonly property var c: cardRep.itemAt(4)
-                readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-                rx: c ? c.x + (c.width - c.width * s) / 2 + 2 : 0
-                ry: c ? c.y + 2 : 0
-                rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-                rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-                rr: 18 * s
-            }
+            // one rounded region per card; inactive slots stay a harmless 1px
+            // (never 0-area, which would read as "blur the whole surface")
+            NotifBlurRegion { c: cardRep.itemAt(0) }
+            NotifBlurRegion { c: cardRep.itemAt(1) }
+            NotifBlurRegion { c: cardRep.itemAt(2) }
+            NotifBlurRegion { c: cardRep.itemAt(3) }
+            NotifBlurRegion { c: cardRep.itemAt(4) }
         }
 
         Repeater {
