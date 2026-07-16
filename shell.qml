@@ -588,6 +588,9 @@ ShellRoot {
             property var flyouts: ({ volume: true, notifs: true })
             property real volWidth: 340
             property string volAnim: "slide"
+            // volume OSD content style: pill (a level bar) or one of three
+            // equalizer visualizers (mirror / spectrum / flicker)
+            property string volStyle: "pill"
             property int volTimeout: 1500
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
@@ -2374,6 +2377,7 @@ ShellRoot {
                     spacing: 14
 
                     SettingRow { key: "volWidth"; label: "Volume size" }
+                    SettingRow { key: "volStyle"; label: "Volume style"; valueWidth: 130 }
                     SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: 130 }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
                     SettingRow { key: "notifWidth"; label: "Notification size" }
@@ -2852,6 +2856,7 @@ ShellRoot {
             case "flyOpacity": return Math.round(cfg.flyOpacity * 100) + "%";
             case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
+            case "volStyle": return cfg.volStyle;
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
             case "notifMax": return "" + cfg.notifMax;
             case "notifWidth": return cfg.notifWidth + " px";
@@ -2944,6 +2949,9 @@ ShellRoot {
             case "volAnim":
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
                 break;
+            case "volStyle":
+                cfg.volStyle = cycleChoice(cfg.volStyle, ["pill", "mirror", "spectrum", "flicker"], dir);
+                break;
             case "volTimeout":
                 cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
                 break;
@@ -3025,6 +3033,7 @@ ShellRoot {
             case "flyTheme": cfg.flyTheme = "amber"; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
+            case "volStyle": cfg.volStyle = "pill"; break;
             case "volTimeout": cfg.volTimeout = 1500; break;
             case "notifMax": cfg.notifMax = 3; break;
             case "notifWidth": cfg.notifWidth = 420; break;
@@ -3371,10 +3380,11 @@ ShellRoot {
         PanelWindow {
             id: volWin
             readonly property string mode: cfg.volAnim
+            readonly property bool eq: cfg.volStyle !== "pill"
             visible: volOsd.show || volOsd.leaving
             anchors.bottom: true
             implicitWidth: cfg.volWidth + 8
-            implicitHeight: 180
+            implicitHeight: 280
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
@@ -3382,15 +3392,48 @@ ShellRoot {
             // the OSD never takes input
             mask: Region {}
 
+            // ~90ms animation tick drives the equalizer bar motion, only
+            // while the OSD is on screen (pill needs no tick)
+            property int tick: 0
+            Timer {
+                interval: 90
+                running: volWin.eq && (volOsd.show || volOsd.leaving)
+                repeat: true
+                onTriggered: volWin.tick++
+            }
+            // per-band base amplitudes for the "spectrum decay" visualizer
+            readonly property var bandWeights: [1, 0.92, 0.82, 0.72, 0.62, 0.56, 0.5, 0.55, 0.6, 0.66, 0.72, 0.78]
+            // half-height (px) of one equalizer bar (mirrored above/below the
+            // centre), per the imported Volume OSD design's three variants
+            function volBarHalf(i: int): int {
+                const eff = root.sinkMuted ? 0 : root.vol * 100;
+                if (eff <= 0)
+                    return 2; // 4px floor
+                const t = tick;
+                let h;
+                if (cfg.volStyle === "mirror") {
+                    const wobble = 0.45 + 0.45 * Math.sin(t * 0.35 + i * 0.85 + 2);
+                    h = Math.max(4, (eff / 100) * 46 * wobble);
+                } else if (cfg.volStyle === "spectrum") {
+                    const osc = 0.5 + 0.5 * Math.sin(t * (0.2 + i * 0.05) + i);
+                    h = Math.max(4, bandWeights[i] * osc * (eff / 100) * 58);
+                } else { // flicker: deterministic pseudo-random hash
+                    const sn = Math.sin((i * 7.13 + t * 1.7) * 12.9898) * 43758.5453;
+                    const r = sn - Math.floor(sn);
+                    h = Math.max(4, (0.25 + 0.75 * r) * (eff / 100) * 58);
+                }
+                return Math.round(h / 2);
+            }
+
             BackgroundEffect.blurRegion: RoundedBlur {
                 // rr un-clamped at the low end so the region collapses to
-                // ~1px (invisible) as the pill fades/scales out
+                // ~1px (invisible) as the card fades/scales out
                 readonly property real s: (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity
                 rx: volCard.x + (volCard.width - volCard.width * s) / 2 + 2
                 ry: volCard.y + (volCard.height - volCard.height * s) / 2 + 2
                 rw: Math.max(1, volCard.width * s - 4)
                 rh: Math.max(1, volCard.height * s - 4)
-                rr: 26 * s
+                rr: Math.max(0, volCard.radius - 2) * s
             }
 
             Rectangle {
@@ -3398,13 +3441,15 @@ ShellRoot {
                 readonly property bool on: volOsd.show && !volOsd.leaving && volOsd.entered
                 x: (parent.width - width) / 2
                 width: cfg.volWidth
-                height: 56
-                radius: 28
+                // equalizer variants need a taller card than the pill
+                height: volWin.eq ? 108 : 56
+                radius: volWin.eq ? 18 : 28
                 // rests 90px above the screen bottom; the slide exit drops it
                 // past the window (= screen) bottom edge. Bounce is built in:
                 // the exit overshoot lands off-screen, so only the entry
                 // shows it.
-                y: volWin.mode === "slide" ? (on ? parent.height - 146 : parent.height) : parent.height - 146
+                readonly property real restY: parent.height - height - 90
+                y: volWin.mode === "slide" ? (on ? restY : parent.height) : restY
                 Behavior on y {
                     NumberAnimation {
                         duration: volWin.mode === "slide" ? 340 : 0
@@ -3417,7 +3462,7 @@ ShellRoot {
                 border.color: Qt.alpha(root.flyTh.accent, 0.33)
                 opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
                 scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
-                // unmap the window the instant the pill has left, so no
+                // unmap the window the instant the card has left, so no
                 // blurred remnant lingers between the anim ending and the
                 // fallback timer (fixes the "small square" on non-slide exits)
                 onOpacityChanged: if (volOsd.leaving && opacity <= 0.02) volOsd.finishHide()
@@ -3429,8 +3474,9 @@ ShellRoot {
                     NumberAnimation { duration: volWin.mode === "none" ? 0 : 240; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
                 }
 
-                // just a pill with a bar
+                // "pill" style: a plain level bar
                 Item {
+                    visible: !volWin.eq
                     anchors.centerIn: parent
                     width: parent.width - 60
                     height: 8
@@ -3447,6 +3493,48 @@ ShellRoot {
                         color: root.sinkMuted ? Qt.alpha(root.flyTh.muted, 0.8) : root.flyTh.accent
                         Behavior on width {
                             NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
+                        }
+                    }
+                }
+
+                // equalizer visualizer variants (mirror / spectrum / flicker):
+                // 12 bars mirrored above and below a horizontal centre axis,
+                // following the flyout accent colour (neutral when muted / 0)
+                Row {
+                    visible: volWin.eq
+                    anchors.centerIn: parent
+                    spacing: 4
+
+                    Repeater {
+                        model: 12
+                        Item {
+                            id: eqBar
+                            required property int index
+                            width: 6
+                            height: 60
+                            readonly property real half: volWin.volBarHalf(index)
+                            readonly property color barColor: (root.sinkMuted || root.vol <= 0)
+                                ? root.flyTh.muted : root.flyTh.accent
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.verticalCenter
+                                width: 6
+                                radius: 3
+                                height: eqBar.half
+                                color: eqBar.barColor
+                                Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                            }
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.verticalCenter
+                                width: 6
+                                radius: 3
+                                height: eqBar.half
+                                color: eqBar.barColor
+                                opacity: 0.55
+                                Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                            }
                         }
                     }
                 }
