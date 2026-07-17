@@ -129,36 +129,54 @@ ShellRoot {
         }
     }
 
+    // muted helper line rendered directly beneath the row it explains
+    component SSub: Text {
+        color: Qt.alpha(root.muted, 0.7)
+        font { family: root.mono; pixelSize: root.fs(11) }
+    }
     component SettingRow: Item {
         id: sr
         property string key
         property string label
+        property string sub: ""
         property int valueWidth: 90
         width: 780
-        height: 34
-        SLabel {
-            anchors.left: parent.left
-            text: sr.label
+        height: 34 + (sub ? srSub.implicitHeight + 2 : 0)
+        Item {
+            id: srMain
+            width: parent.width
+            height: 34
+            SLabel {
+                anchors.left: parent.left
+                text: sr.label
+            }
+            Row {
+                anchors.right: parent.right
+                spacing: 8
+                height: parent.height
+                SBtn {
+                    label: "‹"
+                    onPressed: win.adjustSetting(sr.key, -1)
+                }
+                SValue {
+                    text: win.settingValue(sr.key)
+                    width: sr.valueWidth
+                }
+                SBtn {
+                    label: "›"
+                    onPressed: win.adjustSetting(sr.key, 1)
+                }
+                SReset {
+                    key: sr.key
+                }
+            }
         }
-        Row {
-            anchors.right: parent.right
-            spacing: 8
-            height: parent.height
-            SBtn {
-                label: "‹"
-                onPressed: win.adjustSetting(sr.key, -1)
-            }
-            SValue {
-                text: win.settingValue(sr.key)
-                width: sr.valueWidth
-            }
-            SBtn {
-                label: "›"
-                onPressed: win.adjustSetting(sr.key, 1)
-            }
-            SReset {
-                key: sr.key
-            }
+        SSub {
+            id: srSub
+            visible: sr.sub !== ""
+            anchors.top: srMain.bottom
+            anchors.topMargin: 2
+            text: sr.sub
         }
     }
 
@@ -585,9 +603,6 @@ ShellRoot {
             // volume OSD content style: pill (a level bar) or one of three
             // equalizer visualizers (mirror / spectrum / flicker)
             property string volStyle: "pill"
-            // equalizer bar pitch (px between bar centres): narrower pitch
-            // packs more bars into the same card width
-            property int volEqPitch: 26
             // numeric volume % readout on the OSD
             property bool volShowPercent: true
             property int volTimeout: 1500
@@ -695,10 +710,9 @@ ShellRoot {
             cfg.clipsRows = Math.max(2, Math.min(4, cfg.clipsRows));
             saveSettings();
         }
-        // same heal for the equalizer pitch: it divides the bar count, so a
-        // hand-edited 0 would wipe the bars out entirely
-        if (cfg.volEqPitch < 14 || cfg.volEqPitch > 46) {
-            cfg.volEqPitch = Math.max(14, Math.min(46, cfg.volEqPitch));
+        // the retired equalizer visualizers collapse into the sine wave
+        if (["mirror", "spectrum", "flicker"].includes(cfg.volStyle)) {
+            cfg.volStyle = "sine";
             saveSettings();
         }
         // the "follow" flyout theme option was removed; pin to the launcher
@@ -2563,7 +2577,6 @@ ShellRoot {
                     // tab; only the font row needs a wide value
                     SettingRow { key: "volWidth"; label: "Volume size" }
                     SettingRow { key: "volStyle"; label: "Volume style" }
-                    SettingRow { key: "volEqPitch"; label: "Volume bar spacing" }
                     SettingRow { key: "volAnim"; label: "Volume animation" }
                     SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
@@ -2665,40 +2678,16 @@ ShellRoot {
                             { key: "dimOpacity", label: "Opacity" },
                             { key: "revealOrigin", label: "Spawn circle origin" },
                             { key: "fontFamily", label: "Font" },
-                            { key: "iconTheme", label: "Icon theme" }
+                            { key: "iconTheme", label: "Icon theme", sub: "applies on next launch" }
                         ]
 
-                        Item {
-                            id: srow
+                        SettingRow {
                             required property var modelData
-                            width: 780
-                            height: 34
-
-                            SLabel {
-                                anchors.left: parent.left
-                                text: srow.modelData.label
-                            }
-                            Row {
-                                anchors.right: parent.right
-                                spacing: 8
-                                height: parent.height
-                                SBtn {
-                                    label: "‹"
-                                    onPressed: win.adjustSetting(srow.modelData.key, -1)
-                                }
-                                SValue {
-                                    text: win.settingValue(srow.modelData.key)
-                                    width: srow.modelData.key === "iconTheme" || srow.modelData.key === "fontFamily" ? 260
-                                        : srow.modelData.key === "revealOrigin" ? 150 : 90
-                                }
-                                SBtn {
-                                    label: "›"
-                                    onPressed: win.adjustSetting(srow.modelData.key, 1)
-                                }
-                                SReset {
-                                    key: srow.modelData.key
-                                }
-                            }
+                            key: modelData.key
+                            label: modelData.label
+                            sub: modelData.sub ?? ""
+                            valueWidth: modelData.key === "iconTheme" || modelData.key === "fontFamily" ? 260
+                                : modelData.key === "revealOrigin" ? 150 : 90
                         }
                     }
 
@@ -2816,9 +2805,8 @@ ShellRoot {
                         }
                     }
 
-                    // color themes with palette previews
-                    ThemeRow {
-                        cfgKey: "theme"
+                    SSub {
+                        text: "click toggles a page, drag to reorder — the leftmost page is home"
                     }
 
                     // wallpaper path
@@ -2933,10 +2921,8 @@ ShellRoot {
                             }
                         }
                     }
-                    Text {
+                    SSub {
                         text: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
-                        color: Qt.alpha(root.muted, 0.7)
-                        font { family: root.mono; pixelSize: root.fs(11) }
                     }
 
                     // keybinds
@@ -2995,11 +2981,6 @@ ShellRoot {
                         }
                     }
 
-                    Text {
-                        text: "icon theme applies on next launch"
-                        color: Qt.alpha(root.muted, 0.7)
-                        font { family: root.mono; pixelSize: root.fs(11) }
-                    }
                 }
                 } // tabViewport
             }
@@ -3135,8 +3116,7 @@ ShellRoot {
             case "volWidth": return cfg.volWidth + " px";
             case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
-            case "volStyle": return cfg.volStyle;
-            case "volEqPitch": return cfg.volEqPitch + " px";
+            case "volStyle": return cfg.volStyle === "sine" ? "sine wave" : cfg.volStyle;
             case "volPercent": return cfg.volShowPercent ? "on" : "off";
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
@@ -3200,7 +3180,7 @@ ShellRoot {
                 cfg.fontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.fontScale + dir * 0.1) * 100) / 100));
                 break;
             case "dimOpacity":
-                cfg.dimOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.dimOpacity + dir * 0.05) * 100) / 100));
+                cfg.dimOpacity = Math.max(0, Math.min(1, Math.round((cfg.dimOpacity + dir * 0.05) * 100) / 100));
                 break;
             case "revealOrigin": {
                 let i = originChoices.indexOf(cfg.revealOrigin);
@@ -3227,10 +3207,7 @@ ShellRoot {
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
                 break;
             case "volStyle":
-                cfg.volStyle = cycleChoice(cfg.volStyle, ["pill", "mirror", "spectrum", "flicker"], dir);
-                break;
-            case "volEqPitch":
-                cfg.volEqPitch = Math.max(14, Math.min(46, cfg.volEqPitch + dir * 4));
+                cfg.volStyle = cycleChoice(cfg.volStyle, ["pill", "sine"], dir);
                 break;
             case "volPercent":
                 cfg.volShowPercent = !cfg.volShowPercent;
@@ -3314,7 +3291,6 @@ ShellRoot {
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volStyle": cfg.volStyle = "pill"; break;
-            case "volEqPitch": cfg.volEqPitch = 26; break;
             case "volPercent": cfg.volShowPercent = true; break;
             case "volTimeout": cfg.volTimeout = 1500; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
@@ -3692,21 +3668,10 @@ ShellRoot {
                 onTriggered: volWin.tick++
             }
             readonly property bool pct: cfg.volShowPercent
-            // per-band base amplitude curve for the "spectrum decay"
-            // visualizer (the design's 12-band shape, sampled fractionally so
-            // any bar count follows the same curve)
-            readonly property var bandWeights: [1, 0.92, 0.82, 0.72, 0.62, 0.56, 0.5, 0.55, 0.6, 0.66, 0.72, 0.78]
-            function bandWeight(i: int, n: int): real {
-                const p = (n > 1 ? i / (n - 1) : 0) * (bandWeights.length - 1);
-                const a = Math.floor(p);
-                const b = Math.min(bandWeights.length - 1, a + 1);
-                return bandWeights[a] + (bandWeights[b] - bandWeights[a]) * (p - a);
-            }
-            // Half-height (px) of one equalizer bar (mirrored above/below the
-            // centre), per the imported Volume OSD design's three variants.
-            // The volume factor dominates (the wobble/flicker modulation is a
-            // narrow band on top) and the amplitude spans most of the card,
-            // so a volume change reads clearly as taller/shorter bars.
+            // Half-height (px) of one sine-wave bar (mirrored above/below the
+            // centre). The volume factor dominates (the wobble is a narrow
+            // band on top) and the amplitude spans most of the card, so a
+            // volume change reads clearly as taller/shorter bars.
             function volBarHalf(i: int, n: int): int {
                 const eff = root.sinkMuted ? 0 : root.vol * 100;
                 if (eff <= 0)
@@ -3714,20 +3679,8 @@ ShellRoot {
                 // square-root response: steep below ~50% so quiet-range
                 // volume steps read clearly, flattening toward full volume
                 const v = Math.sqrt(Math.min(1, eff / 100));
-                const t = tick;
-                let h;
-                if (cfg.volStyle === "mirror") {
-                    const wobble = 0.78 + 0.22 * Math.sin(t * 0.35 + i * 0.85 + 2);
-                    h = Math.max(4, v * 84 * wobble);
-                } else if (cfg.volStyle === "spectrum") {
-                    const osc = 0.68 + 0.32 * Math.sin(t * (0.2 + i * 0.05) + i);
-                    h = Math.max(4, bandWeight(i, n) * osc * v * 96);
-                } else { // flicker: deterministic pseudo-random hash
-                    const sn = Math.sin((i * 7.13 + t * 1.7) * 12.9898) * 43758.5453;
-                    const r = sn - Math.floor(sn);
-                    h = Math.max(4, (0.5 + 0.5 * r) * v * 96);
-                }
-                return Math.round(h / 2);
+                const wobble = 0.78 + 0.22 * Math.sin(tick * 0.35 + i * 0.85 + 2);
+                return Math.round(Math.max(4, v * 84 * wobble) / 2);
             }
 
             Rectangle {
@@ -3751,8 +3704,12 @@ ShellRoot {
                         easing.overshoot: 1.2
                     }
                 }
-                // no card background: the bars/pill render straight on the wallpaper
-                color: "transparent"
+                // the sine bars render straight on the wallpaper; the pill
+                // style keeps a card behind the level bar so it reads as a
+                // pill rather than a bare line
+                color: volWin.eq ? "transparent" : "#0a0908"
+                border.width: volWin.eq ? 0 : 1
+                border.color: Qt.alpha(root.flyTh.accent, 0.33)
                 antialiasing: true
                 opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
                 scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
@@ -3810,7 +3767,7 @@ ShellRoot {
                     }
                 }
 
-                // equalizer visualizer variants (mirror / spectrum / flicker):
+                // sine-wave visualizer:
                 // fixed-width bars (the design's 6px) mirrored above and below
                 // a horizontal centre axis, following the flyout accent colour
                 // (neutral when muted / 0). The card width sets how many bars
@@ -3828,9 +3785,9 @@ ShellRoot {
                     anchors.horizontalCenterOffset: -volCard.pctSpace / 2
                     readonly property real avail: volCard.width - 48 - volCard.pctSpace
                     readonly property real barW: 6
-                    // pitch clamped at use too: watchChanges live-reloads
-                    // hand edits the onCompleted heal never saw
-                    readonly property int pitch: Math.max(14, Math.min(46, cfg.volEqPitch))
+                    // bar pitch (px between bar centres) is fixed: dense
+                    // enough to read as a waveform at any card width
+                    readonly property real pitch: 14
                     readonly property int nBars: Math.max(2, Math.floor((avail + pitch - barW) / pitch))
                     spacing: nBars > 1 ? (avail - barW * nBars) / (nBars - 1) : 0
 
@@ -4826,8 +4783,11 @@ ShellRoot {
                 Item {
                     id: chev
                     z: 5
-                    x: fcard.width - width - 7
-                    y: fcard.stripH + 5
+                    // pinned to the card's top-right corner (over the media
+                    // strip when there is one), inset to match the app-row
+                    // dot's padding on the opposite side
+                    x: fcard.width - width - 12
+                    y: 12
                     width: 14
                     height: 14
                     // 1 = pointing down (can expand), -1 = pointing up
