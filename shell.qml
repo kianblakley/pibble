@@ -2293,16 +2293,6 @@ ShellRoot {
                     // default valueWidth throughout (the values are short), so
                     // the ‹ › buttons line up column-tight like the launcher
                     // tab; only the font row needs a wide value
-                    SettingRow { key: "volWidth"; label: "Volume size" }
-                    SettingRow { key: "volStyle"; label: "Volume style" }
-                    SettingRow { key: "volAnim"; label: "Volume animation" }
-                    SettingRow { key: "volPercent"; label: "Volume percent" }
-                    SettingRow { key: "volTimeout"; label: "Volume timeout" }
-                    SettingRow { key: "notifStyle"; label: "Notification style" }
-                    SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "notifFontScale"; label: "Notification font size" }
-                    SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
-
                     // enabled flyouts (unloading notifications releases the
                     // org.freedesktop.Notifications DBus name for other daemons)
                     Item {
@@ -2372,6 +2362,16 @@ ShellRoot {
                             }
                         }
                     }
+
+                    SettingRow { key: "volStyle"; label: "Volume style" }
+                    SettingRow { key: "volWidth"; label: "Volume size" }
+                    SettingRow { key: "volAnim"; label: "Volume animation" }
+                    SettingRow { key: "volPercent"; label: "Volume percent" }
+                    SettingRow { key: "volTimeout"; label: "Volume timeout" }
+                    SettingRow { key: "notifStyle"; label: "Notification style" }
+                    SettingRow { key: "notifTimeout"; label: "Notification timeout" }
+                    SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
+                    SettingRow { key: "notifFontScale"; label: "Font size"; sub: "applies to all flyout text, including the volume percent" }
                 }
 
                 Column {
@@ -2381,30 +2381,6 @@ ShellRoot {
                         NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
-
-                    Repeater {
-                        model: [
-                            { key: "appsGrid", label: "Apps grid" },
-                            { key: "wallsGrid", label: "Wallpaper grid" },
-                            { key: "clipsGrid", label: "Clipboard grid" },
-                            { key: "clipsMax", label: "Clipboard entries" },
-                            { key: "animStyle", label: "Animation" },
-                            { key: "fontScale", label: "Font size" },
-                            { key: "dimOpacity", label: "Opacity" },
-                            { key: "revealOrigin", label: "Spawn circle origin" },
-                            { key: "fontFamily", label: "Font" },
-                            { key: "iconTheme", label: "Icon theme", sub: "applies on next launch" }
-                        ]
-
-                        SettingRow {
-                            required property var modelData
-                            key: modelData.key
-                            label: modelData.label
-                            sub: modelData.sub ?? ""
-                            valueWidth: modelData.key === "iconTheme" || modelData.key === "fontFamily" ? 260
-                                : modelData.key === "revealOrigin" ? 150 : 90
-                        }
-                    }
 
                     // enabled pages: click toggles, drag left/right reorders
                     // the cycle (leftmost chip is the home pane)
@@ -2523,6 +2499,31 @@ ShellRoot {
                     SSub {
                         text: "click toggles a page, drag to reorder — the leftmost page is home"
                     }
+
+                    Repeater {
+                        model: [
+                            { key: "appsGrid", label: "Apps grid" },
+                            { key: "wallsGrid", label: "Wallpaper grid" },
+                            { key: "clipsGrid", label: "Clipboard grid" },
+                            { key: "clipsMax", label: "Clipboard entries" },
+                            { key: "animStyle", label: "Animation" },
+                            { key: "fontScale", label: "Font size" },
+                            { key: "dimOpacity", label: "Opacity" },
+                            { key: "revealOrigin", label: "Spawn circle origin" },
+                            { key: "fontFamily", label: "Font" },
+                            { key: "iconTheme", label: "Icon theme", sub: "applies on next launch" }
+                        ]
+
+                        SettingRow {
+                            required property var modelData
+                            key: modelData.key
+                            label: modelData.label
+                            sub: modelData.sub ?? ""
+                            valueWidth: modelData.key === "iconTheme" || modelData.key === "fontFamily" ? 260
+                                : modelData.key === "revealOrigin" ? 150 : 90
+                        }
+                    }
+
 
                     // wallpaper path
                     Item {
@@ -3552,11 +3553,11 @@ ShellRoot {
                     anchors.right: parent.right
                     anchors.rightMargin: 24
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 42
+                    width: root.flyFs(42)
                     horizontalAlignment: Text.AlignRight
                     text: Math.round(root.vol * 100) + "%"
                     color: root.sinkMuted ? root.flyTh.muted : root.flyTh.fg
-                    font { family: root.flyMono; pixelSize: 15; weight: Font.DemiBold }
+                    font { family: root.flyMono; pixelSize: root.flyFs(15); weight: Font.DemiBold }
                 }
                 readonly property real pctSpace: volWin.pct ? volPct.width + 16 : 0
 
@@ -3645,7 +3646,7 @@ ShellRoot {
     }
 
     // ---------- notification flyouts ----------
-    function notifFs(px: int): int {
+    function flyFs(px: int): int {
         return Math.round(px * cfg.notifFontScale);
     }
 
@@ -4131,7 +4132,7 @@ ShellRoot {
                     // ink varies per codepoint, so the font size compensates
                     font {
                         family: root.flyMono
-                        pixelSize: root.notifFs(text === "✱" ? 27 : text === "⧉" ? 25 : 23)
+                        pixelSize: root.flyFs(text === "✱" ? 27 : text === "⧉" ? 25 : 23)
                         weight: Font.Bold
                     }
                 }
@@ -4267,7 +4268,7 @@ ShellRoot {
                 readonly property bool rich: flyWin.variant === "rich"
                 readonly property bool thumb: flyWin.variant === "thumb"
                 readonly property int lBase: rich ? 1 : 0
-                readonly property real stripH: rich ? root.notifFs(104) : 0
+                readonly property real stripH: rich ? root.flyFs(104) : 0
                 // a short single-line body renders as a sub line; anything longer
                 // becomes a divided body block (they are mutually exclusive)
                 readonly property bool bodyAsSub: flyWin.view.body !== "" && flyWin.view.body.length <= 60
@@ -4279,8 +4280,8 @@ ShellRoot {
                     headText.implicitWidth,
                     subWrap.visible ? subText.implicitWidth : 0,
                     bodyBlock.visible ? bodyText2.implicitWidth : 0)
-                width: rich ? root.notifFs(336)
-                    : Math.min(root.notifFs(344), Math.max(root.notifFs(210), Math.ceil(natW)))
+                width: rich ? root.flyFs(336)
+                    : Math.min(root.flyFs(344), Math.max(root.flyFs(210), Math.ceil(natW)))
                 height: stripH + contentBox.height + 22
                 radius: 16
                 antialiasing: true
@@ -4414,7 +4415,7 @@ ShellRoot {
                             Text {
                                 text: flyWin.view.app || "notification"
                                 color: root.notifTh.muted
-                                font { family: root.flyMono; pixelSize: root.notifFs(10); letterSpacing: 2; capitalization: Font.AllUppercase }
+                                font { family: root.flyMono; pixelSize: root.flyFs(10); letterSpacing: 2; capitalization: Font.AllUppercase }
                             }
                         }
                         Text {
@@ -4426,7 +4427,7 @@ ShellRoot {
                             maximumLineCount: 2
                             elide: Text.ElideRight
                             color: root.notifTh.fg
-                            font { family: root.flyMono; pixelSize: root.notifFs(13); weight: Font.DemiBold }
+                            font { family: root.flyMono; pixelSize: root.flyFs(13); weight: Font.DemiBold }
                             opacity: fcard.lineO(fcard.lBase + 1)
                             transform: Translate { y: fcard.lineY(fcard.lBase + 1) }
                         }
@@ -4454,7 +4455,7 @@ ShellRoot {
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
                                 color: root.notifTh.muted
-                                font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                font { family: root.flyMono; pixelSize: root.flyFs(11) }
                                 opacity: fcard.expanded && subWrap.truncated ? 0 : 1
                                 Behavior on opacity {
                                     NumberAnimation { duration: 180 }
@@ -4467,7 +4468,7 @@ ShellRoot {
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
                                 color: root.notifTh.muted
-                                font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                font { family: root.flyMono; pixelSize: root.flyFs(11) }
                                 opacity: 1 - subText.opacity
                                 visible: opacity > 0
                             }
@@ -4493,7 +4494,7 @@ ShellRoot {
                                 id: bodyClip
                                 width: parent.width
                                 clip: true
-                                readonly property real lineH: bodyText2.lineCount > 0 ? bodyText2.paintedHeight / bodyText2.lineCount : root.notifFs(15)
+                                readonly property real lineH: bodyText2.lineCount > 0 ? bodyText2.paintedHeight / bodyText2.lineCount : root.flyFs(15)
                                 readonly property real collapsedH: Math.min(bodyText2.paintedHeight, Math.ceil(lineH * 3))
                                 readonly property bool truncated: bodyText2.paintedHeight > collapsedH + 1
                                 height: fcard.expanded ? bodyText2.paintedHeight : collapsedH
@@ -4510,7 +4511,7 @@ ShellRoot {
                                     maximumLineCount: 24
                                     textFormat: Text.PlainText
                                     color: root.notifTh.muted
-                                    font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                    font { family: root.flyMono; pixelSize: root.flyFs(11) }
                                 }
                                 // ellipses over the clipped last line; gone once
                                 // expanded (card-coloured backing masks the text)
@@ -4529,7 +4530,7 @@ ShellRoot {
                                         anchors.right: parent.right
                                         text: "…"
                                         color: root.notifTh.muted
-                                        font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                        font { family: root.flyMono; pixelSize: root.flyFs(11) }
                                     }
                                 }
                             }
