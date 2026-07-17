@@ -180,360 +180,6 @@ ShellRoot {
         }
     }
 
-    // Per-card input mask region: the card's bbox while it is active.
-    component NotifMaskRegion: Region {
-        property var c: null
-        x: c ? c.x : 0
-        y: c ? c.y : 0
-        width: c && c.active ? c.width : 0
-        height: c && c.active ? c.height : 0
-    }
-
-    // One notification card: a free-floating pill that slides/expands in,
-    // stacks below its newer siblings, and is swipeable in both directions.
-    component NotifCard: Rectangle {
-        id: nc
-        property var siblings: []
-        property var notifObj: null
-        // snapshot of the notification's content: keeps the card intact
-        // through the exit animation even if the sender closes the object
-        property var view: ({ own: false, glyph: "", app: "", summary: "", body: "", image: "", appIcon: "", timeout: 0 })
-        property bool active: false
-        property bool leaving: false
-        property bool expanded: false
-        property int seq: 0
-        property bool inst: false // apply poses without animating
-        property real cardScale: 1
-        property real cardOpacity: 1
-        // horizontal offset from rest: entry/exit/drag. Driven by swipe
-        // (scene coords, so the card moving doesn't feed back into the drag).
-        property real swipeX: 0
-        property real grabX: 0
-        // written explicitly around the drag (not bound to dragHandler.active):
-        // the Behavior's enabled must already be back to true when the release
-        // handler assigns the exit/spring-back pose, and a binding on the
-        // handler's own active signal isn't guaranteed to have re-evaluated
-        // by then — which made drag-dismiss skip the exit animation and the
-        // spring-back snap instead of slide.
-        property bool dragging: false
-        // gates the body-height animation on: false during spawn so the
-        // collapsed body appears instantly (no expand-on-spawn), true shortly
-        // after so a click animates the expand
-        property bool expandReady: false
-
-        function assign(n) {
-            notifObj = n;
-            const ic = String(n.appIcon ?? "");
-            view = {
-                own: n.appName === "launcher",
-                glyph: root.notifGlyph(ic, String(n.summary ?? "")),
-                app: n.appName ?? "",
-                summary: n.summary ?? "",
-                body: n.body ?? "",
-                image: String(n.image ?? ""),
-                appIcon: ic,
-                timeout: n.expireTimeout
-            };
-            seq = ++root.notifSeq;
-            expanded = false;
-            leaving = false;
-            expandReady = false;
-            expandReadyTimer.restart();
-            exitTimer.stop();
-            // entry pose by style, applied instantly, then released so the
-            // Behaviors animate from the pose to the rest state. When other
-            // cards are already up, the release waits for their y-reflow
-            // first: they slide down, then the new card spawns into the
-            // cleared space above them (instead of appearing beside the
-            // still-moving stack).
-            inst = true;
-            swipeX = 0;
-            cardScale = 0;
-            cardOpacity = 1;
-            active = true;
-            const wait = siblings.some(o => o !== this && o.active && !o.leaving);
-            if (wait)
-                entryTimer.restart();
-            else
-                Qt.callLater(() => releaseEntry());
-        }
-        // every entry pose is invisible (off-screen / scale 0 / opacity 0),
-        // so holding it just delays when the card appears
-        function releaseEntry() {
-            if (leaving || !active)
-                return;
-            inst = false;
-            swipeX = 0;
-            cardScale = 1;
-            cardOpacity = 1;
-        }
-        // dir: -1 swiped left, 1 swiped right, 0 timeout/programmatic
-        function dismiss(dir: int) {
-            if (leaving || !active)
-                return;
-            leaving = true;
-            expanded = false;
-            if (dir > 0)
-                swipeX = width + 60;
-            else if (dir < 0) {
-                swipeX = -(restX + width + 20);
-                cardOpacity = 0;
-            } else
-                cardScale = 0;
-            exitTimer.restart();
-        }
-        function finalize() {
-            exitTimer.stop();
-            if (notifObj)
-                notifObj.expire();
-            notifObj = null;
-            active = false;
-            leaving = false;
-            expanded = false;
-        }
-
-        Timer {
-            id: exitTimer
-            interval: 340
-            onTriggered: nc.finalize()
-        }
-        Timer {
-            // matches the siblings' y-reflow duration (260ms)
-            id: entryTimer
-            interval: 260
-            onTriggered: nc.releaseEntry()
-        }
-        Timer {
-            id: expandReadyTimer
-            interval: 500
-            onTriggered: nc.expandReady = true
-        }
-        Timer {
-            // per-card timeout, paused only while the pointer is over the card
-            // (hovering to read it); leaving the card restarts the countdown.
-            // A sender timeout of exactly 0 means "never expire" (spec):
-            // the card stays until dismissed by hand.
-            interval: nc.view.timeout > 0 ? nc.view.timeout : cfg.notifTimeout
-            running: nc.active && !nc.leaving && !hover.hovered && nc.view.timeout !== 0
-            onTriggered: nc.dismiss(0)
-        }
-        // sender closed it (or another daemon action) — animate out
-        Connections {
-            target: nc.notifObj
-            ignoreUnknownSignals: true
-            function onClosed() {
-                nc.notifObj = null;
-                if (nc.active && !nc.leaving)
-                    nc.dismiss(0);
-            }
-        }
-
-        visible: active
-        width: 420
-        readonly property real cardH: Math.max(66, contentRow.height + 26)
-        height: cardH
-        radius: 20
-        // vertex antialiasing on the rounded outline (off by default for
-        // Rectangle, which leaves visible stair-steps on the corner curve)
-        antialiasing: true
-        color: "#0a0908"
-        border.width: 1
-        border.color: Qt.alpha(root.flyTh.accent, 0.33)
-        transformOrigin: Item.Top
-        scale: cardScale
-        opacity: cardOpacity
-
-        // x = restX + swipeX. The Behavior lives on swipeX (not x) so x snaps
-        // when restX changes as the layer surface settles its width — that
-        // width settle was what made every entry read as a slide regardless
-        // of the animation setting.
-        readonly property real restX: parent.width - width - 16
-        x: restX + swipeX
-        Behavior on swipeX {
-            enabled: !nc.inst && !nc.dragging
-            NumberAnimation {
-                duration: 300
-                easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
-                easing.overshoot: 1.15
-            }
-        }
-        // newest card on top; older active ones stack downward and reflow
-        y: {
-            let yy = 14;
-            for (const o of nc.siblings)
-                if (o !== nc && o.active && o.seq > nc.seq)
-                    yy += o.cardH + 12;
-            return yy;
-        }
-        Behavior on y {
-            enabled: !nc.inst
-            NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
-        }
-        Behavior on cardScale {
-            enabled: !nc.inst
-            NumberAnimation {
-                duration: 320
-                easing.type: nc.leaving ? Easing.InCubic : Easing.OutBack
-                easing.overshoot: 1.3
-            }
-        }
-        Behavior on cardOpacity {
-            enabled: !nc.inst
-            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-        }
-
-        Row {
-            id: contentRow
-            x: 18
-            y: 13
-            width: parent.width - 36
-            spacing: 14
-
-            // the launcher's own notifications use themed glyph badges;
-            // other apps get their image or icon-theme icon
-            Rectangle {
-                visible: nc.view.own
-                width: visible ? 44 : 0
-                height: 44
-                radius: 22
-                antialiasing: true
-                color: Qt.alpha(root.flyTh.accent, 0.14)
-                border.width: 1
-                border.color: Qt.alpha(root.flyTh.accent, 0.4)
-
-                Text {
-                    anchors.centerIn: parent
-                    text: nc.view.glyph
-                    color: root.flyTh.accent
-                    font { family: root.flyMono; pixelSize: root.notifFs(20); weight: Font.Bold }
-                }
-            }
-            Image {
-                id: notifImage
-                visible: !nc.view.own && String(source) !== ""
-                width: visible ? 48 : 0
-                height: 48
-                asynchronous: true
-                fillMode: Image.PreserveAspectCrop
-                // media wins; the icon field may itself hold a file path
-                // (e.g. niri screenshots), which iconUrl passes through
-                source: nc.view.image || root.iconUrl(nc.view.appIcon)
-            }
-
-            Column {
-                width: contentRow.width - (nc.view.own ? 58 : (notifImage.visible ? 62 : 0))
-                spacing: 4
-
-                Text {
-                    visible: text.length > 0
-                    text: nc.view.app
-                    color: root.flyTh.muted
-                    font { family: root.flyMono; pixelSize: root.notifFs(11); letterSpacing: 2; capitalization: Font.AllUppercase }
-                }
-                Text {
-                    visible: text.length > 0
-                    width: parent.width
-                    text: nc.view.summary
-                    wrapMode: Text.Wrap
-                    // fixed cap so the title never reflows on expand (line-count
-                    // changes can't animate and would look like a jump)
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                    color: root.flyTh.fg
-                    font { family: root.flyMono; pixelSize: root.notifFs(14); weight: Font.DemiBold }
-                }
-                // body clips to ~4 lines; clicking the card grows the clip to
-                // the full text. The text is fully laid out at all times and
-                // only the clip height animates, so it reveals smoothly with
-                // no reflow jump.
-                Item {
-                    id: bodyClip
-                    width: parent.width
-                    clip: true
-                    visible: bodyText.text.length > 0
-                    readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : root.notifFs(16)
-                    readonly property real collapsedH: Math.min(bodyText.paintedHeight, Math.ceil(lineH * 4))
-                    // more text than the collapsed clip shows = expandable
-                    readonly property bool truncated: bodyText.paintedHeight > collapsedH + 1
-                    height: visible ? (nc.expanded ? bodyText.paintedHeight : collapsedH) : 0
-                    // animate only a user-initiated expand, not the initial
-                    // layout on spawn (which would look like it expands itself)
-                    Behavior on height {
-                        enabled: nc.expandReady
-                        NumberAnimation { duration: 360; easing.type: Easing.InOutCubic }
-                    }
-
-                    Text {
-                        id: bodyText
-                        width: parent.width
-                        text: nc.view.body
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 24
-                        textFormat: Text.PlainText
-                        color: root.flyTh.muted
-                        font { family: root.flyMono; pixelSize: root.notifFs(12) }
-                    }
-                }
-                // "more text" cue under the clipped body: fades out while
-                // expanded and back in on collapse. Kept in the layout either
-                // way so the card height doesn't change with the fade.
-                Text {
-                    visible: bodyClip.visible && bodyClip.truncated
-                    text: "…"
-                    color: root.flyTh.muted
-                    opacity: nc.expanded ? 0 : 1
-                    Behavior on opacity {
-                        NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
-                    }
-                    font { family: root.flyMono; pixelSize: root.notifFs(12); weight: Font.Bold }
-                }
-            }
-        }
-
-        // Pointer handlers, not a MouseArea with drag.target: dragging the
-        // card by a proxy that is itself a child of the (moving) card fed
-        // back into the drag and stalled it. DragHandler measures the swipe
-        // in scene coordinates, so the card moving under the cursor doesn't
-        // affect the delta; TapHandler gives a clean click that the drag
-        // gesture doesn't swallow.
-        HoverHandler {
-            id: hover
-        }
-        DragHandler {
-            id: dragHandler
-            target: null
-            xAxis.enabled: true
-            yAxis.enabled: false
-            onActiveChanged: {
-                if (active) {
-                    nc.dragging = true;
-                    nc.grabX = centroid.scenePosition.x - nc.swipeX;
-                } else {
-                    // re-enable the Behavior first: the write completes (and
-                    // its enabled binding updates) before the pose below, so
-                    // the exit slide / spring-back actually animates
-                    nc.dragging = false;
-                    if (!nc.leaving) {
-                        if (nc.swipeX > 90)
-                            nc.dismiss(1);
-                        else if (nc.swipeX < -90)
-                            nc.dismiss(-1);
-                        else
-                            nc.swipeX = 0; // slides home
-                    }
-                }
-            }
-            onCentroidChanged: {
-                if (active)
-                    nc.swipeX = centroid.scenePosition.x - nc.grabX;
-            }
-        }
-        TapHandler {
-            // a tap (not a drag) toggles the expanded body
-            onTapped: nc.expanded = !nc.expanded
-        }
-    }
-
     readonly property string defaultWallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
 
     component SReset: Rectangle {
@@ -569,6 +215,7 @@ ShellRoot {
         // its next save
         watchChanges: true
         onFileChanged: reload()
+        onLoaded: root.healSettings()
 
         JsonAdapter {
             id: cfg
@@ -608,9 +255,9 @@ ShellRoot {
             property int volTimeout: 1500
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
-            // "flyout": one circle-and-card notification at a time (queue
-            // across apps, replace within an app); "stack": the pill stack
-            property string notifStyle: "flyout"
+            // one notification at a time (queue across apps, replace within
+            // an app): "bubble" = tinted circle + card, "pill" = card only
+            property string notifStyle: "bubble"
             // flyout palette: "default" (icon-tinted bubble, black card),
             // "matugen" (dynamic wallpaper palette), or a named theme
             property string notifTheme: "default"
@@ -702,7 +349,10 @@ ShellRoot {
         return (n / 1048576).toFixed(1) + " MiB";
     }
 
-    Component.onCompleted: {
+    // heal out-of-range / retired settings values. Hooked to the store's
+    // loaded signal (not Component.onCompleted) so it also covers hot
+    // reloads and hand edits picked up by the file watcher.
+    function healSettings() {
         // clamp out-of-range clip rows (old list-style pane stored large
         // values; the grid renders 2–4 rows) — clamp, don't reset, so a
         // hand-edited value degrades to the nearest legal one
@@ -715,6 +365,11 @@ ShellRoot {
             cfg.volStyle = "sine";
             saveSettings();
         }
+        // "flyout" was renamed "bubble"; the retired stack style folds in too
+        if (cfg.notifStyle === "flyout" || cfg.notifStyle === "stack") {
+            cfg.notifStyle = "bubble";
+            saveSettings();
+        }
         // the "follow" flyout theme option was removed; pin to the launcher
         // theme it was following at the time
         if (cfg.flyTheme === "follow") {
@@ -722,6 +377,7 @@ ShellRoot {
             saveSettings();
         }
     }
+    Component.onCompleted: healSettings()
 
     Process {
         id: matugenProc
@@ -3230,7 +2886,7 @@ ShellRoot {
                 cfg.notifFontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.notifFontScale + dir * 0.1) * 100) / 100));
                 break;
             case "notifStyle":
-                cfg.notifStyle = cycleChoice(cfg.notifStyle, ["flyout", "stack"], dir);
+                cfg.notifStyle = cycleChoice(cfg.notifStyle, ["bubble", "pill"], dir);
                 break;
             case "notifTheme":
                 cfg.notifTheme = cycleChoice(cfg.notifTheme, root.notifThemes, dir);
@@ -3295,7 +2951,7 @@ ShellRoot {
             case "volTimeout": cfg.volTimeout = 1500; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
-            case "notifStyle": cfg.notifStyle = "flyout"; break;
+            case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifTheme": cfg.notifTheme = "default"; break;
             default:
                 if (key.startsWith("bind:")) {
@@ -3827,17 +3483,9 @@ ShellRoot {
     }
 
     // ---------- notification flyouts ----------
-    // A stack of pill cards below the top-right corner, hosted in one
-    // fixed-size window. Cards are assigned to free slots, so existing cards
-    // never rebuild when another notification arrives; stacking order is by
-    // arrival, newest on top. Click expands the body text; swiping left or
-    // right moves the card and dismisses past the threshold. The slot pool
-    // (notifWin.cards) is the capacity: a burst past it reuses the oldest
-    // card, cutting its exit animation short.
     function notifFs(px: int): int {
         return Math.round(px * cfg.notifFontScale);
     }
-    property int notifSeq: 0
 
     // Own org.freedesktop.Notifications only while the flyout is enabled;
     // unloading releases the name for another daemon to claim.
@@ -3849,83 +3497,16 @@ ShellRoot {
             imageSupported: true
             onNotification: n => {
                 n.tracked = true;
-                if (cfg.notifStyle === "stack")
-                    stackNotifLoader.item?.accept(n);
-                else
-                    flyNotifLoader.item?.accept(n);
+                flyNotifLoader.item?.accept(n);
             }
         }
     }
 
-    // Only the selected notification pipeline is loaded: the idle style's
-    // object graph (cards, timers, canvases) would otherwise keep live
-    // bindings for the daemon's lifetime. A rebuild happens only on a
-    // settings change, never on a notification's hot path.
-    LazyLoader {
-        id: stackNotifLoader
-        active: cfg.notifStyle === "stack" && root.flyoutOn("notifs")
-
-        PanelWindow {
-            id: notifWin
-            // Fixed card instances referenced by id. An earlier Repeater version
-            // referenced cards via cardRep.itemAt(i) inside the mask/blur region
-            // bindings, but itemAt() is not reactive and returns null while the
-            // delegates are still being created, so those regions stayed empty —
-            // which dropped the blur (no xray) and the input mask (no clicks).
-            readonly property var cards: [cardA, cardB, cardC]
-            property bool anyActive: false
-            function refreshActive() {
-                anyActive = cards.some(c => c.active);
-            }
-            visible: anyActive
-            anchors.top: true
-            anchors.right: true
-            // fixed size: cards animate inside; the left slack is swipe travel
-            implicitWidth: 660
-            implicitHeight: 1290
-            color: "transparent"
-            exclusionMode: ExclusionMode.Ignore
-            WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "launcher-notif-osd"
-
-            function accept(n) {
-                let free = null, oldest = null;
-                for (let i = 0; i < cards.length; i++) {
-                    const c = cards[i];
-                    if (!c.active && !c.leaving) {
-                        free = c;
-                        break;
-                    }
-                    if (!oldest || c.seq < oldest.seq)
-                        oldest = c;
-                }
-                const s = free || oldest;
-                if (!s)
-                    return;
-                if (!free)
-                    s.finalize();
-                s.assign(n);
-                refreshActive();
-            }
-
-            // input only over the cards; everything else clicks through
-            mask: Region {
-                regions: [
-                    NotifMaskRegion { c: cardA },
-                    NotifMaskRegion { c: cardB },
-                    NotifMaskRegion { c: cardC }
-                ]
-            }
-            NotifCard { id: cardA; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-            NotifCard { id: cardB; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-            NotifCard { id: cardC; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-        }
-    }
-
-    // ---------- creative notification flyout (notifStyle "flyout") ----------
-    // One notification at a time: an app-tinted circle pops in below the
-    // top-right corner, pulses with an expanding ring, then a compact card
-    // staggers its lines in to the left of it. Same-app arrivals replace the
+    // ---------- notification flyout (notifStyle "bubble" / "pill") ----------
+    // One notification at a time. "bubble": an app-tinted circle pops in
+    // below the top-right corner, pulses with an expanding ring, then a
+    // compact card staggers its lines in to the left of it. "pill" is the
+    // same card without the circle, tucked into the corner directly. Same-app arrivals replace the
     // visible card (it slides out and the new one fires next; if the card
     // hasn't appeared yet the content just swaps in place); other apps queue
     // and fire after the current one dismisses. The tint colour is the
@@ -3933,7 +3514,7 @@ ShellRoot {
     // icon), falling back to the flyout theme accent.
     LazyLoader {
         id: flyNotifLoader
-        active: cfg.notifStyle !== "stack" && root.flyoutOn("notifs")
+        active: root.flyoutOn("notifs")
 
         PanelWindow {
             id: flyWin
@@ -3941,8 +3522,12 @@ ShellRoot {
             // show (card staggers in, timeout runs) -> dismiss (lines stagger
             // out, card slides, circle shrinks) -> hidden
             property string phase: "hidden"
+            // "pill" skips every bubble beat: no circle, no pulse phase, the
+            // card claims the corner the circle vacated
+            readonly property bool bubble: cfg.notifStyle !== "pill"
             property var current: null
-            // snapshot of the notification's content (same rationale as NotifCard)
+            // snapshot of the notification's content: keeps the card intact
+            // through the exit animation even if the sender closes the object
             property var view: ({ own: false, glyph: "", app: "", key: "", summary: "", body: "", image: "", icon: "", timeout: 0 })
             property var queue: []
             property int exitDir: 0
@@ -4131,6 +3716,7 @@ ShellRoot {
                 switch (phase) {
                 case "appear":
                     ringAnim.stop();
+                    // pill: no circle to choreograph
                     // entry pose, applied instantly (inst gates the Behaviors)
                     fcard.inst = true;
                     fcard.stagIn = 0;
@@ -4143,7 +3729,8 @@ ShellRoot {
                     fcard.inst = false;
                     ring.scale = 1;
                     ring.opacity = 0;
-                    iconIn.restart();
+                    if (flyWin.bubble)
+                        iconIn.restart();
                     break;
                 case "pulse":
                     iconPop.restart();
@@ -4151,7 +3738,8 @@ ShellRoot {
                     break;
                 case "show":
                     variant = computeVariant();
-                    iconSettle.restart();
+                    if (flyWin.bubble)
+                        iconSettle.restart();
                     fcard.cardO = 1;
                     fcard.cardYS = 1;
                     stagInAnim.restart();
@@ -4160,11 +3748,13 @@ ShellRoot {
                 case "dismiss":
                     stagOutAnim.restart();
                     // hold the bubble until the card has fully left
-                    flyWin.lingerOut = fcard.cardO > 0;
-                    if (flyWin.lingerOut)
-                        iconOutDelay.restart();
-                    else
-                        iconOut.restart();
+                    flyWin.lingerOut = flyWin.bubble && fcard.cardO > 0;
+                    if (flyWin.bubble) {
+                        if (flyWin.lingerOut)
+                            iconOutDelay.restart();
+                        else
+                            iconOut.restart();
+                    }
                     // every dismissal fades with a gentle rightward drift; a
                     // left swipe rubber-bands back through rest to reach it
                     if (fcard.cardO > 0)
@@ -4176,13 +3766,18 @@ ShellRoot {
 
             Timer {
                 id: phaseTimer
-                interval: flyWin.phase === "appear" ? 430 : flyWin.phase === "pulse" ? 210
+                interval: flyWin.phase === "appear" ? (flyWin.bubble ? 430 : 60)
+                    : flyWin.phase === "pulse" ? 210
                     : flyWin.lingerOut ? 640 : 340
                 onTriggered: {
                     switch (flyWin.phase) {
                     case "appear":
-                        flyWin.phase = "pulse";
-                        phaseTimer.restart();
+                        if (flyWin.bubble) {
+                            flyWin.phase = "pulse";
+                            phaseTimer.restart();
+                        } else {
+                            flyWin.phase = "show"; // showTimer takes over
+                        }
                         break;
                     case "pulse":
                         flyWin.phase = "show"; // showTimer takes over
@@ -4303,7 +3898,7 @@ ShellRoot {
                     Region {
                         x: fIcon.x
                         y: fIcon.y
-                        width: flyWin.phase === "show" ? fIcon.width : 0
+                        width: flyWin.bubble && flyWin.phase === "show" ? fIcon.width : 0
                         height: fIcon.height
                     }
                 ]
@@ -4311,6 +3906,7 @@ ShellRoot {
             // ── icon circle ──
             Item {
                 id: fIcon
+                visible: flyWin.bubble
                 x: flyWin.width - width - 26
                 y: 24
                 width: 52
@@ -4551,10 +4147,14 @@ ShellRoot {
                     }
                 ]
 
-                readonly property real restX: fIcon.x - 10 - width
+                // bubble: the card hangs left of the circle, its top at the
+                // circle's vertical centre. pill: no circle, so the card
+                // tucks into the corner the circle would have occupied.
+                readonly property real restX: flyWin.bubble
+                    ? fIcon.x - 10 - width
+                    : flyWin.width - width - 26
                 x: restX + swipeX
-                // hangs below the bubble: card top at the circle's vertical centre
-                y: fIcon.y + fIcon.height / 2
+                y: flyWin.bubble ? fIcon.y + fIcon.height / 2 : 24
                 Behavior on swipeX {
                     enabled: !fcard.inst && !fcard.dragging
                     NumberAnimation {
@@ -4827,7 +4427,8 @@ ShellRoot {
                 HoverHandler {
                     id: cardHover
                 }
-                // swipe-dismiss, same scene-coordinate pattern as NotifCard
+                // swipe-dismiss: DragHandler measures in scene coordinates,
+                // so the card moving under the cursor doesn't feed the drag
                 DragHandler {
                     id: fdrag
                     enabled: flyWin.phase === "show"
