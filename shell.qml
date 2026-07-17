@@ -162,37 +162,6 @@ ShellRoot {
         }
     }
 
-    // Pixel-accurate rounded-rect blur region: the protocol only takes rect
-    // unions, but ellipse child regions decompose into exact 1px scanlines
-    // (same mechanism as the launcher's circular reveal), so the blur edge
-    // follows the corner curve with no visible stair-steps.
-    component RoundedBlur: Region {
-        id: rb
-        property real rx: 0
-        property real ry: 0
-        property real rw: 100
-        property real rh: 50
-        property real rr: 18
-        // Effective radius never exceeds half the box, so a card shrinking to
-        // nothing (fade/scale exit) collapses to a genuine ~1px region instead
-        // of leaving the min-radius corner ellipses behind as a small blurred
-        // square. The body height is clamped to ≥1 so the region is never
-        // empty (an empty blurRegion means "blur the whole surface").
-        readonly property real er: Math.max(0, Math.min(rr, rw / 2, rh / 2))
-        x: rx
-        y: ry + er
-        width: rw
-        height: Math.max(1, rh - 2 * er)
-        regions: [
-            Region { x: rb.rx + rb.er; y: rb.ry; width: Math.max(0, rb.rw - 2 * rb.er); height: rb.er },
-            Region { x: rb.rx + rb.er; y: rb.ry + rb.rh - rb.er; width: Math.max(0, rb.rw - 2 * rb.er); height: rb.er },
-            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry; width: 2 * rb.er; height: 2 * rb.er },
-            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.er; y: rb.ry; width: 2 * rb.er; height: 2 * rb.er },
-            Region { shape: RegionShape.Ellipse; x: rb.rx; y: rb.ry + rb.rh - 2 * rb.er; width: 2 * rb.er; height: 2 * rb.er },
-            Region { shape: RegionShape.Ellipse; x: rb.rx + rb.rw - 2 * rb.er; y: rb.ry + rb.rh - 2 * rb.er; width: 2 * rb.er; height: 2 * rb.er }
-        ]
-    }
-
     // Per-card input mask region: the card's bbox while it is active.
     component NotifMaskRegion: Region {
         property var c: null
@@ -200,23 +169,6 @@ ShellRoot {
         y: c ? c.y : 0
         width: c && c.active ? c.width : 0
         height: c && c.active ? c.height : 0
-    }
-    // Per-card rounded blur region, tracking the card's animated pose. rr is
-    // un-clamped at the low end so it collapses to ~1px on fade/scale exit
-    // instead of leaving a small square; inactive slots stay a 1px region so
-    // the union is never empty (which would blur the whole surface).
-    component NotifBlurRegion: RoundedBlur {
-        property var c: null
-        readonly property real s: c && c.active ? (c.mode === "expand" ? c.scale : 1) * c.opacity : 0
-        // An inactive slot's 1px placeholder (the union must never be empty —
-        // that reads as blur-the-whole-surface) sits tucked inside the topmost
-        // active card's region instead of at the slot's own centre, where it
-        // showed as a lone blurred dot on the desktop below the stack.
-        rx: c ? (c.active ? c.x + (c.width - c.width * s) / 2 + 2 : c.restX + 4) : 0
-        ry: c ? (c.active ? c.y + 2 : 18) : 0
-        rw: c && c.active ? Math.max(1, c.width * s - 4) : 1
-        rh: c && c.active ? Math.max(1, c.height * s - 4) : 1
-        rr: 18 * s
     }
 
     // One notification card: a free-floating pill that slides/expands in,
@@ -250,17 +202,13 @@ ShellRoot {
         // collapsed body appears instantly (no expand-on-spawn), true shortly
         // after so a click animates the expand
         property bool expandReady: false
-        readonly property string mode: cfg.notifAnim
 
         function assign(n) {
             notifObj = n;
             const ic = String(n.appIcon ?? "");
-            const sl = String(n.summary ?? "").toLowerCase();
             view = {
                 own: n.appName === "launcher",
-                // the icon name may arrive resolved (path/url), so match loosely
-                glyph: ic.includes("error") || sl.includes("fail") || sl.includes("not found") ? "!"
-                    : ic.includes("copy") || sl.includes("copied") ? "⧉" : "✱",
+                glyph: root.notifGlyph(ic, String(n.summary ?? "")),
                 app: n.appName ?? "",
                 summary: n.summary ?? "",
                 body: n.body ?? "",
@@ -275,18 +223,31 @@ ShellRoot {
             expandReadyTimer.restart();
             exitTimer.stop();
             // entry pose by style, applied instantly, then released so the
-            // Behaviors animate from the pose to the rest state
+            // Behaviors animate from the pose to the rest state. When other
+            // cards are already up, the release waits for their y-reflow
+            // first: they slide down, then the new card spawns into the
+            // cleared space above them (instead of appearing beside the
+            // still-moving stack).
             inst = true;
-            swipeX = mode === "slide" ? width + 40 : 0;
-            cardScale = mode === "expand" ? 0 : 1;
-            cardOpacity = (mode === "fade" || mode === "none") ? 0 : 1;
+            swipeX = 0;
+            cardScale = 0;
+            cardOpacity = 1;
             active = true;
-            Qt.callLater(() => {
-                inst = false;
-                swipeX = 0;
-                cardScale = 1;
-                cardOpacity = 1;
-            });
+            const wait = siblings.some(o => o !== this && o.active && !o.leaving);
+            if (wait)
+                entryTimer.restart();
+            else
+                Qt.callLater(() => releaseEntry());
+        }
+        // every entry pose is invisible (off-screen / scale 0 / opacity 0),
+        // so holding it just delays when the card appears
+        function releaseEntry() {
+            if (leaving || !active)
+                return;
+            inst = false;
+            swipeX = 0;
+            cardScale = 1;
+            cardOpacity = 1;
         }
         // dir: -1 swiped left, 1 swiped right, 0 timeout/programmatic
         function dismiss(dir: int) {
@@ -294,15 +255,13 @@ ShellRoot {
                 return;
             leaving = true;
             expanded = false;
-            if (dir > 0 || (dir === 0 && mode === "slide"))
+            if (dir > 0)
                 swipeX = width + 60;
             else if (dir < 0) {
                 swipeX = -(restX + width + 20);
                 cardOpacity = 0;
-            } else if (mode === "expand")
+            } else
                 cardScale = 0;
-            else
-                cardOpacity = 0;
             exitTimer.restart();
         }
         function finalize() {
@@ -321,6 +280,12 @@ ShellRoot {
             onTriggered: nc.finalize()
         }
         Timer {
+            // matches the siblings' y-reflow duration (260ms)
+            id: entryTimer
+            interval: 260
+            onTriggered: nc.releaseEntry()
+        }
+        Timer {
             id: expandReadyTimer
             interval: 500
             onTriggered: nc.expandReady = true
@@ -328,8 +293,10 @@ ShellRoot {
         Timer {
             // per-card timeout, paused only while the pointer is over the card
             // (hovering to read it); leaving the card restarts the countdown.
+            // A sender timeout of exactly 0 means "never expire" (spec):
+            // the card stays until dismissed by hand.
             interval: nc.view.timeout > 0 ? nc.view.timeout : cfg.notifTimeout
-            running: nc.active && !nc.leaving && !hover.hovered
+            running: nc.active && !nc.leaving && !hover.hovered && nc.view.timeout !== 0
             onTriggered: nc.dismiss(0)
         }
         // sender closed it (or another daemon action) — animate out
@@ -344,14 +311,14 @@ ShellRoot {
         }
 
         visible: active
-        width: cfg.notifWidth
+        width: 420
         readonly property real cardH: Math.max(66, contentRow.height + 26)
         height: cardH
         radius: 20
         // vertex antialiasing on the rounded outline (off by default for
         // Rectangle, which leaves visible stair-steps on the corner curve)
         antialiasing: true
-        color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity)
+        color: "#0a0908"
         border.width: 1
         border.color: Qt.alpha(root.flyTh.accent, 0.33)
         transformOrigin: Item.Top
@@ -362,12 +329,12 @@ ShellRoot {
         // when restX changes as the layer surface settles its width — that
         // width settle was what made every entry read as a slide regardless
         // of the animation setting.
-        readonly property real restX: parent.width - cfg.notifWidth - 16
+        readonly property real restX: parent.width - width - 16
         x: restX + swipeX
         Behavior on swipeX {
             enabled: !nc.inst && !nc.dragging
             NumberAnimation {
-                duration: nc.mode === "none" ? 0 : 300
+                duration: 300
                 easing.type: nc.leaving ? Easing.OutCubic : Easing.OutBack
                 easing.overshoot: 1.15
             }
@@ -382,19 +349,19 @@ ShellRoot {
         }
         Behavior on y {
             enabled: !nc.inst
-            NumberAnimation { duration: nc.mode === "none" ? 0 : 260; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
         }
         Behavior on cardScale {
             enabled: !nc.inst
             NumberAnimation {
-                duration: nc.mode === "none" ? 0 : 320
+                duration: 320
                 easing.type: nc.leaving ? Easing.InCubic : Easing.OutBack
                 easing.overshoot: 1.3
             }
         }
         Behavior on cardOpacity {
             enabled: !nc.inst
-            NumberAnimation { duration: nc.mode === "none" ? 0 : 220; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
         }
 
         Row {
@@ -430,20 +397,9 @@ ShellRoot {
                 height: 48
                 asynchronous: true
                 fillMode: Image.PreserveAspectCrop
-                source: {
-                    const v = nc.view;
-                    if (v.image)
-                        return v.image;
-                    if (!v.appIcon)
-                        return "";
-                    // some apps (e.g. niri screenshots) pass a file path in
-                    // the icon field instead of an icon name
-                    if (v.appIcon.startsWith("file://"))
-                        return v.appIcon;
-                    if (v.appIcon.startsWith("/"))
-                        return "file://" + v.appIcon;
-                    return Quickshell.iconPath(v.appIcon, true);
-                }
+                // media wins; the icon field may itself hold a file path
+                // (e.g. niri screenshots), which iconUrl passes through
+                source: nc.view.image || root.iconUrl(nc.view.appIcon)
             }
 
             Column {
@@ -590,6 +546,11 @@ ShellRoot {
         path: Quickshell.statePath("settings.json")
         blockLoading: true
         printErrors: false
+        // pick up hand edits to settings.json live; without this the daemon
+        // keeps its stale in-memory copy and silently overwrites the file on
+        // its next save
+        watchChanges: true
+        onFileChanged: reload()
 
         JsonAdapter {
             id: cfg
@@ -617,7 +578,6 @@ ShellRoot {
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
             // flyouts (volume + notification OSDs)
             property string flyTheme: "amber"
-            property real flyOpacity: 0.4
             property string flyFontFamily: ""
             property var flyouts: ({ volume: true, notifs: true })
             property real volWidth: 340
@@ -625,16 +585,20 @@ ShellRoot {
             // volume OSD content style: pill (a level bar) or one of three
             // equalizer visualizers (mirror / spectrum / flicker)
             property string volStyle: "pill"
-            // card background behind the volume OSD content (off = bars only)
-            property bool volShowCard: true
+            // equalizer bar pitch (px between bar centres): narrower pitch
+            // packs more bars into the same card width
+            property int volEqPitch: 26
             // numeric volume % readout on the OSD
             property bool volShowPercent: true
             property int volTimeout: 1500
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
-            property real notifWidth: 420
-            property string notifAnim: "expand"
-            property int notifMax: 3
+            // "flyout": one circle-and-card notification at a time (queue
+            // across apps, replace within an app); "stack": the pill stack
+            property string notifStyle: "flyout"
+            // flyout palette: "default" (icon-tinted bubble, black card),
+            // "matugen" (dynamic wallpaper palette), or a named theme
+            property string notifTheme: "default"
         }
     }
     function saveSettings() {
@@ -676,8 +640,34 @@ ShellRoot {
     }
     readonly property var flyTh: themeColors(cfg.flyTheme)
     readonly property string flyMono: cfg.flyFontFamily || mono
+    // notification-flyout theme: "default" keeps the near-black card and
+    // tints the bubble from the app icon; anything else pins a palette
+    // ("matugen" = the dynamic wallpaper palette) and skips icon extraction
+    readonly property var notifThemes: ["default", "matugen", "amber", "frost", "moss", "rose", "mono"]
+    readonly property bool notifIconTint: cfg.notifTheme === "default"
+    readonly property var notifTh: notifIconTint
+        ? ({ accent: flyTh.accent, fg: "#f2f0ee", muted: "#908c87" })
+        : themeColors(cfg.notifTheme === "matugen" ? "dynamic" : cfg.notifTheme)
     function flyoutOn(name: string): bool {
         return (cfg.flyouts ?? {})[name] !== false;
+    }
+    // icon-name → displayable URL; senders (and .desktop Icon= entries)
+    // sometimes resolve the icon themselves, so paths and urls pass through
+    function iconUrl(name: string): string {
+        if (!name)
+            return "";
+        if (name.startsWith("file://"))
+            return name;
+        if (name.startsWith("/"))
+            return "file://" + name;
+        return Quickshell.iconPath(name, true);
+    }
+    // notification glyph classifier, shared by the stack card and the flyout
+    // bubble (the icon name may arrive resolved as a path, so match loosely)
+    function notifGlyph(icon: string, summary: string): string {
+        const sl = summary.toLowerCase();
+        return icon.includes("error") || sl.includes("fail") || sl.includes("not found") ? "!"
+            : icon.includes("copy") || sl.includes("copied") ? "⧉" : "✱";
     }
 
     function fs(px: int): int {
@@ -698,9 +688,17 @@ ShellRoot {
     }
 
     Component.onCompleted: {
-        // heal settings from the old list-style clipboard pane
+        // clamp out-of-range clip rows (old list-style pane stored large
+        // values; the grid renders 2–4 rows) — clamp, don't reset, so a
+        // hand-edited value degrades to the nearest legal one
         if (cfg.clipsRows > 4 || cfg.clipsRows < 2) {
-            cfg.clipsRows = 3;
+            cfg.clipsRows = Math.max(2, Math.min(4, cfg.clipsRows));
+            saveSettings();
+        }
+        // same heal for the equalizer pitch: it divides the bar count, so a
+        // hand-edited 0 would wipe the bars out entirely
+        if (cfg.volEqPitch < 14 || cfg.volEqPitch > 46) {
+            cfg.volEqPitch = Math.max(14, Math.min(46, cfg.volEqPitch));
             saveSettings();
         }
         // the "follow" flyout theme option was removed; pin to the launcher
@@ -717,6 +715,15 @@ ShellRoot {
         // until the settings pane wants the preview — its output triggers a
         // theme-color rebind of every tile, which would hitch the intro.
         running: cfg.theme === "dynamic"
+        // a refresh requested while a run was in flight; honoured on exit so
+        // the palette still catches up with a just-applied wallpaper
+        property bool rerun: false
+        onRunningChanged: {
+            if (!running && rerun) {
+                rerun = false;
+                Qt.callLater(() => running = true);
+            }
+        }
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$PATH"
             img=$(awww query -n workspaces 2>/dev/null | sed -n 's/.*displaying: image: //p' | head -1)
@@ -724,6 +731,11 @@ ShellRoot {
             matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`]
         stdout: StdioCollector {
             onStreamFinished: {
+                // empty output is benign (awww not up yet at login, no
+                // wallpaper set, or a run torn down early): keep the last
+                // palette silently instead of raising a false alarm
+                if (!text.trim())
+                    return;
                 try {
                     const c = JSON.parse(text).colors;
                     root.dynTheme = {
@@ -1001,9 +1013,16 @@ ShellRoot {
             clipScan.running = false;
             clipScan.running = true;
             root.rescanWallpapers();
+            // refresh the dynamic palette, but never kill a run already in
+            // flight — a killed run surfaces as truncated JSON, which used to
+            // raise a spurious "Dynamic theme failed" notification. A refresh
+            // that lands mid-run is queued instead of dropped, so the palette
+            // can't go stale on the wallpaper the busy run never saw.
             if (cfg.theme === "dynamic") {
-                matugenProc.running = false;
-                matugenProc.running = true;
+                if (matugenProc.running)
+                    matugenProc.rerun = true;
+                else
+                    matugenProc.running = true;
             }
         }
 
@@ -1020,19 +1039,19 @@ ShellRoot {
             input.text = "";
             pane = homePane();
             paneBeforeSettings = homePane();
-            paneBeforePower = homePane();
             settingsTab = "general";
             selected = 0;
             wallSelected = 0;
             clipSelected = 0;
-            powerSelected = 0;
+            powerArmed = false;
+            powerDragging = false;
+            powerRaw = 0;
             // panes keep the opacity their last entry animation ended at;
             // reset them or the warm-up pass flashes them fully visible
             drawer.opacity = 0.004;
             wallDrawer.opacity = 0.004;
             clipDrawer.opacity = 0.004;
             settingsPane.opacity = 0.004;
-            powerPane.opacity = 0.004;
         }
 
         anchors {
@@ -1119,7 +1138,7 @@ ShellRoot {
             input.text = "";
             capturingBind = "";
             expandedClip = null;
-            pane = (p === "settings" || p === "power" || activePanes.includes(p)) ? p : homePane();
+            pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
         }
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
@@ -1132,35 +1151,44 @@ ShellRoot {
                 setPane("settings");
             }
         }
-        // power menu (shutdown / restart / sleep / logout), like settings a
-        // pane outside the cycle with its own toggle and remembered origin
-        property string paneBeforePower: "clock"
-        property int powerSelected: 0
-        readonly property var powerChoices: [
-            { id: "shutdown", label: "Shut down", glyph: "⏻" },
-            { id: "restart", label: "Restart", glyph: "⟳" },
-            { id: "sleep", label: "Sleep", glyph: "⏾" },
-            { id: "logout", label: "Log out", glyph: "↩" }
-        ]
-        function togglePower() {
-            if (pane === "power") {
-                setPane(paneBeforePower);
-            } else {
-                paneBeforePower = pane;
-                powerSelected = 0;
-                setPane("power");
-            }
+        // ---------- swipe-to-power ----------
+        // Dragging down on empty space pulls the pane content down (rubber
+        // band) and reveals a ring that strokes itself closed as you drag,
+        // like a swipe-to-refresh. Releasing with the ring complete (or the
+        // power keybind) arms the "power off?" prompt; Enter then powers
+        // off, anything else (Escape, a click, another key) lets go.
+        property bool powerDragging: false
+        property real powerGrabY: 0
+        property real powerRaw: 0 // raw downward drag distance (finger travel)
+        property bool powerArmed: false
+        readonly property real powerThreshold: 300
+        readonly property real powerProgress: Math.min(1, powerRaw / powerThreshold)
+        // content shift lags the finger with increasing resistance
+        readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / 260))
+        Behavior on powerRaw {
+            enabled: !win.powerDragging
+            NumberAnimation { duration: win.ad(320); easing.type: Easing.OutCubic }
         }
-        function powerAction(id: string) {
-            const cmds = {
-                shutdown: "systemctl poweroff",
-                restart: "systemctl reboot",
-                sleep: "systemctl suspend",
-                logout: 'niri msg action quit --skip-confirmation || loginctl terminate-session "$XDG_SESSION_ID"'
-            };
-            if (!cmds[id])
-                return;
-            Quickshell.execDetached(["bash", "-c", cmds[id]]);
+        Timer {
+            // a forgotten armed prompt must not lie in wait to turn the next
+            // launch Return into a poweroff: let go on its own after a beat
+            interval: 6000
+            running: win.powerArmed && !win.powerDragging
+            onTriggered: win.disarmPower()
+        }
+        function disarmPower() {
+            powerArmed = false;
+            powerRaw = 0;
+        }
+        // the power keybind plays the pull animation (the powerRaw Behavior
+        // animates the ride down) straight into the armed pose: Enter powers
+        // off, anything else lets go — same as completing the drag by hand
+        function playPower() {
+            powerArmed = true;
+            powerRaw = powerThreshold;
+        }
+        function powerOff() {
+            Quickshell.execDetached(["systemctl", "poweroff"]);
             exit();
         }
         function cyclePane(dir: int) {
@@ -1170,8 +1198,6 @@ ShellRoot {
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
-            if (pane === "power")
-                return;
             let i = activePanes.indexOf(pane);
             if (i < 0)
                 i = 0;
@@ -1301,9 +1327,6 @@ ShellRoot {
                 clipSelected = dy !== 0
                     ? vMove(clipSelected, clipMatches.length, cfg.clipsCols, clipRowsC, dy)
                     : hMove(clipSelected, clipMatches.length, dx);
-            } else if (pane === "power") {
-                if (dx !== 0)
-                    powerSelected = hMove(powerSelected, powerChoices.length, dx);
             }
         }
 
@@ -1329,7 +1352,13 @@ ShellRoot {
                 return;
             root.recordLaunch(entry);
             launchEntry = entry;
-            appLaunch.command = ["bash", "-c", 'command -v gtk-launch >/dev/null || exit 42; exec gtk-launch "$1"', "_", entry.id];
+            // The launched app inherits gtk-launch's stdio, i.e. this Process's
+            // pipes — which close once gtk-launch exits, so chatty apps
+            // (flatpaks especially) would SIGPIPE on their next log line and
+            // die seconds after launch. Point stdio at /dev/null and give the
+            // app its own session; setsid -w keeps gtk-launch's exit code for
+            // the fallback below.
+            appLaunch.command = ["bash", "-c", 'command -v gtk-launch >/dev/null || exit 42; setsid -w gtk-launch "$1" >/dev/null 2>&1', "_", entry.id];
             appLaunch.running = true;
             exit();
         }
@@ -1401,7 +1430,13 @@ ShellRoot {
                     body=$(head -c 4000 "$tmp")
                 fi
                 rm -f "$tmp"
-                notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
+                # copied images ride along as notification media (the decoded
+                # entry is already cached by the thumbnail scan)
+                if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
+                    notify-send -a launcher -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
+                else
+                    notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
+                fi
                 sleep 0.3
                 nid=$(cliphist list | head -n 1 | cut -f1)
                 echo "$nid"
@@ -1465,8 +1500,6 @@ ShellRoot {
                     expandClip(clipMatches[clipSelected] ?? null);
             } else if (pane === "apps")
                 launch(matches.length ? matches[selected] : null);
-            else if (pane === "power")
-                powerAction(powerChoices[powerSelected].id);
             else if (pane === "clock")
                 setPane("apps");
         }
@@ -1586,6 +1619,13 @@ ShellRoot {
             anchors.fill: parent
             opacity: 0
 
+            // the swipe-to-power rubber band, shared: every pane references
+            // this one instance, so the pull physics live in a single place
+            Translate {
+                id: panePull
+                y: win.powerPull
+            }
+
             Rectangle {
                 anchors.fill: parent
                 color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.dimOpacity)
@@ -1602,7 +1642,9 @@ ShellRoot {
                 anchors.fill: parent
                 property real wheelAcc: 0
                 onClicked: {
-                    if (win.expandedClip)
+                    if (win.powerArmed)
+                        win.disarmPower();
+                    else if (win.expandedClip)
                         win.collapseClip();
                     else
                         input.forceActiveFocus();
@@ -1618,6 +1660,35 @@ ShellRoot {
                         wheelAcc += 120;
                     }
                 }
+
+                // swipe-to-power: a downward drag that starts on empty space
+                // (tile MouseAreas grab their own presses). Same scene-coords
+                // pattern as the notification swipe: the content moving under
+                // the cursor must not feed back into the drag.
+                DragHandler {
+                    target: null
+                    xAxis.enabled: false
+                    yAxis.enabled: true
+                    onActiveChanged: {
+                        if (active) {
+                            win.powerDragging = true;
+                            win.powerGrabY = centroid.scenePosition.y - win.powerRaw;
+                        } else {
+                            win.powerDragging = false;
+                            if (win.powerProgress >= 1) {
+                                // hold the completed pose and wait for Enter
+                                win.powerArmed = true;
+                                win.powerRaw = win.powerThreshold;
+                            } else {
+                                win.disarmPower(); // springs back up
+                            }
+                        }
+                    }
+                    onCentroidChanged: {
+                        if (active)
+                            win.powerRaw = Math.max(0, centroid.scenePosition.y - win.powerGrabY);
+                    }
+                }
             }
 
             // Idle state: big clock + date. The outer gate holds the clock
@@ -1627,6 +1698,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: clockView.width
                 height: clockView.height
+                transform: panePull
                 visible: win.pane === "clock"
                 onVisibleChanged: if (visible) fadeUp.restart()
                 // fade in only once the hole (from wherever it originates)
@@ -1670,6 +1742,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: cfg.appsCols * 174 + (cfg.appsCols - 1) * 24 + 52
                 height: grid.height + 52
+                transform: panePull
                 opacity: 0.004
                 visible: win.drawerOpen || win.warmingApps
                 Connections {
@@ -1772,13 +1845,7 @@ ShellRoot {
                                             sourceSize: Qt.size(88, 88)
                                             asynchronous: true
                                             fillMode: Image.PreserveAspectFit
-                                            source: {
-                                                const name = cell.shownEntry ? cell.shownEntry.icon : "";
-                                                if (!name)
-                                                    return "";
-                                                // some entries put a file path in Icon=
-                                                return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
-                                            }
+                                            source: root.iconUrl(cell.shownEntry ? cell.shownEntry.icon : "")
                                             visible: status === Image.Ready
                                         }
                                         Text {
@@ -1844,6 +1911,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: cfg.wallsCols * 240 + (cfg.wallsCols - 1) * 24 + 52
                 height: wallGrid.height + 52
+                transform: panePull
                 opacity: 0.004
                 // during warm-up, show the pane only after all thumbnail
                 // textures are uploaded, so its first frame reuses them
@@ -2000,6 +2068,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: cfg.clipsCols * 240 + (cfg.clipsCols - 1) * 16 + 52
                 height: Math.max(clipMasonry.height, 120) + 52
+                transform: panePull
                 opacity: 0.004
                 visible: win.pane === "clips"
                 Connections {
@@ -2393,6 +2462,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: 860
                 height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
+                transform: panePull
                 opacity: 0.004
                 visible: win.pane === "settings"
                 Connections {
@@ -2493,17 +2563,15 @@ ShellRoot {
                     // tab; only the font row needs a wide value
                     SettingRow { key: "volWidth"; label: "Volume size" }
                     SettingRow { key: "volStyle"; label: "Volume style" }
+                    SettingRow { key: "volEqPitch"; label: "Volume bar spacing" }
                     SettingRow { key: "volAnim"; label: "Volume animation" }
-                    SettingRow { key: "volCardBg"; label: "Volume card" }
                     SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
-                    SettingRow { key: "notifWidth"; label: "Notification size" }
+                    SettingRow { key: "notifStyle"; label: "Notification style" }
+                    SettingRow { key: "notifTheme"; label: "Notification theme" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
                     SettingRow { key: "notifFontScale"; label: "Notification font size" }
-                    SettingRow { key: "notifAnim"; label: "Notification animation" }
-                    SettingRow { key: "notifMax"; label: "Max notifications" }
                     SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
-                    SettingRow { key: "flyOpacity"; label: "Opacity" }
 
                     // enabled flyouts (unloading notifications releases the
                     // org.freedesktop.Notifications DBus name for other daemons)
@@ -2878,7 +2946,7 @@ ShellRoot {
                             { action: "reverseCycle", label: "Cycle pages (reverse)" },
                             { action: "launch", label: "Launch / apply" },
                             { action: "settings", label: "Settings" },
-                            { action: "power", label: "Power menu" },
+                            { action: "power", label: "Power off prompt" },
                             { action: "exit", label: "Exit / back" }
                         ]
 
@@ -2936,84 +3004,67 @@ ShellRoot {
                 } // tabViewport
             }
 
-            // Power menu: four big horizontal actions. Opened from the corner
-            // power button or the power keybind (Ctrl+P by default); Escape
-            // steps back to wherever it was opened from.
+            // Swipe-to-power pull indicator: extra dim over the whole screen,
+            // and a small ring that rides down ahead of the pulled content,
+            // stroking itself closed as the drag progresses. On completion a
+            // "power off?" prompt fades in; Enter confirms.
+            Rectangle {
+                anchors.fill: parent
+                color: "black"
+                opacity: 0.5 * win.powerProgress
+            }
             Item {
-                id: powerPane
-                anchors.centerIn: parent
-                width: powerRow.width + 80
-                height: powerRow.height + 80
-                opacity: 0.004
-                visible: win.pane === "power"
-                Connections {
-                    target: win
-                    function onPaneChanged() {
-                        if (win.pane === "power")
-                            powerIn.restart();
+                id: powerRing
+                visible: win.powerRaw > 1
+                anchors.horizontalCenter: parent.horizontalCenter
+                // the -200 rides in with the pull so the ring still enters
+                // from the top edge, just landing higher than the stock spot
+                y: -height + win.powerPull * 2.6 - 200 * win.powerProgress
+                width: 36
+                height: 36
+                opacity: Math.min(1, win.powerRaw / 80)
+
+                Canvas {
+                    id: ringCanvas
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        ctx.reset();
+                        // a plain ring that strokes itself closed clockwise
+                        // from the top as the drag completes
+                        ctx.lineWidth = 3.6;
+                        ctx.lineCap = "round";
+                        ctx.strokeStyle = root.accent;
+                        ctx.beginPath();
+                        ctx.arc(width / 2, height / 2, 10, -Math.PI / 2,
+                            -Math.PI / 2 + Math.PI * 2 * win.powerProgress, false);
+                        ctx.stroke();
                     }
                 }
-                ParallelAnimation {
-                    id: powerIn
-                    NumberAnimation { target: powerPane; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
-                    NumberAnimation { target: powerPane; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: powerPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                }
-
-                Row {
-                    id: powerRow
-                    anchors.centerIn: parent
-                    spacing: 28
-
-                    Repeater {
-                        model: win.powerChoices
-
-                        Rectangle {
-                            id: powerCard
-                            required property var modelData
-                            required property int index
-                            readonly property bool isSelected: win.powerSelected === index
-                            width: 170
-                            height: 170
-                            radius: 22
-                            antialiasing: true
-                            color: Qt.alpha(root.accent, isSelected || powerCardArea.containsMouse ? 0.2 : 0.08)
-                            border.width: isSelected ? 2 : 1
-                            border.color: isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 16
-
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: powerCard.modelData.glyph
-                                    color: root.accent
-                                    font { family: root.mono; pixelSize: root.fs(52) }
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: powerCard.modelData.label
-                                    color: powerCard.isSelected ? root.fg : root.muted
-                                    font { family: root.mono; pixelSize: root.fs(14) }
-                                }
-                            }
-                            MouseArea {
-                                id: powerCardArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    win.powerSelected = powerCard.index;
-                                    win.powerAction(powerCard.modelData.id);
-                                }
-                            }
-                        }
+                Connections {
+                    target: win
+                    function onPowerProgressChanged() {
+                        ringCanvas.requestPaint();
                     }
                 }
             }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: powerRing.y + powerRing.height + 12
+                text: "power off?"
+                color: root.fg
+                // start the fade as the ring nears closed: the pull easing
+                // crawls through its last few percent, so waiting for exactly
+                // 1.0 reads as a long pause after the circle looks complete
+                opacity: win.powerProgress >= 0.85 ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
+                font { family: root.mono; pixelSize: root.fs(18); letterSpacing: 2 }
+            }
 
-            // Corner buttons (power + settings): pop up when hovering the
-            // bottom-right corner, or while their pane is open
+            // Corner settings button: pops up when hovering the bottom-right
+            // corner, or while the settings pane is open
             MouseArea {
                 id: settingsHover
                 anchors.right: parent.right
@@ -3021,53 +3072,40 @@ ShellRoot {
                 width: 260
                 height: 180
                 hoverEnabled: true
-                readonly property bool revealed: containsMouse || win.pane === "settings" || win.pane === "power"
+                readonly property bool revealed: containsMouse || win.pane === "settings"
 
-                Row {
+                Rectangle {
+                    id: cornerBtn
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 32
-                    spacing: 14
+                    width: 56
+                    height: 56
+                    radius: 28
+                    antialiasing: true
+                    color: Qt.alpha(root.accent, cornerBtnArea.containsMouse ? 0.2 : 0.11)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.33)
+                    opacity: settingsHover.revealed ? 1 : 0
+                    scale: settingsHover.revealed ? 1 : 0.5
+                    Behavior on opacity {
+                        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
+                    }
 
-                    Repeater {
-                        model: [
-                            { glyph: "⏻", pane: "power" },
-                            { glyph: "⚙", pane: "settings" }
-                        ]
-
-                        Rectangle {
-                            id: cornerBtn
-                            required property var modelData
-                            width: 56
-                            height: 56
-                            radius: 28
-                            antialiasing: true
-                            color: Qt.alpha(root.accent, cornerBtnArea.containsMouse ? 0.2 : 0.11)
-                            border.width: 1
-                            border.color: Qt.alpha(root.accent, 0.33)
-                            opacity: settingsHover.revealed ? 1 : 0
-                            scale: settingsHover.revealed ? 1 : 0.5
-                            Behavior on opacity {
-                                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
-                            }
-                            Behavior on scale {
-                                NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: cornerBtn.modelData.glyph
-                                color: root.fg
-                                font { pixelSize: root.fs(26) }
-                            }
-                            MouseArea {
-                                id: cornerBtnArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: cornerBtn.modelData.pane === "power"
-                                    ? win.togglePower() : win.toggleSettings()
-                            }
-                        }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "⚙"
+                        color: root.fg
+                        font { pixelSize: root.fs(26) }
+                    }
+                    MouseArea {
+                        id: cornerBtnArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: win.toggleSettings()
                     }
                 }
             }
@@ -3095,18 +3133,16 @@ ShellRoot {
             case "fontFamily": return cfg.fontFamily || "JetBrains Mono";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
-            case "flyOpacity": return Math.round(cfg.flyOpacity * 100) + "%";
             case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
             case "volAnim": return cfg.volAnim;
             case "volStyle": return cfg.volStyle;
-            case "volCardBg": return cfg.volShowCard ? "on" : "off";
+            case "volEqPitch": return cfg.volEqPitch + " px";
             case "volPercent": return cfg.volShowPercent ? "on" : "off";
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
-            case "notifMax": return "" + cfg.notifMax;
-            case "notifWidth": return cfg.notifWidth + " px";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
-            case "notifAnim": return cfg.notifAnim;
+            case "notifStyle": return cfg.notifStyle;
+            case "notifTheme": return cfg.notifTheme;
             }
             return "";
         }
@@ -3187,26 +3223,20 @@ ShellRoot {
             case "volWidth":
                 cfg.volWidth = Math.max(240, Math.min(560, cfg.volWidth + dir * 20));
                 break;
-            case "flyOpacity":
-                cfg.flyOpacity = Math.max(0, Math.min(0.9, Math.round((cfg.flyOpacity + dir * 0.05) * 100) / 100));
-                break;
             case "volAnim":
                 cfg.volAnim = cycleChoice(cfg.volAnim, ["slide", "fade", "pop", "none"], dir);
                 break;
             case "volStyle":
                 cfg.volStyle = cycleChoice(cfg.volStyle, ["pill", "mirror", "spectrum", "flicker"], dir);
                 break;
-            case "volCardBg":
-                cfg.volShowCard = !cfg.volShowCard;
+            case "volEqPitch":
+                cfg.volEqPitch = Math.max(14, Math.min(46, cfg.volEqPitch + dir * 4));
                 break;
             case "volPercent":
                 cfg.volShowPercent = !cfg.volShowPercent;
                 break;
             case "volTimeout":
                 cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
-                break;
-            case "notifMax":
-                cfg.notifMax = Math.max(1, Math.min(5, cfg.notifMax + dir));
                 break;
             case "flyFontFamily": {
                 const list = [""].concat(root.fontFamilies);
@@ -3216,17 +3246,17 @@ ShellRoot {
                 cfg.flyFontFamily = list[((i + dir) % list.length + list.length) % list.length];
                 break;
             }
-            case "notifWidth":
-                cfg.notifWidth = Math.max(320, Math.min(600, cfg.notifWidth + dir * 20));
-                break;
             case "notifTimeout":
                 cfg.notifTimeout = Math.max(1000, Math.min(15000, cfg.notifTimeout + dir * 1000));
                 break;
             case "notifFontScale":
                 cfg.notifFontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.notifFontScale + dir * 0.1) * 100) / 100));
                 break;
-            case "notifAnim":
-                cfg.notifAnim = cycleChoice(cfg.notifAnim, ["expand", "slide", "fade", "none"], dir);
+            case "notifStyle":
+                cfg.notifStyle = cycleChoice(cfg.notifStyle, ["flyout", "stack"], dir);
+                break;
+            case "notifTheme":
+                cfg.notifTheme = cycleChoice(cfg.notifTheme, root.notifThemes, dir);
                 break;
             }
             root.saveSettings();
@@ -3279,20 +3309,18 @@ ShellRoot {
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 340; break;
-            case "flyOpacity": cfg.flyOpacity = 0.4; break;
             case "flyFontFamily": cfg.flyFontFamily = ""; break;
             case "flyTheme": cfg.flyTheme = "amber"; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volStyle": cfg.volStyle = "pill"; break;
-            case "volCardBg": cfg.volShowCard = true; break;
+            case "volEqPitch": cfg.volEqPitch = 26; break;
             case "volPercent": cfg.volShowPercent = true; break;
             case "volTimeout": cfg.volTimeout = 1500; break;
-            case "notifMax": cfg.notifMax = 3; break;
-            case "notifWidth": cfg.notifWidth = 420; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
-            case "notifAnim": cfg.notifAnim = "expand"; break;
+            case "notifStyle": cfg.notifStyle = "flyout"; break;
+            case "notifTheme": cfg.notifTheme = "default"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
@@ -3330,14 +3358,27 @@ ShellRoot {
                 }
                 const ks = win.keyName(event);
                 const kb = cfg.keybinds;
+                // armed power prompt: Enter powers off, anything else lets go
+                if (win.powerArmed) {
+                    event.accepted = true;
+                    // a bare modifier press is not a decision either way
+                    if ([Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta].includes(event.key))
+                        return;
+                    // compare the unmodified key: Ctrl still held from the
+                    // Ctrl+P arm must not turn the confirm into "Ctrl+Return"
+                    const bare = ks.replace(/^(?:Ctrl\+|Alt\+|Shift\+)+/, "");
+                    if (bare === (kb.launch ?? "Return"))
+                        win.powerOff();
+                    else
+                        win.disarmPower();
+                    return;
+                }
                 if (ks === (kb.exit ?? "Escape")) {
-                    // layered: expanded clip -> settings/power -> whole app
+                    // layered: expanded clip -> settings -> whole app
                     if (win.expandedClip)
                         win.collapseClip();
                     else if (win.pane === "settings")
                         win.setPane(win.paneBeforeSettings);
-                    else if (win.pane === "power")
-                        win.setPane(win.paneBeforePower);
                     else
                         win.exit();
                     event.accepted = true;
@@ -3345,7 +3386,7 @@ ShellRoot {
                     win.toggleSettings();
                     event.accepted = true;
                 } else if (ks === (kb.power ?? "Ctrl+P")) {
-                    win.togglePower();
+                    win.playPower();
                     event.accepted = true;
                 } else if (ks === (kb.reverseCycle ?? "Shift+Tab")) {
                     win.cyclePane(-1);
@@ -3489,12 +3530,7 @@ ShellRoot {
                     height: 1
                     asynchronous: true
                     sourceSize: Qt.size(88, 88)
-                    source: {
-                        const name = modelData.icon;
-                        if (!name)
-                            return "";
-                        return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
-                    }
+                    source: root.iconUrl(modelData.icon)
                 }
             }
         }
@@ -3523,15 +3559,16 @@ ShellRoot {
         }
     }
 
-    // Warm the app-icon pixmap cache shortly after the daemon starts, so the
+    // Warm the app-icon pixmap cache the moment the daemon starts, so the
     // very first launcher open renders icons immediately instead of briefly
-    // showing the two-letter fallback while the SVGs decode. A tiny
-    // transparent overlay surface is enough to drive the image provider and
-    // populate the process-global cache; it unloads once the cache is warm.
-    // (The in-window warm-up only spans a couple of frames before the reveal,
-    // too short for the async decodes to finish on a cold first open.)
-    property bool bootWarmIcons: false
-    Timer { interval: 900; running: true; onTriggered: root.bootWarmIcons = true }
+    // showing the two-letter fallback while the SVGs decode (QML decodes
+    // images on a single reader thread, so ~100 theme SVGs take a second or
+    // two — pay that at session start, not at first open). A tiny transparent
+    // overlay surface is enough to drive the image provider and populate the
+    // process-global cache; it unloads once the cache is warm (the in-window
+    // warm-up Item keeps every pixmap referenced after that, so the cache
+    // never evicts them).
+    property bool bootWarmIcons: true
     Timer { interval: 30000; running: true; onTriggered: root.bootWarmIcons = false }
     LazyLoader {
         active: root.bootWarmIcons
@@ -3556,12 +3593,7 @@ ShellRoot {
                         height: 1
                         asynchronous: true
                         sourceSize: Qt.size(88, 88)
-                        source: {
-                            const name = modelData.icon;
-                            if (!name)
-                                return "";
-                            return name.startsWith("/") ? "file://" + name : Quickshell.iconPath(name, true);
-                        }
+                        source: root.iconUrl(modelData.icon)
                     }
                 }
             }
@@ -3659,7 +3691,6 @@ ShellRoot {
                 repeat: true
                 onTriggered: volWin.tick++
             }
-            readonly property bool cardBg: cfg.volShowCard
             readonly property bool pct: cfg.volShowPercent
             // per-band base amplitude curve for the "spectrum decay"
             // visualizer (the design's 12-band shape, sampled fractionally so
@@ -3680,7 +3711,9 @@ ShellRoot {
                 const eff = root.sinkMuted ? 0 : root.vol * 100;
                 if (eff <= 0)
                     return 2; // 4px floor
-                const v = Math.min(1, eff / 100);
+                // square-root response: steep below ~50% so quiet-range
+                // volume steps read clearly, flattening toward full volume
+                const v = Math.sqrt(Math.min(1, eff / 100));
                 const t = tick;
                 let h;
                 if (cfg.volStyle === "mirror") {
@@ -3695,19 +3728,6 @@ ShellRoot {
                     h = Math.max(4, (0.5 + 0.5 * r) * v * 96);
                 }
                 return Math.round(h / 2);
-            }
-
-            BackgroundEffect.blurRegion: RoundedBlur {
-                // rr un-clamped at the low end so the region collapses to
-                // ~1px (invisible) as the card fades/scales out; no card
-                // background = nothing to blur behind
-                readonly property real s: volWin.cardBg
-                    ? (volWin.mode === "pop" ? volCard.scale : 1) * volCard.opacity : 0
-                rx: volCard.x + (volCard.width - volCard.width * s) / 2 + 2
-                ry: volCard.y + (volCard.height - volCard.height * s) / 2 + 2
-                rw: Math.max(1, volCard.width * s - 4)
-                rh: Math.max(1, volCard.height * s - 4)
-                rr: Math.max(0, volCard.radius - 2) * s
             }
 
             Rectangle {
@@ -3731,10 +3751,8 @@ ShellRoot {
                         easing.overshoot: 1.2
                     }
                 }
-                // the card background is optional (bars-only mode)
-                color: volWin.cardBg ? Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.flyOpacity) : "transparent"
-                border.width: volWin.cardBg ? 1 : 0
-                border.color: Qt.alpha(root.flyTh.accent, 0.33)
+                // no card background: the bars/pill render straight on the wallpaper
+                color: "transparent"
                 antialiasing: true
                 opacity: volWin.mode === "slide" ? 1 : (on ? 1 : 0)
                 scale: volWin.mode === "pop" ? (on ? 1 : 0.8) : 1
@@ -3810,7 +3828,10 @@ ShellRoot {
                     anchors.horizontalCenterOffset: -volCard.pctSpace / 2
                     readonly property real avail: volCard.width - 48 - volCard.pctSpace
                     readonly property real barW: 6
-                    readonly property int nBars: Math.max(4, Math.floor((avail + 20) / 26))
+                    // pitch clamped at use too: watchChanges live-reloads
+                    // hand edits the onCompleted heal never saw
+                    readonly property int pitch: Math.max(14, Math.min(46, cfg.volEqPitch))
+                    readonly property int nBars: Math.max(2, Math.floor((avail + pitch - barW) / pitch))
                     spacing: nBars > 1 ? (avail - barW * nBars) / (nBars - 1) : 0
 
                     Repeater {
@@ -3853,9 +3874,9 @@ ShellRoot {
     // fixed-size window. Cards are assigned to free slots, so existing cards
     // never rebuild when another notification arrives; stacking order is by
     // arrival, newest on top. Click expands the body text; swiping left or
-    // right moves the card and dismisses past the threshold. Five slots
-    // exist; cfg.notifMax caps how many are used at once.
-    readonly property int notifSlots: 5
+    // right moves the card and dismisses past the threshold. The slot pool
+    // (notifWin.cards) is the capacity: a burst past it reuses the oldest
+    // card, cutting its exit animation short.
     function notifFs(px: int): int {
         return Math.round(px * cfg.notifFontScale);
     }
@@ -3871,81 +3892,1022 @@ ShellRoot {
             imageSupported: true
             onNotification: n => {
                 n.tracked = true;
-                notifWin.accept(n);
+                if (cfg.notifStyle === "stack")
+                    stackNotifLoader.item?.accept(n);
+                else
+                    flyNotifLoader.item?.accept(n);
             }
         }
     }
 
-    PanelWindow {
-        id: notifWin
-        // Fixed card instances referenced by id. An earlier Repeater version
-        // referenced cards via cardRep.itemAt(i) inside the mask/blur region
-        // bindings, but itemAt() is not reactive and returns null while the
-        // delegates are still being created, so those regions stayed empty —
-        // which dropped the blur (no xray) and the input mask (no clicks).
-        readonly property var cards: [cardA, cardB, cardC, cardD, cardE]
-        property bool anyActive: false
-        function refreshActive() {
-            anyActive = cards.some(c => c.active);
-        }
-        visible: anyActive
-        anchors.top: true
-        anchors.right: true
-        // fixed size: cards animate inside; the left slack is swipe travel
-        implicitWidth: cfg.notifWidth + 240
-        implicitHeight: 1290
-        color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "launcher-notif-osd"
+    // Only the selected notification pipeline is loaded: the idle style's
+    // object graph (cards, timers, canvases) would otherwise keep live
+    // bindings for the daemon's lifetime. A rebuild happens only on a
+    // settings change, never on a notification's hot path.
+    LazyLoader {
+        id: stackNotifLoader
+        active: cfg.notifStyle === "stack" && root.flyoutOn("notifs")
 
-        function accept(n) {
-            const max = Math.max(1, Math.min(root.notifSlots, cfg.notifMax));
-            let free = null, oldest = null;
-            for (let i = 0; i < max; i++) {
-                const c = cards[i];
-                if (!c.active && !c.leaving) {
-                    free = c;
+        PanelWindow {
+            id: notifWin
+            // Fixed card instances referenced by id. An earlier Repeater version
+            // referenced cards via cardRep.itemAt(i) inside the mask/blur region
+            // bindings, but itemAt() is not reactive and returns null while the
+            // delegates are still being created, so those regions stayed empty —
+            // which dropped the blur (no xray) and the input mask (no clicks).
+            readonly property var cards: [cardA, cardB, cardC]
+            property bool anyActive: false
+            function refreshActive() {
+                anyActive = cards.some(c => c.active);
+            }
+            visible: anyActive
+            anchors.top: true
+            anchors.right: true
+            // fixed size: cards animate inside; the left slack is swipe travel
+            implicitWidth: 660
+            implicitHeight: 1290
+            color: "transparent"
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "launcher-notif-osd"
+
+            function accept(n) {
+                let free = null, oldest = null;
+                for (let i = 0; i < cards.length; i++) {
+                    const c = cards[i];
+                    if (!c.active && !c.leaving) {
+                        free = c;
+                        break;
+                    }
+                    if (!oldest || c.seq < oldest.seq)
+                        oldest = c;
+                }
+                const s = free || oldest;
+                if (!s)
+                    return;
+                if (!free)
+                    s.finalize();
+                s.assign(n);
+                refreshActive();
+            }
+
+            // input only over the cards; everything else clicks through
+            mask: Region {
+                regions: [
+                    NotifMaskRegion { c: cardA },
+                    NotifMaskRegion { c: cardB },
+                    NotifMaskRegion { c: cardC }
+                ]
+            }
+            NotifCard { id: cardA; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+            NotifCard { id: cardB; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+            NotifCard { id: cardC; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+        }
+    }
+
+    // ---------- creative notification flyout (notifStyle "flyout") ----------
+    // One notification at a time: an app-tinted circle pops in below the
+    // top-right corner, pulses with an expanding ring, then a compact card
+    // staggers its lines in to the left of it. Same-app arrivals replace the
+    // visible card (it slides out and the new one fires next; if the card
+    // hasn't appeared yet the content just swaps in place); other apps queue
+    // and fire after the current one dismisses. The tint colour is the
+    // dominant colour of the app icon (Canvas pixel average, cached per
+    // icon), falling back to the flyout theme accent.
+    LazyLoader {
+        id: flyNotifLoader
+        active: cfg.notifStyle !== "stack" && root.flyoutOn("notifs")
+
+        PanelWindow {
+            id: flyWin
+            // hidden -> appear (circle pops in) -> pulse (overshoot + ring) ->
+            // show (card staggers in, timeout runs) -> dismiss (lines stagger
+            // out, card slides, circle shrinks) -> hidden
+            property string phase: "hidden"
+            property var current: null
+            // snapshot of the notification's content (same rationale as NotifCard)
+            property var view: ({ own: false, glyph: "", app: "", key: "", summary: "", body: "", image: "", icon: "", timeout: 0 })
+            property var queue: []
+            property int exitDir: 0
+            // this dismissal keeps the bubble up until the card is gone
+            property bool lingerOut: false
+            // "simple" | "thumb" | "rich"; frozen when the card fires so a late
+            // image probe can't reshape the visible card
+            property string variant: "simple"
+            property color nColor: root.notifTh.accent
+            property var tintCache: ({})
+            Behavior on nColor {
+                ColorAnimation { duration: 220 }
+            }
+
+            visible: phase !== "hidden"
+            anchors.top: true
+            anchors.right: true
+            // fixed size: everything animates inside (see the OSD architecture
+            // note); sized for the widest card at max font scale plus ring bloom
+            // and a fully expanded body
+            implicitWidth: 720
+            implicitHeight: 640
+            color: "transparent"
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "launcher-notif-fly"
+
+            function accept(n) {
+                // sender may retract a queued notification before it fires
+                n.closed.connect(() => flyWin.unqueue(n));
+                // fire straight away only when nothing is up AND nothing is
+                // waiting (during the inter-notification gap the phase is hidden
+                // but the queue must keep its order)
+                if (phase === "hidden" && queue.length === 0) {
+                    fire(n);
+                    return;
+                }
+                // never hold two notifications of one app: replace in the queue
+                for (let i = 0; i < queue.length; i++) {
+                    if (appKey(queue[i]) === appKey(n)) {
+                        const old = queue[i];
+                        queue[i] = n;
+                        old.expire();
+                        return;
+                    }
+                }
+                if (phase !== "hidden" && view.key === appKey(n)) {
+                    if (phase === "appear" || phase === "pulse") {
+                        // card isn't up yet: swap the content in place
+                        const old = current;
+                        snapshot(n);
+                        if (old)
+                            old.expire();
+                        return;
+                    }
+                    // on screen: slide the current card out now, fire this next
+                    queue.unshift(n);
+                    if (phase === "show")
+                        dismiss(0);
+                    return; // already dismissing: it fires on finalize
+                }
+                if (queue.length >= 6)
+                    queue.shift().expire();
+                queue.push(n);
+            }
+            function unqueue(n) {
+                const i = queue.indexOf(n);
+                if (i >= 0)
+                    queue.splice(i, 1);
+            }
+            // identity for replace-within-app: the name when given, else the
+            // desktop-entry hint (Discord and friends send no appName)
+            function appKey(n): string {
+                return String(n.appName ?? "") || String(n.desktopEntry ?? "");
+            }
+            function snapshot(n) {
+                current = n;
+                let icon = root.iconUrl(String(n.appIcon ?? ""));
+                let img = String(n.image ?? "");
+                // some apps (e.g. niri screenshots) pass a file path in the icon
+                // field: that is notification media, not an app icon
+                if (icon.startsWith("file://")) {
+                    if (!img)
+                        img = icon;
+                    icon = "";
+                }
+                // notify-send-style senders arrive with everything in the image
+                // slot (appIcon empty), routed through the icon provider: a
+                // file path there is notification media (decode it directly so
+                // the aspect probe sees real dimensions), an icon name is the
+                // app icon, not media
+                if (img.startsWith("image://icon/")) {
+                    const rest = img.slice("image://icon/".length);
+                    if (rest.startsWith("/"))
+                        img = "file://" + rest;
+                    else {
+                        if (!icon)
+                            icon = img;
+                        img = "";
+                    }
+                }
+                // some senders (e.g. Discord) omit the app name and icon but set
+                // the desktop-entry hint — recover both from the entry
+                const de = String(n.desktopEntry ?? "");
+                let appName = String(n.appName ?? "");
+                if (de && (!appName || !icon)) {
+                    const ent = Array.from(DesktopEntries.applications.values)
+                        .find(e => e.id.toLowerCase() === de.toLowerCase());
+                    if (ent) {
+                        if (!appName)
+                            appName = ent.name;
+                        if (!icon && ent.icon)
+                            icon = root.iconUrl(ent.icon);
+                    }
+                    if (!appName)
+                        appName = de;
+                }
+                view = {
+                    own: n.appName === "launcher",
+                    glyph: root.notifGlyph(icon, String(n.summary ?? "")),
+                    app: appName,
+                    key: appKey(n),
+                    summary: n.summary ?? "",
+                    body: n.body ?? "",
+                    image: img,
+                    icon: icon,
+                    timeout: n.expireTimeout
+                };
+                imgProbe.source = view.image;
+                // "default" theme tints from the app icon (else the media
+                // image); pinned themes use their accent everywhere
+                const src = (root.notifIconTint && !view.own) ? (view.icon || view.image) : "";
+                if (!src)
+                    nColor = root.notifTh.accent;
+                else if (tintCache[src] !== undefined)
+                    nColor = tintCache[src];
+                else {
+                    nColor = root.notifTh.accent;
+                    tint.src = src; // updates nColor when extracted
+                }
+            }
+            function fire(n) {
+                snapshot(n);
+                exitDir = 0;
+                phase = "appear";
+                phaseTimer.restart();
+            }
+            // dir: swipe direction (-1 rubber-bands back before the drift),
+            // 0 for timeout/bubble click/sender-close; all exit drifting right
+            function dismiss(dir: int) {
+                if (phase === "hidden" || phase === "dismiss")
+                    return;
+                exitDir = dir;
+                phase = "dismiss";
+                phaseTimer.restart();
+            }
+            function finalize() {
+                const c = current;
+                current = null;
+                if (c)
+                    c.expire();
+                phase = "hidden";
+                if (queue.length > 0)
+                    gapTimer.restart();
+            }
+            function computeVariant(): string {
+                if (!view.image)
+                    return "simple";
+                // wide images (16:10 and up: screenshots, photos) read best as a
+                // full strip; squarer ones (avatars, album art) as a thumbnail
+                if (imgProbe.status === Image.Ready && imgProbe.implicitHeight > 0
+                    && imgProbe.implicitWidth / imgProbe.implicitHeight >= 1.6)
+                    return "rich";
+                return "thumb";
+            }
+
+            onPhaseChanged: {
+                iconIn.stop();
+                iconPop.stop();
+                iconSettle.stop();
+                iconOut.stop();
+                iconOutDelay.stop();
+                stagInAnim.stop();
+                stagOutAnim.stop();
+                wipeAnim.stop();
+                switch (phase) {
+                case "appear":
+                    ringAnim.stop();
+                    // entry pose, applied instantly (inst gates the Behaviors)
+                    fcard.inst = true;
+                    fcard.stagIn = 0;
+                    fcard.stagOut = 0;
+                    fcard.imgWipe = 0;
+                    fcard.cardO = 0;
+                    fcard.cardYS = 0.92;
+                    fcard.swipeX = 0;
+                    fcard.expanded = false;
+                    fcard.inst = false;
+                    ring.scale = 1;
+                    ring.opacity = 0;
+                    iconIn.restart();
+                    break;
+                case "pulse":
+                    iconPop.restart();
+                    ringAnim.restart();
+                    break;
+                case "show":
+                    variant = computeVariant();
+                    iconSettle.restart();
+                    fcard.cardO = 1;
+                    fcard.cardYS = 1;
+                    stagInAnim.restart();
+                    wipeAnim.restart();
+                    break;
+                case "dismiss":
+                    stagOutAnim.restart();
+                    // hold the bubble until the card has fully left
+                    flyWin.lingerOut = fcard.cardO > 0;
+                    if (flyWin.lingerOut)
+                        iconOutDelay.restart();
+                    else
+                        iconOut.restart();
+                    // every dismissal fades with a gentle rightward drift; a
+                    // left swipe rubber-bands back through rest to reach it
+                    if (fcard.cardO > 0)
+                        fcard.swipeX = (exitDir < 0 ? 0 : fcard.swipeX) + 18;
+                    fcard.cardO = 0;
                     break;
                 }
-                if (!oldest || c.seq < oldest.seq)
-                    oldest = c;
             }
-            const s = free || oldest;
-            if (!s)
-                return;
-            if (!free)
-                s.finalize();
-            s.assign(n);
-            refreshActive();
-        }
 
-        // input only over the cards; everything else clicks through
-        mask: Region {
-            regions: [
-                NotifMaskRegion { c: cardA },
-                NotifMaskRegion { c: cardB },
-                NotifMaskRegion { c: cardC },
-                NotifMaskRegion { c: cardD },
-                NotifMaskRegion { c: cardE }
-            ]
-        }
-        // one rounded region per card; inactive slots stay a harmless 1px
-        // (never 0-area, which would read as "blur the whole surface")
-        BackgroundEffect.blurRegion: Region {
-            regions: [
-                NotifBlurRegion { c: cardA },
-                NotifBlurRegion { c: cardB },
-                NotifBlurRegion { c: cardC },
-                NotifBlurRegion { c: cardD },
-                NotifBlurRegion { c: cardE }
-            ]
-        }
+            Timer {
+                id: phaseTimer
+                interval: flyWin.phase === "appear" ? 430 : flyWin.phase === "pulse" ? 210
+                    : flyWin.lingerOut ? 640 : 340
+                onTriggered: {
+                    switch (flyWin.phase) {
+                    case "appear":
+                        flyWin.phase = "pulse";
+                        phaseTimer.restart();
+                        break;
+                    case "pulse":
+                        flyWin.phase = "show"; // showTimer takes over
+                        break;
+                    case "dismiss":
+                        flyWin.finalize();
+                        break;
+                    }
+                }
+            }
+            Timer {
+                id: showTimer
+                // a sender timeout of exactly 0 means "never expire" (spec): the
+                // notification stays until clicked or swiped away
+                interval: flyWin.view.timeout > 0 ? flyWin.view.timeout : cfg.notifTimeout
+                running: flyWin.phase === "show" && !cardHover.hovered && flyWin.view.timeout !== 0
+                onTriggered: flyWin.dismiss(0)
+            }
+            Timer {
+                // small beat between one notification leaving and the next firing
+                id: gapTimer
+                interval: 160
+                onTriggered: {
+                    if (flyWin.queue.length > 0 && flyWin.phase === "hidden")
+                        flyWin.fire(flyWin.queue.shift());
+                }
+            }
+            // sender closed the on-screen notification — animate out
+            Connections {
+                target: flyWin.current
+                ignoreUnknownSignals: true
+                function onClosed() {
+                    flyWin.current = null;
+                    flyWin.dismiss(0);
+                }
+            }
 
-        NotifCard { id: cardA; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-        NotifCard { id: cardB; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-        NotifCard { id: cardC; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-        NotifCard { id: cardD; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
-        NotifCard { id: cardE; siblings: notifWin.cards; onActiveChanged: notifWin.refreshActive() }
+            // aspect-ratio probe for the notification image; the icon-circle
+            // phases (~630ms) cover the async load before the card needs it
+            Image {
+                id: imgProbe
+                visible: false
+                asynchronous: true
+                // a big image can outlast the icon phases; when the probe lands
+                // while the card is up, re-classify once so a wide screenshot
+                // isn't stuck cropped into the thumbnail circle
+                onStatusChanged: {
+                    if (status === Image.Ready && flyWin.phase === "show")
+                        flyWin.variant = flyWin.computeVariant();
+                }
+            }
+            // dominant-colour extraction: the icon is drawn at 26x26 and averaged,
+            // weighted by saturation and alpha, skipping near-white/black pixels;
+            // the result is normalised into a band that reads on the dark card.
+            // Parked off the window's left edge: a visible:false Canvas never
+            // paints, an off-viewport one does.
+            Canvas {
+                id: tint
+                property string src: ""
+                x: -60
+                y: 0
+                width: 26
+                height: 26
+                renderStrategy: Canvas.Immediate
+                renderTarget: Canvas.Image
+                onSrcChanged: {
+                    if (src)
+                        loadImage(src);
+                }
+                onImageLoaded: requestPaint()
+                onPaint: {
+                    if (!src || !isImageLoaded(src))
+                        return;
+                    const ctx = getContext("2d");
+                    ctx.clearRect(0, 0, width, height);
+                    ctx.drawImage(src, 0, 0, width, height);
+                    const d = ctx.getImageData(0, 0, width, height).data;
+                    let r = 0, g = 0, b = 0, w = 0;
+                    for (let i = 0; i < d.length; i += 4) {
+                        const a = d[i + 3] / 255;
+                        if (a < 0.4)
+                            continue;
+                        const mx = Math.max(d[i], d[i + 1], d[i + 2]);
+                        const mn = Math.min(d[i], d[i + 1], d[i + 2]);
+                        const lum = (mx + mn) / 510;
+                        if (lum > 0.95 || lum < 0.06)
+                            continue;
+                        const sat = mx > 0 ? (mx - mn) / mx : 0;
+                        const wt = a * (0.1 + sat * sat);
+                        r += d[i] * wt;
+                        g += d[i + 1] * wt;
+                        b += d[i + 2] * wt;
+                        w += wt;
+                    }
+                    let c = root.notifTh.accent;
+                    if (w > 3) {
+                        c = Qt.rgba(r / w / 255, g / w / 255, b / w / 255, 1);
+                        // pull into a visible band; leave true greys grey
+                        c = (c.hslHue < 0 || c.hslSaturation < 0.12)
+                            ? Qt.hsla(Math.max(0, c.hslHue), c.hslSaturation, Math.min(0.75, Math.max(0.5, c.hslLightness)), 1)
+                            : Qt.hsla(c.hslHue, Math.max(c.hslSaturation, 0.5), Math.min(0.68, Math.max(0.45, c.hslLightness)), 1);
+                    }
+                    flyWin.tintCache[src] = c;
+                    if (src === flyWin.view.icon || src === flyWin.view.image)
+                        flyWin.nColor = c;
+                    unloadImage(src);
+                    src = "";
+                }
+            }
+
+            // input only over the card and bubble while they are interactive
+            mask: Region {
+                x: fcard.x
+                y: fcard.y
+                width: flyWin.phase === "show" ? fcard.width : 0
+                height: fcard.height
+                regions: [
+                    Region {
+                        x: fIcon.x
+                        y: fIcon.y
+                        width: flyWin.phase === "show" ? fIcon.width : 0
+                        height: fIcon.height
+                    }
+                ]
+            }
+            // ── icon circle ──
+            Item {
+                id: fIcon
+                x: flyWin.width - width - 26
+                y: 24
+                width: 52
+                height: 52
+                scale: 0
+                opacity: 0
+                // grow-on-hover rides a transform so the phase animations own
+                // `scale`; independent of the card's (separate handlers)
+                readonly property bool hov: bubbleHover.hovered && flyWin.phase === "show"
+                property real hoverS: hov ? 1.08 : 1
+                Behavior on hoverS {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
+                transform: Scale {
+                    origin.x: fIcon.width / 2
+                    origin.y: fIcon.height / 2
+                    xScale: fIcon.hoverS
+                    yScale: fIcon.hoverS
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: width / 2
+                    antialiasing: true
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.lighter(flyWin.nColor, 1.18) }
+                        GradientStop { position: 1; color: Qt.darker(flyWin.nColor, 1.22) }
+                    }
+
+                }
+                Rectangle {
+                    id: ring
+                    anchors.fill: parent
+                    radius: width / 2
+                    antialiasing: true
+                    color: "transparent"
+                    border.width: 2
+                    border.color: flyWin.nColor
+                    opacity: 0
+                }
+                Image {
+                    id: circleIcon
+                    anchors.centerIn: parent
+                    width: 28
+                    height: 28
+                    sourceSize: Qt.size(56, 56)
+                    asynchronous: true
+                    source: flyWin.view.own ? "" : flyWin.view.icon
+                    visible: String(source) !== ""
+                }
+                // no app icon: the launcher's own glyphs stay; other apps get
+                // the drawn bell fallback
+                readonly property color inkC: "#f2f0ee"
+                Text {
+                    anchors.centerIn: parent
+                    visible: !circleIcon.visible && flyWin.view.own
+                    text: flyWin.view.glyph
+                    color: fIcon.inkC
+                    // optical parity with the drawn icon (~18px ink): glyph
+                    // ink varies per codepoint, so the font size compensates
+                    font {
+                        family: root.flyMono
+                        pixelSize: root.notifFs(text === "✱" ? 27 : text === "⧉" ? 25 : 23)
+                        weight: Font.Bold
+                    }
+                }
+                Canvas {
+                    visible: !circleIcon.visible && !flyWin.view.own
+                    anchors.centerIn: parent
+                    width: 24
+                    height: width
+                    renderStrategy: Canvas.Immediate
+                    renderTarget: Canvas.Image
+                    property color ink: fIcon.inkC
+                    onInkChanged: requestPaint()
+                    onVisibleChanged: if (visible) requestPaint()
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.save();
+                        // the path is authored on a 24px grid; scale to item size
+                        ctx.scale(width / 24, height / 24);
+                        ctx.fillStyle = String(ink);
+                        // bell: dome, flared skirt, clapper
+                        ctx.beginPath();
+                        ctx.arc(12, 9.2, 6, Math.PI, 0);
+                        ctx.lineTo(18, 12.4);
+                        ctx.quadraticCurveTo(19, 14.9, 20.5, 15.9);
+                        ctx.lineTo(3.5, 15.9);
+                        ctx.quadraticCurveTo(5, 14.9, 6, 12.4);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(12, 18.9, 2, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                }
+                HoverHandler {
+                    id: bubbleHover
+                }
+                // clicking the bubble dismisses the notification
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: flyWin.phase === "show"
+                    onClicked: flyWin.dismiss(0)
+                }
+            }
+
+            // icon keyframes ported from the reference CSS
+            SequentialAnimation {
+                id: iconIn
+                ParallelAnimation {
+                    NumberAnimation { target: fIcon; property: "opacity"; to: 1; duration: 220; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: 300; easing.type: Easing.OutCubic }
+                }
+                NumberAnimation { target: fIcon; property: "scale"; to: 0.95; duration: 100; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1; duration: 100; easing.type: Easing.InOutQuad }
+            }
+            SequentialAnimation {
+                id: iconPop
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.32; duration: 170; easing.type: Easing.OutCubic }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: 120; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: 95; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: 95; easing.type: Easing.InOutQuad }
+            }
+            NumberAnimation {
+                id: iconSettle
+                target: fIcon
+                property: "scale"
+                to: 1.1
+                duration: 300
+                easing.type: Easing.InOutQuad
+            }
+            ParallelAnimation {
+                id: iconOut
+                NumberAnimation { target: fIcon; property: "scale"; to: 0; duration: 260; easing.type: Easing.InBack }
+                NumberAnimation { target: fIcon; property: "opacity"; to: 0; duration: 260; easing.type: Easing.InCubic }
+            }
+            Timer {
+                // bubble hold on dismiss: fires the icon exit once the card's
+                // slide/fade (~300ms) has finished
+                id: iconOutDelay
+                interval: 300
+                onTriggered: iconOut.restart()
+            }
+            ParallelAnimation {
+                id: ringAnim
+                NumberAnimation { target: ring; property: "scale"; from: 1; to: 2.4; duration: 600; easing.type: Easing.OutCubic }
+                NumberAnimation { target: ring; property: "opacity"; from: 0.65; to: 0; duration: 600; easing.type: Easing.OutCubic }
+            }
+            // shared clocks for the per-line staggers (ms timelines; each line
+            // derives its own eased window from them in lp/lq below)
+            NumberAnimation { id: stagInAnim; target: fcard; property: "stagIn"; from: 0; to: 650; duration: 650 }
+            NumberAnimation { id: stagOutAnim; target: fcard; property: "stagOut"; from: 0; to: 300; duration: 300 }
+            SequentialAnimation {
+                id: wipeAnim
+                PauseAnimation { duration: 100 }
+                NumberAnimation { target: fcard; property: "imgWipe"; from: 0; to: 1; duration: 500; easing.type: Easing.OutQuint }
+            }
+
+            // ── card ──
+            Rectangle {
+                id: fcard
+                property real stagIn: 0
+                property real stagOut: 0
+                property real imgWipe: 0
+                property real cardO: 0
+                property real cardYS: 0.92
+                property real swipeX: 0
+                property real grabX: 0
+                property bool dragging: false
+                property bool inst: false
+                // click-to-expand for a body longer than the collapsed clip
+                property bool expanded: false
+                // whether a tap can reveal more (drives the chevron + ellipses)
+                readonly property bool expandable: bodyClip.truncated || subWrap.truncated
+
+                // per-line enter/exit progress: 380ms windows offset 90ms apart
+                // in (quint-out), 180ms offset 40ms apart out (quad-in)
+                function lp(i: int): real {
+                    const p = Math.max(0, Math.min(1, (stagIn - i * 90) / 380));
+                    return 1 - Math.pow(1 - p, 4);
+                }
+                function lq(i: int): real {
+                    const q = Math.max(0, Math.min(1, (stagOut - i * 40) / 180));
+                    return q * q;
+                }
+                function lineO(i: int): real {
+                    return lp(i) * (1 - lq(i));
+                }
+                function lineY(i: int): real {
+                    return 10 * (1 - lp(i)) - 6 * lq(i);
+                }
+
+                readonly property bool rich: flyWin.variant === "rich"
+                readonly property bool thumb: flyWin.variant === "thumb"
+                readonly property int lBase: rich ? 1 : 0
+                readonly property real stripH: rich ? root.notifFs(104) : 0
+                // a short single-line body renders as a sub line; anything longer
+                // becomes a divided body block (they are mutually exclusive)
+                readonly property bool bodyAsSub: flyWin.view.body !== "" && flyWin.view.body.length <= 60
+                    && flyWin.view.body.indexOf("\n") < 0
+
+                // natural content width clamped to a compact range; rich is fixed
+                readonly property real natW: 12 + (thumb ? 50 : 0) + 34 + Math.max(
+                    appRow.implicitWidth,
+                    headText.implicitWidth,
+                    subWrap.visible ? subText.implicitWidth : 0,
+                    bodyBlock.visible ? bodyText2.implicitWidth : 0)
+                width: rich ? root.notifFs(336)
+                    : Math.min(root.notifFs(344), Math.max(root.notifFs(210), Math.ceil(natW)))
+                height: stripH + contentBox.height + 22
+                radius: 16
+                antialiasing: true
+                color: "#0c0c10"
+                visible: flyWin.phase === "show" || flyWin.phase === "dismiss"
+                opacity: cardO
+                // grow-on-hover, independent of the bubble's (separate handlers)
+                readonly property bool hov: cardHover.hovered && flyWin.phase === "show"
+                property real hoverS: hov ? 1.025 : 1
+                Behavior on hoverS {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
+                transform: [
+                    Scale {
+                        origin.x: fcard.width / 2
+                        origin.y: fcard.height / 2
+                        yScale: fcard.cardYS
+                    },
+                    Scale {
+                        // top-pinned: a center origin tracks the animated height
+                        // during expand and creeps the card upward
+                        origin.x: fcard.width / 2
+                        origin.y: 0
+                        xScale: fcard.hoverS
+                        yScale: fcard.hoverS
+                    }
+                ]
+
+                readonly property real restX: fIcon.x - 10 - width
+                x: restX + swipeX
+                // hangs below the bubble: card top at the circle's vertical centre
+                y: fIcon.y + fIcon.height / 2
+                Behavior on swipeX {
+                    enabled: !fcard.inst && !fcard.dragging
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: flyWin.phase === "dismiss" ? Easing.OutCubic : Easing.OutBack
+                        easing.overshoot: 1.15
+                    }
+                }
+                Behavior on cardO {
+                    enabled: !fcard.inst
+                    NumberAnimation {
+                        duration: flyWin.phase === "dismiss" ? 260 : 320
+                        easing.type: flyWin.phase === "dismiss" ? Easing.InCubic : Easing.OutCubic
+                    }
+                }
+                Behavior on cardYS {
+                    enabled: !fcard.inst
+                    NumberAnimation { duration: 320; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                }
+
+                // rich media strip: left-to-right wipe reveal. The inner clipper
+                // overshoots the strip height so its bottom rounding falls below
+                // the image (top corners round, bottom edge square).
+                Item {
+                    visible: fcard.rich
+                    x: 0
+                    y: 0
+                    width: Math.round(fcard.width * fcard.imgWipe)
+                    height: fcard.stripH
+                    clip: true
+                    opacity: 1 - fcard.lq(0)
+
+                    ClippingRectangle {
+                        width: fcard.width
+                        height: fcard.stripH + 16
+                        radius: 16
+                        color: Qt.alpha(flyWin.nColor, 0.2)
+
+                        Image {
+                            width: fcard.width
+                            height: fcard.stripH
+                            asynchronous: true
+                            fillMode: Image.PreserveAspectCrop
+                            source: fcard.rich ? flyWin.view.image : ""
+                        }
+                    }
+                }
+
+                Row {
+                    id: contentBox
+                    x: 12
+                    y: fcard.stripH + 11
+                    width: fcard.width - 12 - 34
+                    spacing: 10
+
+                    ClippingRectangle {
+                        visible: fcard.thumb
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 40
+                        height: 40
+                        radius: 20
+                        color: Qt.alpha(flyWin.nColor, 0.25)
+                        border.width: 2
+                        border.color: Qt.alpha(flyWin.nColor, 0.4)
+                        opacity: fcard.lineO(0)
+                        transform: Translate { y: fcard.lineY(0) }
+
+                        Image {
+                            anchors.fill: parent
+                            asynchronous: true
+                            fillMode: Image.PreserveAspectCrop
+                            sourceSize: Qt.size(80, 80)
+                            source: fcard.thumb ? flyWin.view.image : ""
+                        }
+                    }
+
+                    Column {
+                        width: parent.width - (fcard.thumb ? 50 : 0)
+                        spacing: 3
+
+                        Row {
+                            id: appRow
+                            spacing: 5
+                            opacity: fcard.lineO(fcard.lBase)
+                            transform: Translate { y: fcard.lineY(fcard.lBase) }
+
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 5
+                                height: 5
+                                radius: 2.5
+                                antialiasing: true
+                                color: flyWin.nColor
+                            }
+                            Text {
+                                text: flyWin.view.app || "notification"
+                                color: root.notifTh.muted
+                                font { family: root.flyMono; pixelSize: root.notifFs(10); letterSpacing: 2; capitalization: Font.AllUppercase }
+                            }
+                        }
+                        Text {
+                            id: headText
+                            visible: text.length > 0
+                            width: parent.width
+                            text: flyWin.view.summary
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            color: root.notifTh.fg
+                            font { family: root.flyMono; pixelSize: root.notifFs(13); weight: Font.DemiBold }
+                            opacity: fcard.lineO(fcard.lBase + 1)
+                            transform: Translate { y: fcard.lineY(fcard.lBase + 1) }
+                        }
+                        // short body: an elided single line that, when it doesn't
+                        // fit, expands to the full wrapped text on tap (the elided
+                        // and wrapped copies crossfade inside an animated clip)
+                        Item {
+                            id: subWrap
+                            visible: fcard.bodyAsSub
+                            width: parent.width
+                            readonly property bool truncated: fcard.bodyAsSub && subText.truncated
+                            height: visible ? (fcard.expanded && truncated ? subFull.paintedHeight : subText.implicitHeight) : 0
+                            clip: true
+                            opacity: fcard.lineO(fcard.lBase + 2)
+                            transform: Translate { y: fcard.lineY(fcard.lBase + 2) }
+                            Behavior on height {
+                                enabled: flyWin.phase === "show"
+                                NumberAnimation { duration: 340; easing.type: Easing.InOutCubic }
+                            }
+
+                            Text {
+                                id: subText
+                                width: parent.width
+                                text: fcard.bodyAsSub ? flyWin.view.body : ""
+                                elide: Text.ElideRight
+                                textFormat: Text.PlainText
+                                color: root.notifTh.muted
+                                font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                opacity: fcard.expanded && subWrap.truncated ? 0 : 1
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 180 }
+                                }
+                            }
+                            Text {
+                                id: subFull
+                                width: parent.width
+                                text: subText.text
+                                wrapMode: Text.Wrap
+                                textFormat: Text.PlainText
+                                color: root.notifTh.muted
+                                font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                opacity: 1 - subText.opacity
+                                visible: opacity > 0
+                            }
+                        }
+                        Column {
+                            id: bodyBlock
+                            visible: flyWin.view.body !== "" && !fcard.bodyAsSub
+                            width: parent.width
+                            topPadding: 5
+                            spacing: 6
+                            opacity: fcard.lineO(fcard.lBase + 2)
+                            transform: Translate { y: fcard.lineY(fcard.lBase + 2) }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 1
+                                color: Qt.alpha(root.notifTh.fg, 0.09)
+                            }
+                            // body clips to 3 lines; tapping the card animates
+                            // the clip open (text is fully laid out throughout,
+                            // so the reveal is a smooth height change)
+                            Item {
+                                id: bodyClip
+                                width: parent.width
+                                clip: true
+                                readonly property real lineH: bodyText2.lineCount > 0 ? bodyText2.paintedHeight / bodyText2.lineCount : root.notifFs(15)
+                                readonly property real collapsedH: Math.min(bodyText2.paintedHeight, Math.ceil(lineH * 3))
+                                readonly property bool truncated: bodyText2.paintedHeight > collapsedH + 1
+                                height: fcard.expanded ? bodyText2.paintedHeight : collapsedH
+                                Behavior on height {
+                                    enabled: flyWin.phase === "show"
+                                    NumberAnimation { duration: 340; easing.type: Easing.InOutCubic }
+                                }
+
+                                Text {
+                                    id: bodyText2
+                                    width: parent.width
+                                    text: bodyBlock.visible ? flyWin.view.body : ""
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 24
+                                    textFormat: Text.PlainText
+                                    color: root.notifTh.muted
+                                    font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                }
+                                // ellipses over the clipped last line; gone once
+                                // expanded (card-coloured backing masks the text)
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    width: bodyEll.implicitWidth + 10
+                                    height: bodyEll.implicitHeight
+                                    color: fcard.color
+                                    opacity: bodyClip.truncated && !fcard.expanded ? 1 : 0
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: 180 }
+                                    }
+                                    Text {
+                                        id: bodyEll
+                                        anchors.right: parent.right
+                                        text: "…"
+                                        color: root.notifTh.muted
+                                        font { family: root.flyMono; pixelSize: root.notifFs(11) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // expand-state chevron: fades in only while the card is hovered
+                // and there is more to show. Drawn on a Canvas so up and down
+                // share exact ink bounds (glyphs sit at different heights in the
+                // em box and visually jumped); flipping direction morphs the
+                // arms through a flat line into the opposite point.
+                Item {
+                    id: chev
+                    z: 5
+                    x: fcard.width - width - 7
+                    y: fcard.stripH + 5
+                    width: 14
+                    height: 14
+                    // 1 = pointing down (can expand), -1 = pointing up
+                    property real morph: fcard.expanded ? -1 : 1
+                    Behavior on morph {
+                        enabled: flyWin.phase === "show" && !fcard.inst
+                        NumberAnimation { duration: 280; easing.type: Easing.InOutCubic }
+                    }
+                    opacity: (fcard.expandable || fcard.expanded) && cardHover.hovered && flyWin.phase === "show" ? 0.9 : 0
+                    Behavior on opacity {
+                        NumberAnimation { duration: 200 }
+                    }
+
+                    Canvas {
+                        anchors.fill: parent
+                        renderStrategy: Canvas.Immediate
+                        renderTarget: Canvas.Image
+                        property color col: root.notifTh.muted
+                        property real m: chev.morph
+                        onColChanged: requestPaint()
+                        onMChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.strokeStyle = String(col);
+                            ctx.lineWidth = 1.6;
+                            ctx.lineCap = "round";
+                            ctx.lineJoin = "round";
+                            ctx.beginPath();
+                            ctx.moveTo(3.5, 7.25 - 1.75 * m);
+                            ctx.lineTo(7, 7.25 + 1.75 * m);
+                            ctx.lineTo(10.5, 7.25 - 1.75 * m);
+                            ctx.stroke();
+                        }
+                    }
+                }
+                HoverHandler {
+                    id: cardHover
+                }
+                // swipe-dismiss, same scene-coordinate pattern as NotifCard
+                DragHandler {
+                    id: fdrag
+                    enabled: flyWin.phase === "show"
+                    target: null
+                    xAxis.enabled: true
+                    yAxis.enabled: false
+                    onActiveChanged: {
+                        if (active) {
+                            fcard.dragging = true;
+                            fcard.grabX = centroid.scenePosition.x - fcard.swipeX;
+                        } else {
+                            fcard.dragging = false;
+                            if (flyWin.phase === "show") {
+                                if (fcard.swipeX > 60)
+                                    flyWin.dismiss(1);
+                                else if (fcard.swipeX < -60)
+                                    flyWin.dismiss(-1);
+                                else
+                                    fcard.swipeX = 0; // springs home
+                            }
+                        }
+                    }
+                    onCentroidChanged: {
+                        if (active) {
+                            const raw = centroid.scenePosition.x - fcard.grabX;
+                            // either direction dismisses; both share the same
+                            // light asymptotic drag (cap ~140px) so the card
+                            // feels equally weighted left and right
+                            fcard.swipeX = 140 * raw / (140 + Math.abs(raw));
+                        }
+                    }
+                }
+                TapHandler {
+                    // a tap (not a drag) expands the clipped body
+                    onTapped: {
+                        if (fcard.expandable || fcard.expanded)
+                            fcard.expanded = !fcard.expanded;
+                    }
+                }
+            }
+        }
     }
 }
