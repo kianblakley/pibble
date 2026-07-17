@@ -49,15 +49,17 @@ ShellRoot {
     component ThemeRow: Item {
         id: tr
         property string cfgKey: "theme"
-        property bool includeFollow: false
+        property string sub: ""
+        readonly property bool fly: cfgKey === "flyTheme"
         width: 780
-        height: 86
-        readonly property string current: cfgKey === "theme" ? cfg.theme : cfg.flyTheme
+        height: 86 + (sub ? trSub.implicitHeight + 6 : 0)
+        readonly property string current: fly ? cfg.flyTheme : cfg.theme
+        readonly property bool light: fly ? cfg.flyLight : cfg.themeLight
         function setVal(v: string) {
-            if (cfgKey === "theme")
-                cfg.theme = v;
-            else
+            if (fly)
                 cfg.flyTheme = v;
+            else
+                cfg.theme = v;
             root.saveSettings();
         }
 
@@ -65,29 +67,56 @@ ShellRoot {
             anchors.left: parent.left
             anchors.verticalCenter: undefined
             y: 6
-            text: "Color theme"
-        }
-        SReset {
-            key: tr.cfgKey
-            anchors.right: parent.right
+            text: tr.fly ? "Flyouts" : "Launcher"
         }
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 34
+            height: 28
             spacing: 8
 
+            // light variant of whichever scheme is active (sun = light)
+            SBtn {
+                label: tr.light ? "\u2600" : "\u263e"
+                onPressed: {
+                    if (tr.fly)
+                        cfg.flyLight = !cfg.flyLight;
+                    else
+                        cfg.themeLight = !cfg.themeLight;
+                    root.saveSettings();
+                }
+            }
+            SReset {
+                key: tr.cfgKey
+            }
+        }
+        SSub {
+            id: trSub
+            visible: tr.sub !== ""
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            text: tr.sub
+        }
+        Row {
+            anchors.right: parent.right
+            anchors.rightMargin: 70
+            // the flyouts row carries one extra card (dynamic): narrow the
+            // cards so the row clears the label on the left
+            spacing: tr.fly ? 6 : 8
+
             Repeater {
-                model: (tr.includeFollow
-                    ? [{ id: "follow", name: "Follow", accent: "", fg: "", muted: "" }]
-                    : []).concat(root.themes)
+                model: root.themes.concat(
+                    tr.fly ? [{ id: "dynamic", name: "Dynamic", accent: "", fg: "", muted: "" }] : [],
+                    [{ id: "custom", name: "Custom", accent: "", fg: "", muted: "" }])
 
                 Rectangle {
                     id: trCard
                     required property var modelData
-                    readonly property var pal: modelData.id === "follow" ? root.activeTheme
-                        : modelData.id === "dynamic" ? root.dynTheme : modelData
+                    readonly property var pal: modelData.id === "matugen" ? root.dynTheme
+                        : modelData.id === "custom" ? root.customPal()
+                        : modelData.id === "dynamic" ? ({ accent: root.launcherBase.accent, fg: "#f2f0ee", muted: "#908c87" })
+                        : modelData
                     readonly property bool active: tr.current === modelData.id
-                    width: tr.includeFollow ? 80 : 88
+                    width: tr.fly ? 72 : 80
                     height: 86
                     radius: 12
                     color: Qt.alpha(root.accent, active ? 0.16 : 0.06)
@@ -258,9 +287,14 @@ ShellRoot {
             // one notification at a time (queue across apps, replace within
             // an app): "bubble" = tinted circle + card, "pill" = card only
             property string notifStyle: "bubble"
-            // flyout palette: "default" (icon-tinted bubble, black card),
-            // "matugen" (dynamic wallpaper palette), or a named theme
-            property string notifTheme: "default"
+            // legacy: folded into flyTheme by healSettings; kept so old
+            // configs can still be read for the one-time migration
+            property string notifTheme: ""
+            // palette behind the "custom" scheme (editable in the colors tab)
+            property var customTheme: ({ accent: "#e8a24a", fg: "#f3ede4", muted: "#8a8378" })
+            // per-scope light variant of the active scheme (sun/moon toggle)
+            property bool themeLight: false
+            property bool flyLight: false
         }
     }
     function saveSettings() {
@@ -268,48 +302,57 @@ ShellRoot {
     }
 
     // ---------- theme ----------
+    // Named schemes plus two resolved ones: "matugen" samples the current
+    // wallpaper, "custom" is the user-defined palette from the colors tab.
+    // The flyouts additionally accept "dynamic" (notification icon tint).
     readonly property var themes: [
         { id: "amber", name: "Amber", accent: "#e8a24a", fg: "#f3ede4", muted: "#8a8378" },
         { id: "frost", name: "Frost", accent: "#7ab8e0", fg: "#e6eef4", muted: "#83919c" },
         { id: "moss",  name: "Moss",  accent: "#a3c76a", fg: "#eef3e4", muted: "#8d9378" },
         { id: "rose",  name: "Rose",  accent: "#e07a9a", fg: "#f4e8ec", muted: "#9c8389" },
         { id: "mono",  name: "Mono",  accent: "#cfcfcf", fg: "#f0f0f0", muted: "#8a8a8a" },
-        { id: "dynamic", name: "Dynamic", accent: "", fg: "", muted: "" }
+        { id: "matugen", name: "Matugen", accent: "", fg: "", muted: "" }
     ]
     // filled in from matugen (current wallpaper) at startup
     property var dynTheme: ({ accent: "#e8a24a", fg: "#f3ede4", muted: "#8a8378" })
-    readonly property var activeTheme: {
-        if (cfg.theme === "dynamic")
-            return dynTheme;
-        const t = themes.find(t => t.id === cfg.theme);
-        return t ?? themes[0];
+    function customPal() {
+        const c = cfg.customTheme ?? {};
+        return { accent: c.accent || "#e8a24a", fg: c.fg || "#f3ede4", muted: c.muted || "#8a8378" };
     }
+    // light variant of a scheme: same accent, ink flips dark (the surface
+    // colors flip via root.surface / root.flySurface)
+    function applyMode(p, light) {
+        return light ? { accent: p.accent, fg: "#26221c", muted: "#6d665c" } : p;
+    }
+    readonly property var launcherBase: cfg.theme === "matugen" ? dynTheme
+        : cfg.theme === "custom" ? customPal()
+        : (themes.find(t => t.id === cfg.theme) ?? themes[0])
+    readonly property var activeTheme: applyMode(launcherBase, cfg.themeLight)
     readonly property color accent: activeTheme.accent
     readonly property color fg: activeTheme.fg
     readonly property color muted: activeTheme.muted
+    // backdrop the launcher dims the screen with
+    readonly property color surface: cfg.themeLight ? "#ece7df" : "#0a0908"
     readonly property string mono: cfg.fontFamily || "JetBrains Mono"
 
-    // OSDs can follow the launcher theme or pin their own
+    // resolve a scheme id to its raw palette; unknown ids (the flyouts'
+    // "dynamic") fall back to the launcher's scheme
     function themeColors(sel) {
-        if (sel && sel !== "follow") {
-            if (sel === "dynamic")
-                return dynTheme;
-            const t = themes.find(t => t.id === sel);
-            if (t)
-                return t;
-        }
-        return activeTheme;
+        if (sel === "matugen")
+            return dynTheme;
+        if (sel === "custom")
+            return customPal();
+        return themes.find(t => t.id === sel) ?? launcherBase;
     }
-    readonly property var flyTh: themeColors(cfg.flyTheme)
+    readonly property var flyTh: applyMode(themeColors(cfg.flyTheme), cfg.flyLight)
     readonly property string flyMono: cfg.flyFontFamily || mono
-    // notification-flyout theme: "default" keeps the near-black card and
-    // tints the bubble from the app icon; anything else pins a palette
-    // ("matugen" = the dynamic wallpaper palette) and skips icon extraction
-    readonly property var notifThemes: ["default", "matugen", "amber", "frost", "moss", "rose", "mono"]
-    readonly property bool notifIconTint: cfg.notifTheme === "default"
+    // flyTheme "dynamic": near-black card, bubble tinted from the app icon
+    readonly property bool notifIconTint: cfg.flyTheme === "dynamic"
     readonly property var notifTh: notifIconTint
-        ? ({ accent: flyTh.accent, fg: "#f2f0ee", muted: "#908c87" })
-        : themeColors(cfg.notifTheme === "matugen" ? "dynamic" : cfg.notifTheme)
+        ? applyMode({ accent: flyTh.accent, fg: "#f2f0ee", muted: "#908c87" }, cfg.flyLight)
+        : flyTh
+    // card surface behind both flyouts
+    readonly property color flySurface: cfg.flyLight ? "#f3efe8" : "#0c0c10"
     function flyoutOn(name: string): bool {
         return (cfg.flyouts ?? {})[name] !== false;
     }
@@ -360,6 +403,24 @@ ShellRoot {
             cfg.clipsRows = Math.max(2, Math.min(4, cfg.clipsRows));
             saveSettings();
         }
+        // One-time migrations, keyed strictly on values only old configs
+        // can contain — every branch must be a no-op on a fresh or healed
+        // config, because this also runs if a load ever surfaces adapter
+        // defaults (an unconditional save here once clobbered the file).
+        if (cfg.theme === "dynamic") {
+            cfg.theme = "matugen"; // renamed
+            saveSettings();
+        }
+        // pre-colors-tab configs always carry a non-empty notifTheme; fold
+        // it into the flyout scheme ("default" = icon tint = new "dynamic";
+        // flyTheme's own old "dynamic" meant matugen)
+        if (cfg.notifTheme) {
+            cfg.flyTheme = cfg.notifTheme === "default" ? "dynamic"
+                : cfg.notifTheme === "matugen" ? "matugen"
+                : cfg.notifTheme;
+            cfg.notifTheme = "";
+            saveSettings();
+        }
         // the retired equalizer visualizers collapse into the sine wave
         if (["mirror", "spectrum", "flicker"].includes(cfg.volStyle)) {
             cfg.volStyle = "sine";
@@ -384,7 +445,7 @@ ShellRoot {
         // Needed at startup only for the dynamic theme; otherwise deferred
         // until the settings pane wants the preview — its output triggers a
         // theme-color rebind of every tile, which would hitch the intro.
-        running: cfg.theme === "dynamic"
+        running: cfg.theme === "matugen"
         // a refresh requested while a run was in flight; honoured on exit so
         // the palette still catches up with a just-applied wallpaper
         property bool rerun: false
@@ -414,8 +475,8 @@ ShellRoot {
                         muted: c.outline.dark.color
                     };
                 } catch (e) {
-                    if (cfg.theme === "dynamic")
-                        root.notifyError("Dynamic theme failed", "matugen returned no palette for the current wallpaper");
+                    if (cfg.theme === "matugen")
+                        root.notifyError("Matugen theme failed", "matugen returned no palette for the current wallpaper");
                 }
             }
         }
@@ -688,7 +749,7 @@ ShellRoot {
             // raise a spurious "Dynamic theme failed" notification. A refresh
             // that lands mid-run is queued instead of dropped, so the palette
             // can't go stale on the wallpaper the busy run never saw.
-            if (cfg.theme === "dynamic") {
+            if (cfg.theme === "matugen") {
                 if (matugenProc.running)
                     matugenProc.rerun = true;
                 else
@@ -864,7 +925,7 @@ ShellRoot {
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                const tabs = ["general", "flyouts"];
+                const tabs = ["general", "flyouts", "colors"];
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
@@ -1234,7 +1295,7 @@ ShellRoot {
                     root.scansStarted = true;
                     iconThemeScan.running = true;
                     fontScan.running = true;
-                    if (!matugenProc.running && cfg.theme !== "dynamic")
+                    if (!matugenProc.running && cfg.theme !== "matugen")
                         matugenProc.running = true;
                 }
             }
@@ -1298,7 +1359,7 @@ ShellRoot {
 
             Rectangle {
                 anchors.fill: parent
-                color: Qt.rgba(10 / 255, 9 / 255, 8 / 255, cfg.dimOpacity)
+                color: Qt.alpha(root.surface, cfg.dimOpacity)
             }
 
             // Background click-catcher; also the scroll-wheel path. Wheel
@@ -2128,7 +2189,7 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property int tabIdx: win.settingsTab === "general" ? 0 : 1
+                readonly property int tabIdx: win.settingsTab === "general" ? 0 : win.settingsTab === "flyouts" ? 1 : 2
                 anchors.centerIn: parent
                 width: 860
                 height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
@@ -2170,7 +2231,8 @@ ShellRoot {
                         Repeater {
                             model: [
                                 { id: "general", label: "Launcher" },
-                                { id: "flyouts", label: "Flyouts" }
+                                { id: "flyouts", label: "Flyouts" },
+                                { id: "colors", label: "Colors" }
                             ]
 
                             Item {
@@ -2217,7 +2279,7 @@ ShellRoot {
                     anchors.topMargin: 18
                     // constant height (tallest page): switching tabs never
                     // moves the pane, shorter pages stay top-aligned
-                    height: Math.max(settingsCol.height, flyCol.height)
+                    height: Math.max(settingsCol.height, flyCol.height, colorsCol.height)
 
                 // flyouts tab: volume + notification OSDs
                 Column {
@@ -2237,7 +2299,6 @@ ShellRoot {
                     SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
                     SettingRow { key: "notifStyle"; label: "Notification style" }
-                    SettingRow { key: "notifTheme"; label: "Notification theme" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
                     SettingRow { key: "notifFontScale"; label: "Notification font size" }
                     SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
@@ -2311,8 +2372,6 @@ ShellRoot {
                             }
                         }
                     }
-
-                    ThemeRow { cfgKey: "flyTheme" }
                 }
 
                 Column {
@@ -2638,6 +2697,113 @@ ShellRoot {
                     }
 
                 }
+
+                // colors tab: one scheme row per scope plus the custom palette
+                Column {
+                    id: colorsCol
+                    x: 20 + (2 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                    }
+                    spacing: 14
+
+                    ThemeRow { cfgKey: "theme" }
+                    ThemeRow {
+                        cfgKey: "flyTheme"
+                        sub: "dynamic tints each notification from its app icon; the volume flyout then follows the launcher scheme"
+                    }
+
+                    // custom palette: three hex fields feeding the "custom" scheme
+                    Item {
+                        width: 780
+                        height: 40
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Custom palette"
+                        }
+                        SReset {
+                            key: "customTheme"
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34
+                            spacing: 10
+                            height: parent.height
+
+                            Repeater {
+                                model: [
+                                    { part: "accent", label: "accent" },
+                                    { part: "fg", label: "text" },
+                                    { part: "muted", label: "muted" }
+                                ]
+
+                                Rectangle {
+                                    id: palField
+                                    required property var modelData
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 132
+                                    height: 34
+                                    radius: 8
+                                    color: Qt.alpha(root.accent, palInput.activeFocus ? 0.16 : 0.08)
+                                    border.width: 1
+                                    border.color: palInput.activeFocus ? root.accent : Qt.alpha(root.accent, 0.33)
+
+                                    Rectangle {
+                                        id: palSwatch
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 18
+                                        radius: 5
+                                        color: root.customPal()[palField.modelData.part]
+                                        border.width: 1
+                                        border.color: Qt.rgba(1, 1, 1, 0.15)
+                                    }
+                                    TextInput {
+                                        id: palInput
+                                        anchors.left: palSwatch.right
+                                        anchors.right: parent.right
+                                        anchors.margins: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.customPal()[palField.modelData.part]
+                                        color: root.fg
+                                        clip: true
+                                        font { family: root.mono; pixelSize: root.fs(12) }
+                                        onEditingFinished: {
+                                            if (/^#[0-9a-fA-F]{6}$/.test(text)) {
+                                                const c = Object.assign({}, root.customPal());
+                                                c[palField.modelData.part] = text.toLowerCase();
+                                                cfg.customTheme = c;
+                                                root.saveSettings();
+                                            } else {
+                                                text = root.customPal()[palField.modelData.part];
+                                            }
+                                            input.forceActiveFocus();
+                                        }
+                                        Keys.onEscapePressed: input.forceActiveFocus()
+                                        Connections {
+                                            target: cfg
+                                            function onCustomThemeChanged() {
+                                                palInput.text = root.customPal()[palField.modelData.part];
+                                            }
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.NoButton
+                                        cursorShape: Qt.IBeamCursor
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SSub {
+                        text: "hex colors (accent / text / muted) behind the custom scheme"
+                    }
+                }
                 } // tabViewport
             }
 
@@ -2778,7 +2944,6 @@ ShellRoot {
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
             case "notifStyle": return cfg.notifStyle;
-            case "notifTheme": return cfg.notifTheme;
             }
             return "";
         }
@@ -2888,9 +3053,6 @@ ShellRoot {
             case "notifStyle":
                 cfg.notifStyle = cycleChoice(cfg.notifStyle, ["bubble", "pill"], dir);
                 break;
-            case "notifTheme":
-                cfg.notifTheme = cycleChoice(cfg.notifTheme, root.notifThemes, dir);
-                break;
             }
             root.saveSettings();
         }
@@ -2935,15 +3097,16 @@ ShellRoot {
             case "revealOrigin": cfg.revealOrigin = "center"; break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
-            case "theme": cfg.theme = "amber"; break;
+            case "theme": cfg.theme = "amber"; cfg.themeLight = false; break;
             case "wallpaperDir":
                 cfg.wallpaperDir = "~/Pictures/wallpapers";
                 root.rescanWallpapers();
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
+            case "customTheme": cfg.customTheme = ({ accent: "#e8a24a", fg: "#f3ede4", muted: "#8a8378" }); break;
             case "volWidth": cfg.volWidth = 340; break;
             case "flyFontFamily": cfg.flyFontFamily = ""; break;
-            case "flyTheme": cfg.flyTheme = "amber"; break;
+            case "flyTheme": cfg.flyTheme = "amber"; cfg.flyLight = false; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volStyle": cfg.volStyle = "pill"; break;
@@ -2952,7 +3115,6 @@ ShellRoot {
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
-            case "notifTheme": cfg.notifTheme = "default"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
@@ -3363,7 +3525,7 @@ ShellRoot {
                 // the sine bars render straight on the wallpaper; the pill
                 // style keeps a card behind the level bar so it reads as a
                 // pill rather than a bare line
-                color: volWin.eq ? "transparent" : "#0a0908"
+                color: volWin.eq ? "transparent" : root.flySurface
                 border.width: volWin.eq ? 0 : 1
                 border.color: Qt.alpha(root.flyTh.accent, 0.33)
                 antialiasing: true
@@ -4122,7 +4284,7 @@ ShellRoot {
                 height: stripH + contentBox.height + 22
                 radius: 16
                 antialiasing: true
-                color: "#0c0c10"
+                color: root.flySurface
                 visible: flyWin.phase === "show" || flyWin.phase === "dismiss"
                 opacity: cardO
                 // grow-on-hover, independent of the bubble's (separate handlers)
