@@ -483,6 +483,10 @@ ShellRoot {
     }
 
     // ---------- apps ----------
+    // warm decode order = the home page's sort, so the icons the user sees
+    // first come off the (single) QML image reader thread first
+    readonly property var warmOrderApps: allApps.slice().sort((a, b) =>
+        launchCount(b) - launchCount(a) || a.name.localeCompare(b.name))
     readonly property var allApps: {
         const list = Array.from(DesktopEntries.applications.values)
             .filter(e => !e.noDisplay);
@@ -1289,7 +1293,14 @@ ShellRoot {
         ParallelAnimation {
             id: fadeIn
             onFinished: {
-                win.warmingWalls = true;
+                // warm once per daemon run: the thumbs stay pinned by the
+                // warm-up Images, so re-ticking the ~2s FrameAnimation on
+                // every open just burned frames right as the user started
+                // typing (visible as reveal/tile jank on quick Tab presses)
+                if (!win.wallsWarmedOnce) {
+                    win.wallsWarmedOnce = true;
+                    win.warmingWalls = true;
+                }
                 // deferred one-time startup work (clip scans run per open)
                 if (!root.scansStarted) {
                     root.scansStarted = true;
@@ -3221,6 +3232,7 @@ ShellRoot {
         property bool warmingApps: false
         property bool warmingWalls: false
         property bool warmedOnce: false
+        property bool wallsWarmedOnce: false
         FrameAnimation {
             id: firstFrames
             onTriggered: {
@@ -3318,7 +3330,7 @@ ShellRoot {
             visible: win.warmingApps
             opacity: 0.004
             Repeater {
-                model: root.allApps
+                model: root.warmOrderApps
                 Image {
                     required property var modelData
                     width: 1
@@ -3326,6 +3338,23 @@ ShellRoot {
                     asynchronous: true
                     sourceSize: Qt.size(88, 88)
                     source: root.iconUrl(modelData.icon)
+                }
+            }
+        }
+        // clipboard image thumbnails, decoded as the scan lands and pinned
+        // so clip page flips hit the pixmap cache instead of re-decoding
+        Item {
+            visible: false
+            Repeater {
+                model: root.clips
+                Image {
+                    required property var modelData
+                    width: 1
+                    height: 1
+                    asynchronous: true
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize: Qt.size(480, 640)
+                    source: modelData.image === true && modelData.thumb ? "file://" + modelData.thumb : ""
                 }
             }
         }
@@ -3381,7 +3410,7 @@ ShellRoot {
             Item {
                 anchors.fill: parent
                 Repeater {
-                    model: root.allApps
+                    model: root.warmOrderApps
                     Image {
                         required property var modelData
                         width: 1
@@ -3984,6 +4013,10 @@ ShellRoot {
                 id: imgProbe
                 visible: false
                 asynchronous: true
+                // ratio-only probe: cap one dimension (ratio is preserved
+                // when only one is set) so a 4K screenshot isn't decoded at
+                // native size just to read its aspect
+                sourceSize.width: 160
                 // a big image can outlast the icon phases; when the probe lands
                 // while the card is up, re-classify once so a wide screenshot
                 // isn't stuck cropped into the thumbnail circle
@@ -3997,6 +4030,21 @@ ShellRoot {
             // the result is normalised into a band that reads on the dark card.
             // Parked off the window's left edge: a visible:false Canvas never
             // paints, an off-viewport one does.
+            // decode the tint source on the image reader thread at icon
+            // size: Canvas.loadImage decodes at native resolution on the GUI
+            // thread, which stalled the whole shell (and the bubble's entry)
+            // whenever a full-size screenshot arrived as notification media
+            Image {
+                id: tintSrc
+                visible: false
+                asynchronous: true
+                sourceSize: Qt.size(26, 26)
+                source: tint.src
+                onStatusChanged: {
+                    if (status === Image.Ready)
+                        tint.requestPaint();
+                }
+            }
             Canvas {
                 id: tint
                 property string src: ""
@@ -4006,17 +4054,12 @@ ShellRoot {
                 height: 26
                 renderStrategy: Canvas.Immediate
                 renderTarget: Canvas.Image
-                onSrcChanged: {
-                    if (src)
-                        loadImage(src);
-                }
-                onImageLoaded: requestPaint()
                 onPaint: {
-                    if (!src || !isImageLoaded(src))
+                    if (!src || tintSrc.status !== Image.Ready)
                         return;
                     const ctx = getContext("2d");
                     ctx.clearRect(0, 0, width, height);
-                    ctx.drawImage(src, 0, 0, width, height);
+                    ctx.drawImage(tintSrc, 0, 0, width, height);
                     const d = ctx.getImageData(0, 0, width, height).data;
                     let r = 0, g = 0, b = 0, w = 0;
                     for (let i = 0; i < d.length; i += 4) {
@@ -4046,8 +4089,7 @@ ShellRoot {
                     flyWin.tintCache[src] = c;
                     if (src === flyWin.view.icon || src === flyWin.view.image)
                         flyWin.nColor = c;
-                    unloadImage(src);
-                    src = "";
+                    src = ""; // also clears tintSrc.source
                 }
             }
 
@@ -4361,6 +4403,8 @@ ShellRoot {
                             height: fcard.stripH
                             asynchronous: true
                             fillMode: Image.PreserveAspectCrop
+                            // decode at ~2x display width, not native size
+                            sourceSize.width: 700
                             source: fcard.rich ? flyWin.view.image : ""
                         }
                     }
