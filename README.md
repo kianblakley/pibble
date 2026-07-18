@@ -48,13 +48,20 @@ Optional - required for full features:
 | [matugen](https://github.com/InioX/matugen) | Wallpaper-derived color theme |
 
 
-**2. Start the daemon**
+**2. Clone**
+
+```sh
+git clone https://github.com/kianblakley/pibble.git
+cd pibble
+```
+
+**3. Start the daemon**
 
 ```sh
 ./launch.sh
 ```
 
-**3. Toggle the launcher**
+**4. Toggle the launcher**
 
 ```sh
 ./launch.sh toggle
