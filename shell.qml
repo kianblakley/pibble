@@ -247,8 +247,10 @@ ShellRoot {
             property real dimOpacity: 0.4
             property string revealOrigin: "top-left"
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
-            // flyouts (volume + notification OSDs)
-            property var flyouts: ({ volume: true, notifs: true })
+            // flyouts (volume + notification OSDs); "alerts" gates every
+            // notify-send pibble sends on its own behalf (errors, copy
+            // confirmations) independent of whether other apps' notifications show
+            property var flyouts: ({ volume: true, notifs: true, alerts: true })
             property real volWidth: 420
             property string volAnim: "pop"
             // volume OSD content style: pill (a level bar) or sine (equalizer)
@@ -332,6 +334,8 @@ ShellRoot {
 
     // internal errors surface as regular notifications (we are the server)
     function notifyError(summary: string, body: string) {
+        if (!flyoutOn("alerts"))
+            return;
         Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "dialog-error", summary, body]);
     }
 
@@ -398,11 +402,17 @@ ShellRoot {
         }
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$PATH"
+            command -v matugen >/dev/null || { echo NOMATUGEN; exit 0; }
             img=$(awww query -n workspaces 2>/dev/null | sed -n 's/.*displaying: image: //p' | head -1)
             [ -n "$img" ] || exit 0
             matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`]
         stdout: StdioCollector {
             onStreamFinished: {
+                if (text.trim() === "NOMATUGEN") {
+                    if (cfg.theme === "matugen")
+                        root.notifyError("matugen not found", "Install matugen to use the Dynamic theme.");
+                    return;
+                }
                 // empty output is benign (awww not up yet at login, no
                 // wallpaper set, or a run torn down early): keep the last
                 // palette silently instead of raising a false alarm
@@ -614,6 +624,16 @@ ShellRoot {
     // scratch file for the notification tint's icon-grab round trip (see
     // the flyout notification Canvas below)
     readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher-tint.png"
+    // re-checked (and re-notified) every time the clips pane is navigated
+    // to, not just once per problem — the user wants a reminder each visit
+    function checkClipAlert() {
+        if (win.pane !== "clips")
+            return;
+        if (!cliphistAvailable)
+            notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
+        else if (!clipWatcherRunning)
+            notifyError("Clipboard watcher not running", "wl-paste --watch cliphist store isn't running — clipboard history won't update.");
+    }
 
     Process {
         id: clipScan
@@ -629,17 +649,14 @@ ShellRoot {
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
-                    if (root.cliphistAvailable)
-                        root.notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
                     root.cliphistAvailable = false;
+                    root.checkClipAlert();
                     return;
                 }
                 root.cliphistAvailable = true;
                 const nl = text.indexOf("\n");
-                const watcherRunning = text.slice(0, nl).trim() === "WATCH:1";
-                if (!watcherRunning && root.clipWatcherRunning)
-                    root.notifyError("Clipboard watcher not running", "wl-paste --watch cliphist store isn't running — clipboard history won't update.");
-                root.clipWatcherRunning = watcherRunning;
+                root.clipWatcherRunning = text.slice(0, nl).trim() === "WATCH:1";
+                root.checkClipAlert();
                 root.clips = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
@@ -881,6 +898,8 @@ ShellRoot {
             capturingBind = "";
             expandedClip = null;
             pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
+            if (pane === "clips")
+                root.checkClipAlert();
         }
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
@@ -1138,9 +1157,9 @@ ShellRoot {
                     [ -e "$BLUR" ] || magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
                 fi
                 export WALL BLUR
-                eval "$4" || notify-send -a launcher -i dialog-error "Wallpaper command failed" "$4"
+                eval "$4" || { [ "$6" = "1" ] && notify-send -a launcher -i dialog-error "Wallpaper command failed" "$4"; }
             `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand,
-                cfg.wallCommand.includes("$BLUR") ? "1" : "0"]);
+                cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"]);
             exit();
         }
 
@@ -1215,10 +1234,12 @@ ShellRoot {
                 rm -f "$tmp"
                 # copied images ride along as notification media (the decoded
                 # entry is already cached by the thumbnail scan)
-                if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
-                    notify-send -a launcher -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
-                else
-                    notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
+                if [ "$5" = "1" ]; then
+                    if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
+                        notify-send -a launcher -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
+                    else
+                        notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
+                    fi
                 fi
                 sleep 0.3
                 nid=$(cliphist list | head -n 1 | cut -f1)
@@ -1227,7 +1248,7 @@ ShellRoot {
                     cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
                 fi
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir,
-                clip.preview.slice(0, 60)];
+                clip.preview.slice(0, 60), root.flyoutOn("alerts") ? "1" : "0"];
             clipCopy.running = true;
         }
         property string infoClipId: ""
@@ -2416,7 +2437,8 @@ ShellRoot {
                             Repeater {
                                 model: [
                                     { id: "volume", label: "volume" },
-                                    { id: "notifs", label: "notifications" }
+                                    { id: "notifs", label: "notifications" },
+                                    { id: "alerts", label: "alerts" }
                                 ]
 
                                 Item {
@@ -3056,7 +3078,7 @@ ShellRoot {
         }
 
         function toggleFlyout(f: string) {
-            const fly = Object.assign({ volume: true, notifs: true }, cfg.flyouts);
+            const fly = Object.assign({ volume: true, notifs: true, alerts: true }, cfg.flyouts);
             fly[f] = fly[f] === false;
             cfg.flyouts = fly;
             root.saveSettings();
@@ -3102,7 +3124,7 @@ ShellRoot {
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 420; break;
-            case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
+            case "flyouts": cfg.flyouts = ({ volume: true, notifs: true, alerts: true }); break;
             case "volAnim": cfg.volAnim = "pop"; break;
             case "volStyle": cfg.volStyle = "sine"; break;
             case "volPercent": cfg.volShowPercent = true; break;
