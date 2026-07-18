@@ -629,12 +629,17 @@ ShellRoot {
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
+                    if (root.cliphistAvailable)
+                        root.notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
                     root.cliphistAvailable = false;
                     return;
                 }
                 root.cliphistAvailable = true;
                 const nl = text.indexOf("\n");
-                root.clipWatcherRunning = text.slice(0, nl).trim() === "WATCH:1";
+                const watcherRunning = text.slice(0, nl).trim() === "WATCH:1";
+                if (!watcherRunning && root.clipWatcherRunning)
+                    root.notifyError("Clipboard watcher not running", "wl-paste --watch cliphist store isn't running — clipboard history won't update.");
+                root.clipWatcherRunning = watcherRunning;
                 root.clips = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
@@ -1881,15 +1886,11 @@ ShellRoot {
                 }
 
                 Text {
-                    visible: !root.cliphistAvailable || root.clips.length === 0
+                    visible: root.clips.length === 0
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: 40
-                    text: !root.cliphistAvailable
-                        ? "cliphist not found"
-                        : !root.clipWatcherRunning
-                            ? "clipboard history is empty — wl-paste --watch cliphist store isn't running"
-                            : "clipboard history is empty"
+                    text: "clipboard history is empty"
                     color: root.muted
                     font { family: root.mono; pixelSize: root.fs(14) }
                 }
