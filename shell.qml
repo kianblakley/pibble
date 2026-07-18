@@ -1141,6 +1141,11 @@ ShellRoot {
         property var expandedClip: null
         property string expandedText: ""
         property int expandedBytes: -1
+        // full-resolution decode for the expand view: the grid/warm-up thumb
+        // (c.thumb) is downscaled on disk to keep the background warm cheap,
+        // so expanding needs its own full-res decode. Done lazily here, on
+        // the interactive expand action, instead of eagerly for every clip.
+        property string expandedFullPath: ""
         property point expandOrigin: Qt.point(0, 0)
         signal expandAnimStart
         signal expandAnimCollapse
@@ -1154,8 +1159,27 @@ ShellRoot {
             expandedClip = clip;
             expandedText = "";
             expandedBytes = -1;
+            expandedFullPath = "";
             // cells record expandOrigin synchronously on the change above
             Qt.callLater(() => expandAnimStart());
+            // Skip the on-demand decode when the clip's native size already
+            // fits the thumb cap (480x640): the thumb (built with magick's
+            // "only shrink if larger" >) IS the full-res image there, so
+            // decoding again would just swap the Image source to identical
+            // pixels — and any source change makes QML clear the current
+            // pixmap and reload async, flashing blank for no visual gain.
+            const d = (clip.dims || "").split("x");
+            const iw = parseInt(d[0]) || 0;
+            const ih = parseInt(d[1]) || 0;
+            if (clip.image && (iw > 480 || ih > 640)) {
+                clipFullImg.forId = clip.id;
+                clipFullImg.command = ["bash", "-c", `
+                    export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+                    dir="$1"; id="$2"
+                    f="$dir/$id-full.png"
+                    [ -s "$f" ] || cliphist decode "$id" > "$f"`, "_", root.clipThumbDir, clip.id];
+                clipFullImg.running = true;
+            }
             // Fast path: decode for the details view immediately so the
             // text reveal runs together with the expand animation.
             infoClipId = clip.id;
@@ -1199,6 +1223,15 @@ ShellRoot {
             clipCopy.running = true;
         }
         property string infoClipId: ""
+        Process {
+            id: clipFullImg
+            property string forId: ""
+            onExited: (code) => {
+                if (code === 0 && forId === win.expandedClip?.id) {
+                    win.expandedFullPath = root.clipThumbDir + "/" + forId + "-full.png";
+                }
+            }
+        }
         Process {
             id: clipInfo
             stdout: StdioCollector {
@@ -2064,13 +2097,17 @@ ShellRoot {
                     visible: win.expandedClip !== null
                     readonly property bool isImg: win.expandedClip !== null && win.expandedClip.image === true
                     // images render at native size, capped to fit the screen
+                    // (58% of width, 53% of height to leave room for the
+                    // text/metadata below the image and the card's margins)
                     readonly property size imgFit: {
                         if (!isImg)
                             return Qt.size(0, 0);
                         const d = (win.expandedClip.dims || "").split("x");
                         const iw = parseInt(d[0]) || 16;
                         const ih = parseInt(d[1]) || 9;
-                        const s = Math.min(1, 1500 / iw, 800 / ih);
+                        const maxW = win.revW * 0.58;
+                        const maxH = win.revH * 0.53;
+                        const s = Math.min(1, maxW / iw, maxH / ih);
                         return Qt.size(Math.max(320, Math.round(iw * s)), Math.max(180, Math.round(ih * s)));
                     }
                     anchors.centerIn: parent
@@ -2151,10 +2188,17 @@ ShellRoot {
                                 anchors.fill: parent
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectFit
-                                sourceSize: Qt.size(2000, 1200)
+                                sourceSize: Qt.size(win.revW, win.revH)
+                                // prefer the on-demand full-res decode; the
+                                // small thumb is an instant placeholder while
+                                // it lands, and the fallback if decode fails
                                 source: {
                                     const c = win.expandedClip;
-                                    return c && c.image && c.thumb ? "file://" + c.thumb : "";
+                                    if (!c || !c.image)
+                                        return "";
+                                    if (win.expandedFullPath && clipFullImg.forId === c.id)
+                                        return "file://" + win.expandedFullPath;
+                                    return c.thumb ? "file://" + c.thumb : "";
                                 }
                             }
                         }
