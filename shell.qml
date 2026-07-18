@@ -2961,7 +2961,7 @@ ShellRoot {
                                 onTriggered: versionText.clicks = 0
                             }
                             Timer {
-                                id: reveal
+                                id: versionReveal
                                 interval: 420
                                 onTriggered: {
                                     versionText.text = "I vibe coded this using a microphone. Insanity";
@@ -2979,7 +2979,7 @@ ShellRoot {
                                     if (versionText.clicks >= 3) {
                                         versionText.revealed = true;
                                         versionText.opacity = 0;
-                                        reveal.start();
+                                        versionReveal.start();
                                     }
                                 }
                             }
