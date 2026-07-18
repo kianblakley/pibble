@@ -67,3 +67,32 @@ cd pibble
 ./pibble toggle
 ```
 
+## Compositor integration
+
+Each pibble window sets a `namespace` via the wlr layer-shell protocol, which
+compositors can match on to apply their own rules (placement, blur, opacity,
+etc.):
+
+| Namespace | Window |
+|---|---|
+| `pibble-launcher` | Main launcher window |
+| `pibble-notifications` | Notification flyout |
+| `pibble-volume` | Volume OSD |
+
+pibble also requests background blur behind the launcher itself via the
+[`ext-background-effect-v1`](https://wayland.app/protocols/ext-background-effect-v1)
+Wayland protocol (see the "Background blur" setting) — currently implemented
+by niri. On niri, you can tune or override this per window with a layer rule,
+e.g.:
+
+```kdl
+layer-rule {
+    match namespace="^pibble-launcher$"
+
+    background-effect {
+        blur false
+        xray false
+    }
+}
+```
+

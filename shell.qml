@@ -826,7 +826,7 @@ ShellRoot {
         color: "transparent"
 
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "app-launcher"
+        WlrLayershell.namespace: "pibble-launcher"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
         // The blur protocol has no strength parameter, so the "grow" styles
@@ -2658,7 +2658,7 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150; sub: "grow only supports niri at the moment" }
+                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150; sub: "grow animations only tested in niri so far" }
 
                     Repeater {
                         model: [
@@ -2678,7 +2678,7 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only applies to compositors that support ext-background-effect-v1 protocols" }
+                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
 
                     // wallpaper path
                     Item {
@@ -3464,7 +3464,7 @@ ShellRoot {
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "launcher-warm"
+            WlrLayershell.namespace: "pibble-warmup"
             mask: Region {} // click-through, takes no input
 
             Item {
@@ -3562,7 +3562,7 @@ ShellRoot {
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "launcher-vol-osd"
+            WlrLayershell.namespace: "pibble-volume"
             // the OSD never takes input
             mask: Region {}
 
@@ -3803,7 +3803,7 @@ ShellRoot {
             color: "transparent"
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.namespace: "launcher-notif-fly"
+            WlrLayershell.namespace: "pibble-notifications"
 
             function accept(n) {
                 // sender may retract a queued notification before it fires
