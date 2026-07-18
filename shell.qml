@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -829,19 +830,18 @@ ShellRoot {
         WlrLayershell.namespace: "pibble-launcher"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-        // The blur protocol has no strength parameter, so the "grow" styles
-        // fake a blur fade by opening a circular hole of blur from a corner
-        // (or the center). Quantized to an int diameter so the region's
-        // x/y/width/height always change as one step. niri maps the region
-        // from surface-local logical coordinates; use the screen's logical
-        // size (not the window's, which briefly reports its pre-configure
-        // 500x500 during startup and would place the early frames
-        // off-center). No other compositor implements this region mapping
-        // yet, so "grow" only animates correctly on niri; "fade" (below)
-        // sidesteps the hole entirely and just cross-fades content opacity,
-        // which works anywhere.
+        // "grow" styles reveal a circle from a corner (or the center) that
+        // expands to cover the screen; "fade" (below) cross-fades content
+        // opacity instead. The circle itself is a client-side mask on our
+        // own content (see growMask below), so it renders identically on
+        // every compositor. Quantized to an int diameter so the mask/region
+        // geometry always changes as one step.
         property real reveal: 0
         readonly property bool fadeMode: cfg.launchAnimation === "fade"
+        // "none" skips the reveal entirely (see lad() below) — it must not
+        // be treated as "grow" just because it isn't "fade".
+        readonly property bool noneMode: cfg.launchAnimation === "none"
+        readonly property bool growMode: !fadeMode && !noneMode
         readonly property real revW: screen ? screen.width : 0
         readonly property real revH: screen ? screen.height : 0
         readonly property var originFrac: {
@@ -864,13 +864,15 @@ ShellRoot {
         // Clamped to 1px: an empty region reads as "no region set", which the
         // protocol treats as blur-the-whole-surface — a full-screen blur flash.
         readonly property int revealDiameter: Math.max(1, Math.ceil(2 * maxRevealRadius * reveal))
-        // Requesting a region at all is what flips background-effect into
-        // "on request" on niri, which then defaults xray on too — so with
-        // the "Background blur" setting off, don't ask at all. With it on:
-        // "grow" styles get the animated hole; "fade" has no hole to grow,
-        // so it just asks for the whole surface, statically, for as long as
-        // the window is open.
-        BackgroundEffect.blurRegion: !cfg.bgBlur ? null : (win.fadeMode ? fadeBlurRegion : growRegion)
+        // This is a bonus on top of the client-side circle, not what draws
+        // it: wherever a compositor implements ext-background-effect-v1,
+        // this blurs the same area the circle already occupies. "fade" and
+        // "none" have no circle, so they just get the whole surface,
+        // statically, for as long as the window is open. Requesting a
+        // region at all is what flips background-effect into "on request"
+        // on niri, which then defaults xray on too — so with the
+        // "Background blur" setting off, don't ask at all.
+        BackgroundEffect.blurRegion: !cfg.bgBlur ? null : (win.growMode ? growRegion : fadeBlurRegion)
         Region {
             id: growRegion
             shape: RegionShape.Ellipse
@@ -1414,7 +1416,7 @@ ShellRoot {
                 property: "opacity"
                 from: 0
                 to: 1
-                duration: win.ad(win.fadeMode ? 320 : 450)
+                duration: win.lad(win.fadeMode ? 320 : 450)
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
@@ -1422,9 +1424,8 @@ ShellRoot {
                 property: "reveal"
                 from: 0
                 to: 1
-                // Only visible in "grow" styles — blurRegion is unset
-                // entirely in "fade", so this has no on-screen effect there.
-                duration: win.ad(520)
+                // Only visible in "grow" styles — unused by "fade"/"none".
+                duration: win.lad(520)
                 // Starts at moderate velocity (no ease-in dead zone where the
                 // dot seems stuck, no Out-style explosion), settles gently.
                 easing.type: Easing.BezierSpline
@@ -1439,7 +1440,7 @@ ShellRoot {
                     target: content
                     property: "opacity"
                     to: 0
-                    duration: win.ad(win.fadeMode ? 260 : 320)
+                    duration: win.lad(win.fadeMode ? 260 : 320)
                     easing.type: Easing.InCubic
                 }
                 NumberAnimation {
@@ -1447,7 +1448,7 @@ ShellRoot {
                     property: "reveal"
                     // Only visible in "grow" styles, same as above.
                     to: 0
-                    duration: win.ad(320)
+                    duration: win.lad(320)
                     easing.type: Easing.InQuad
                 }
             }
@@ -1462,6 +1463,46 @@ ShellRoot {
             id: content
             anchors.fill: parent
             opacity: 0
+            // "grow" styles: clip content itself into the growing circle
+            // instead of relying on compositor blur to fake one — renders
+            // identically on every compositor.
+            layer.enabled: win.growMode
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: growMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 0.05
+            }
+
+            // Mask shape: same geometry as the blur-region ellipse above, so
+            // the client-drawn circle and any compositor blur behind it
+            // (where supported) stay in sync.
+            //
+            // Sized to match content's own bounds (not just the circle) so
+            // MultiEffect maps mask <-> source pixel-for-pixel instead of
+            // stretching a small texture across the whole surface. Kept
+            // genuinely visible (not visible: false) and layered explicitly,
+            // since an invisible item's layer never actually renders — a
+            // huge offset is what keeps it off the real screen instead.
+            Item {
+                id: growMask
+                visible: true
+                layer.enabled: true
+                x: -100000
+                y: -100000
+                width: content.width
+                height: content.height
+
+                Rectangle {
+                    antialiasing: true
+                    x: win.originX - win.revealDiameter / 2
+                    y: win.originY - win.revealDiameter / 2
+                    width: win.revealDiameter
+                    height: win.revealDiameter
+                    radius: width / 2
+                    color: "white"
+                }
+            }
 
             // the swipe-to-power rubber band, shared: every pane references
             // this one instance, so the pull physics live in a single place
@@ -2658,7 +2699,8 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150; sub: "grow animations only tested in niri so far" }
+                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150 }
+                    SettingRow { key: "animStyle"; label: "Tile animation" }
 
                     Repeater {
                         model: [
@@ -2666,7 +2708,6 @@ ShellRoot {
                             { key: "wallsGrid", label: "Wallpaper grid" },
                             { key: "clipsGrid", label: "Clipboard grid" },
                             { key: "clipsMax", label: "Clipboard entries" },
-                            { key: "animStyle", label: "Animation" },
                             { key: "dimOpacity", label: "Background opacity" }
                         ]
 
@@ -3006,7 +3047,7 @@ ShellRoot {
             }
             return "";
         }
-        readonly property var launchAnimChoices: ["grow-center", "grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "fade"]
+        readonly property var launchAnimChoices: ["grow-center", "grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "fade", "none"]
         function cycleChoice(cur: string, list, dir: int): string {
             let i = list.indexOf(cur);
             if (i < 0)
@@ -3317,9 +3358,16 @@ ShellRoot {
         readonly property int animDur: animStyle === "fade" ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
         readonly property int animFadeDur: animStyle === "none" ? 0 : 180
         readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
-        // "none" zeroes every animation duration, including the intro reveal
+        // "none" (tile animation) zeroes tile/pane-entrance durations only —
+        // the launch reveal has its own independent "none" (see lad below),
+        // so picking one doesn't silently also flatten the other.
         function ad(ms: int): int {
             return animStyle === "none" ? 0 : ms;
+        }
+        // Launch-animation duration helper: zeroed only by launchAnimation
+        // === "none", never by the tile animation setting above.
+        function lad(ms: int): int {
+            return win.noneMode ? 0 : ms;
         }
         function animDelay(slot: int, cols: int): int {
             if (!staggering)
