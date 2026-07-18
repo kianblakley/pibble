@@ -2929,12 +2929,15 @@ ShellRoot {
                     }
 
                     // closes out the tab with a divider and the repo's
-                    // commit, centered underneath
+                    // commit, centered underneath; extra breathing room above
+                    // and below the divider itself, beyond the Column's
+                    // normal row spacing
                     Item {
                         width: 780
-                        height: 1 + 10 + versionText.implicitHeight
+                        height: 10 + 1 + 10 + versionText.implicitHeight
 
                         Rectangle {
+                            y: 10
                             width: parent.width
                             height: 1
                             color: Qt.alpha(root.muted, 0.25)
@@ -2942,7 +2945,7 @@ ShellRoot {
                         Text {
                             id: versionText
                             anchors.top: parent.top
-                            anchors.topMargin: 10
+                            anchors.topMargin: 10 + 1 + 10
                             anchors.horizontalCenter: parent.horizontalCenter
                             visible: root.pibbleCommit !== ""
                             text: root.pibbleCommit
@@ -2964,8 +2967,27 @@ ShellRoot {
                                 id: versionReveal
                                 interval: 420
                                 onTriggered: {
-                                    versionText.text = "I vibe coded this using a microphone. Insanity";
+                                    versionText.text = "I vibe coded this using a microphone.";
                                     versionText.opacity = 1;
+                                    revealTimeout.start();
+                                }
+                            }
+                            Timer {
+                                id: revealTimeout
+                                interval: 3000
+                                onTriggered: {
+                                    versionText.opacity = 0;
+                                    versionHide.start();
+                                }
+                            }
+                            Timer {
+                                id: versionHide
+                                interval: 420
+                                onTriggered: {
+                                    versionText.text = root.pibbleCommit;
+                                    versionText.opacity = 1;
+                                    versionText.revealed = false;
+                                    versionText.clicks = 0;
                                 }
                             }
                             MouseArea {
