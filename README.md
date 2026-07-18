@@ -1,9 +1,9 @@
+> [!IMPORTANT] 
+> I have only extensively tested this on Niri so far. Please open a GitHub issue if you encounter any bugs.
+
 <h1 align=center>
     pibble
 </h1>
-
-> [!IMPORTANT] 
-> I have only extensively tested this on Niri so far. Please open a GitHub issue if you encounter any bugs.
 
 ![Clock](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clock.png)
 
