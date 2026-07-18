@@ -58,12 +58,12 @@ cd pibble
 **3. Start the daemon**
 
 ```sh
-./launch.sh
+./pibble
 ```
 
 **4. Toggle the launcher**
 
 ```sh
-./launch.sh toggle
+./pibble toggle
 ```
 

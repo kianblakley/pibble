@@ -607,6 +607,9 @@ ShellRoot {
     // ---------- clipboard history (cliphist) ----------
     property var clips: []
     property bool cliphistAvailable: true
+    // cliphist installed but nothing is feeding it (no `wl-paste --watch`
+    // running to pipe clipboard changes into `cliphist store`)
+    property bool clipWatcherRunning: true
     readonly property string clipThumbDir: cacheRoot + "/clips"
     // scratch file for the notification tint's icon-grab round trip (see
     // the flyout notification Canvas below)
@@ -618,6 +621,7 @@ ShellRoot {
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
+            pgrep -x wl-paste >/dev/null 2>&1 && echo WATCH:1 || echo WATCH:0
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
                 n=$(cliphist decode "$id" 2>/dev/null | wc -c)
                 printf '%s\t%s\t%s\n' "$id" "$n" "$preview"
@@ -628,7 +632,10 @@ ShellRoot {
                     root.cliphistAvailable = false;
                     return;
                 }
-                root.clips = text.split("\n").filter(l => l.trim()).map(l => {
+                root.cliphistAvailable = true;
+                const nl = text.indexOf("\n");
+                root.clipWatcherRunning = text.slice(0, nl).trim() === "WATCH:1";
+                root.clips = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
                     const id = l.slice(0, t1);
@@ -1878,9 +1885,11 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: 40
-                    text: root.cliphistAvailable
-                        ? "clipboard history is empty"
-                        : "cliphist not found — sudo dnf install cliphist wl-clipboard"
+                    text: !root.cliphistAvailable
+                        ? "cliphist not found"
+                        : !root.clipWatcherRunning
+                            ? "clipboard history is empty — wl-paste --watch cliphist store isn't running"
+                            : "clipboard history is empty"
                     color: root.muted
                     font { family: root.mono; pixelSize: root.fs(14) }
                 }

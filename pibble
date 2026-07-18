@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # App-launcher shell daemon control.
-#   launch.sh          start the persistent daemon (for spawn-at-startup)
-#   launch.sh toggle   show/hide the launcher window (for the keybind),
-#                      starting the daemon first if it isn't running
+#   pibble          start the persistent daemon (for spawn-at-startup)
+#   pibble toggle   show/hide the launcher window (for the keybind),
+#                   starting the daemon first if it isn't running
 # Qt can't switch icon themes at runtime, so quickshell reads QS_ICON_THEME
 # at startup; we pull it out of the launcher's persisted settings.
 repo="$(dirname "$(readlink -f "$0")")"
