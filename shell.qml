@@ -2438,7 +2438,7 @@ ShellRoot {
                                 model: [
                                     { id: "volume", label: "volume" },
                                     { id: "notifs", label: "notifications" },
-                                    { id: "alerts", label: "alerts" }
+                                    { id: "alerts", label: "pibble alerts" }
                                 ]
 
                                 Item {
