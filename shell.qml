@@ -262,7 +262,7 @@ ShellRoot {
             property string volStyle: "pill"
             // numeric volume % readout on the OSD
             property bool volShowPercent: true
-            property int volTimeout: 1500
+            property int volTimeout: 2000
             property int notifTimeout: 5000
             property real notifFontScale: 1.0
             // one notification at a time (queue across apps, replace within
@@ -299,7 +299,7 @@ ShellRoot {
     readonly property color muted: activeTheme.muted
     // backdrop the launcher dims the screen with
     readonly property color surface: "#0a0908"
-    readonly property string mono: cfg.fontFamily || "JetBrains Mono"
+    readonly property string mono: cfg.fontFamily
 
     // resolve a scheme id to its raw palette; unknown ids fall back to the
     // launcher's scheme
@@ -309,7 +309,7 @@ ShellRoot {
         return themes.find(t => t.id === sel) ?? launcherBase;
     }
     readonly property var flyTh: themeColors(cfg.flyTheme)
-    readonly property string flyMono: cfg.flyFontFamily || mono
+    readonly property string flyMono: cfg.flyFontFamily === "system" ? "" : (cfg.flyFontFamily || mono)
     // flyTheme "matugen" ("Dynamic"): near-black card, bubble tinted from
     // the app icon; the volume level bar still follows the wallpaper palette
     readonly property bool notifIconTint: cfg.flyTheme === "matugen"
@@ -561,8 +561,17 @@ ShellRoot {
     }
     readonly property string wallDir: expandHome(cfg.wallpaperDir)
 
-    // Each entry: path|thumb|blurred. Reuses the conventions: thumbnails/<f>
-    // for grid previews, blurred/<f> or <stem>blurred.<ext> for the overview.
+    // Single persistent, self-cleaning cache root for everything the app
+    // generates (wallpaper thumbnails/blur, clip thumbnails) — separate from
+    // the source directories so deleting a wallpaper or a clip scrolling
+    // past clipsMax can be detected and swept on the next scan.
+    readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/app-launcher"
+    readonly property string wallCacheDir: cacheRoot + "/wallpapers"
+
+    // Each entry: path|thumb|blurred. thumb/blurred point into wallCacheDir,
+    // keyed by a hash of the source path (stable across renames of unrelated
+    // files, safe across multiple wallpaperDirs); <stem>blurred.<ext> next to
+    // the source is still honored as a user-supplied override.
     property var wallpapers: []
     property string lastMissingDir: ""
     function rescanWallpapers() {
@@ -574,16 +583,19 @@ ShellRoot {
         running: true
         command: ["bash", "-c", `
             cd "$1" || { echo NODIR; exit 0; }
+            cachedir="$2"
             shopt -s nullglob nocaseglob
             for f in *.png *.jpg *.jpeg *.webp; do
                 case "$f" in *blurred.*) continue ;; esac
-                stem="\${f%.*}" ext="\${f##*.}" thumb="$f" blur=""
+                stem="\${f%.*}" ext="\${f##*.}"
+                key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
+                thumb="$PWD/$f" blur=""
                 # only trust caches newer than the source image
-                [ "thumbnails/$f" -nt "$f" ] && thumb="thumbnails/$f"
-                [ "blurred/$f" -nt "$f" ] && blur="blurred/$f"
-                [ -e "\${stem}blurred.$ext" ] && blur="\${stem}blurred.$ext"
-                printf '%s|%s|%s\\n' "$PWD/$f" "$PWD/$thumb" "\${blur:+$PWD/$blur}"
-            done | sort`, "_", root.wallDir]
+                [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$ext"
+                [ "$cachedir/blurred/$key.$ext" -nt "$f" ] && blur="$cachedir/blurred/$key.$ext"
+                [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
+                printf '%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur"
+            done | sort`, "_", root.wallDir, root.wallCacheDir]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NODIR") {
@@ -603,24 +615,32 @@ ShellRoot {
                 // Generate missing thumbnails (a full 5K image standing in as
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
                 // overview variants in the background; the next scan picks
-                // them up and applying never has to blur synchronously.
+                // them up and applying never has to blur synchronously. Also
+                // sweeps cache entries whose source wallpaper is gone — runs
+                // every scan (not just when something's missing) so deletions
+                // get cleaned up promptly.
                 const wantBlur = cfg.wallCommand.includes("$BLUR");
-                const needsWork = walls.some(w => (wantBlur && !w.blur) || w.thumb === w.path);
-                if (needsWork) {
-                    Quickshell.execDetached(["bash", "-c", `
-                        dir="$1" gb="$2"; shift 2
-                        cd "$dir" || exit 0
-                        mkdir -p thumbnails
-                        [ "$gb" = "1" ] && mkdir -p blurred
-                        for f in "$@"; do
-                            b=$(basename "$f")
-                            stem="\${b%.*}" ext="\${b##*.}"
-                            [ "thumbnails/$b" -nt "$f" ] || magick "$f" -resize 480x270^ -gravity center -extent 480x270 "thumbnails/$b"
-                            if [ "$gb" = "1" ]; then
-                                [ "blurred/$b" -nt "$f" ] || [ -e "\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "blurred/$b"
-                            fi
-                        done`, "_", root.wallDir, wantBlur ? "1" : "0"].concat(walls.map(w => w.path)));
-                }
+                Quickshell.execDetached(["bash", "-c", `
+                    walldir="$1" cachedir="$2" gb="$3"; shift 3
+                    mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
+                    live=""
+                    for f in "$@"; do
+                        b=$(basename "$f")
+                        stem="\${b%.*}" ext="\${b##*.}"
+                        key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
+                        live="$live $key"
+                        [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] || magick "$f" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$ext"
+                        if [ "$gb" = "1" ]; then
+                            [ "$cachedir/blurred/$key.$ext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$ext"
+                        fi
+                    done
+                    for d in "$cachedir/thumbnails" "$cachedir/blurred"; do
+                        for c in "$d"/*; do
+                            [ -e "$c" ] || continue
+                            k=$(basename "$c"); k="\${k%.*}"
+                            case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
+                        done
+                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0"].concat(walls.map(w => w.path)));
             }
         }
     }
@@ -628,7 +648,7 @@ ShellRoot {
     // ---------- clipboard history (cliphist) ----------
     property var clips: []
     property bool cliphistAvailable: true
-    readonly property string clipThumbDir: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher-clipthumbs"
+    readonly property string clipThumbDir: cacheRoot + "/clips"
     // scratch file for the notification tint's icon-grab round trip (see
     // the flyout notification Canvas below)
     readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher-tint.png"
@@ -660,6 +680,20 @@ ShellRoot {
                         ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: "" }
                         : { id, bytes, image: false, preview: preview.trim() };
                 });
+                // Sweep cached thumbs (and on-demand full-res decodes) for
+                // ids that fell out of the current clipsMax window — runs
+                // every scan so the cache never grows past what's shown.
+                clipPrune.command = ["bash", "-c", `
+                    dir="$1"; shift
+                    [ -d "$dir" ] || exit 0
+                    for f in "$dir"/*.png; do
+                        [ -e "$f" ] || continue
+                        b=$(basename "$f" .png)
+                        id="\${b%-full}"
+                        case " $* " in *" $id "*) ;; *) rm -f "$f" ;; esac
+                    done`, "_", root.clipThumbDir].concat(root.clips.map(c => c.id));
+                clipPrune.running = true;
+
                 const imgs = root.clips.filter(c => c.image).map(c => c.id);
                 if (imgs.length) {
                     clipThumbs.command = ["bash", "-c", `
@@ -687,6 +721,9 @@ ShellRoot {
                 }
             }
         }
+    }
+    Process {
+        id: clipPrune
     }
     Process {
         id: clipThumbs
@@ -1952,6 +1989,7 @@ ShellRoot {
                                         visible: false
                                         width: 214
                                         wrapMode: Text.Wrap
+                                        textFormat: Text.PlainText
                                         text: {
                                             const c = clipCell.shownClip;
                                             return c && !c.image ? c.preview : "";
@@ -2047,6 +2085,7 @@ ShellRoot {
                                             anchors.fill: parent
                                             anchors.margins: 13
                                             text: clipCell.shownClip ? clipCell.shownClip.preview : ""
+                                            textFormat: Text.PlainText
                                             wrapMode: Text.Wrap
                                             elide: Text.ElideRight
                                             maximumLineCount: Math.max(1, Math.floor((clipCell.tileH - 26) / Math.max(1, clipCell.lineHpx)))
@@ -2113,6 +2152,10 @@ ShellRoot {
                     anchors.centerIn: parent
                     width: isImg ? imgFit.width + 48 : 560
                     height: expandCol.height + 44
+                    // large images cover much more of the screen than text
+                    // cards, so the same growth duration reads as an abrupt
+                    // pop; ease it in more slowly
+                    readonly property int expandDur: isImg ? 560 : 380
                     // the decoded full text arrives async and is longer than
                     // the preview; grow smoothly instead of jumping
                     Behavior on height {
@@ -2128,10 +2171,10 @@ ShellRoot {
 
                     ParallelAnimation {
                         id: expandIn
-                        NumberAnimation { target: expandTx; property: "x"; to: 0; duration: win.ad(380); easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandTx; property: "y"; to: 0; duration: win.ad(380); easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandCard; property: "opacity"; from: 0.3; to: 1; duration: win.ad(220); easing.type: Easing.OutCubic }
-                        NumberAnimation { target: expandCard; property: "scale"; from: 0.35; to: 1; duration: win.ad(380); easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                        NumberAnimation { target: expandTx; property: "x"; to: 0; duration: win.ad(expandCard.expandDur); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandTx; property: "y"; to: 0; duration: win.ad(expandCard.expandDur); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "opacity"; from: 0.3; to: 1; duration: win.ad(Math.round(expandCard.expandDur * 0.58)); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: expandCard; property: "scale"; from: 0.35; to: 1; duration: win.ad(expandCard.expandDur); easing.type: Easing.OutBack; easing.overshoot: 1.1 }
                     }
                     SequentialAnimation {
                         id: expandOut
@@ -2217,6 +2260,7 @@ ShellRoot {
                                 id: expandBody
                                 width: parent.width
                                 text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
+                                textFormat: Text.PlainText
                                 wrapMode: Text.Wrap
                                 elide: Text.ElideRight
                                 maximumLineCount: 30
@@ -2442,6 +2486,7 @@ ShellRoot {
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
                     SettingRow { key: "notifFontScale"; label: "Font size" }
                     SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
+                    SettingRow { key: "iconTheme"; label: "Icon theme"; sub: "applies on next launch"; valueWidth: 260 }
 
                     ThemeRow { cfgKey: "flyTheme" }
                 }
@@ -2919,14 +2964,14 @@ ShellRoot {
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "revealOrigin": return cfg.revealOrigin;
-            case "fontFamily": return cfg.fontFamily || "JetBrains Mono";
+            case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
-            case "flyFontFamily": return cfg.flyFontFamily || "follow launcher";
+            case "flyFontFamily": return cfg.flyFontFamily === "system" ? "system default" : (cfg.flyFontFamily || "follow launcher");
             case "volAnim": return cfg.volAnim;
             case "volStyle": return cfg.volStyle === "sine" ? "sine wave" : cfg.volStyle;
             case "volPercent": return cfg.volShowPercent ? "on" : "off";
-            case "volTimeout": return (cfg.volTimeout / 1000).toFixed(1) + " s";
+            case "volTimeout": return (cfg.volTimeout / 1000).toFixed(0) + " s";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
             case "notifStyle": return cfg.notifStyle;
@@ -3020,10 +3065,10 @@ ShellRoot {
                 cfg.volShowPercent = !cfg.volShowPercent;
                 break;
             case "volTimeout":
-                cfg.volTimeout = Math.max(500, Math.min(10000, cfg.volTimeout + dir * 500));
+                cfg.volTimeout = Math.max(1000, Math.min(10000, cfg.volTimeout + dir * 1000));
                 break;
             case "flyFontFamily": {
-                const list = [""].concat(root.fontFamilies);
+                const list = ["", "system"].concat(root.fontFamilies);
                 let i = list.indexOf(cfg.flyFontFamily);
                 if (i < 0)
                     i = 0;
@@ -3096,7 +3141,7 @@ ShellRoot {
             case "volAnim": cfg.volAnim = "slide"; break;
             case "volStyle": cfg.volStyle = "pill"; break;
             case "volPercent": cfg.volShowPercent = true; break;
-            case "volTimeout": cfg.volTimeout = 1500; break;
+            case "volTimeout": cfg.volTimeout = 2000; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifFontScale": cfg.notifFontScale = 1.0; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
@@ -3419,10 +3464,10 @@ ShellRoot {
 
     // ================= OSDs (persistent) =================
     // Both flyouts are persistent windows of fixed size; the cards animate
-    // inside them. niri's geometry-corner-radius does not clip layer-surface
-    // blur (verified on 26.04-git 2809), so the blur is shaped client-side
-    // with ellipse scanline regions, inset 2px so the region edge hides
-    // under the card's antialiased border.
+    // inside them. Cards are always fully opaque (root.flySurface, no
+    // border), so unlike the launcher's reveal these windows request no
+    // BackgroundEffect.blurRegion at all — there'd be nothing behind an
+    // opaque card for it to show.
 
     // ---------- volume OSD: pill sliding up from the bottom edge ----------
     PwObjectTracker {
@@ -4406,11 +4451,21 @@ ShellRoot {
                     clip: true
                     opacity: 1 - fcard.lq(0)
 
-                    ClippingRectangle {
+                    // plain (unmasked) placeholder tint behind the image; kept
+                    // separate from the ClippingRectangle below so its fill
+                    // never bleeds into the offscreen mask's corner antialiasing
+                    Rectangle {
                         width: fcard.width
                         height: fcard.stripH + 16
                         radius: 16
                         color: Qt.alpha(flyWin.nColor, 0.2)
+                    }
+
+                    ClippingRectangle {
+                        width: fcard.width
+                        height: fcard.stripH + 16
+                        radius: 16
+                        color: "transparent"
 
                         Image {
                             width: fcard.width
@@ -4472,6 +4527,7 @@ ShellRoot {
                             }
                             Text {
                                 text: flyWin.view.app || "notification"
+                                textFormat: Text.PlainText
                                 color: root.notifTh.muted
                                 font { family: root.flyMono; pixelSize: root.flyFs(10); letterSpacing: 2; capitalization: Font.AllUppercase }
                             }
@@ -4481,6 +4537,7 @@ ShellRoot {
                             visible: text.length > 0
                             width: parent.width
                             text: flyWin.view.summary
+                            textFormat: Text.PlainText
                             wrapMode: Text.Wrap
                             maximumLineCount: 2
                             elide: Text.ElideRight
