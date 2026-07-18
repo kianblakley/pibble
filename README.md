@@ -2,12 +2,10 @@
     pibble
 </h1>
 
-> [!NOTE] 
-> only tested on niri so far. Other WMs may work but aren't verified.
+> [!IMPORTANT] 
+> I have only extensively tested this on Niri so far. Please open a GitHub issue if you encounter any bugs.
 
-## Video
-
-todo
+[demo coming]
 
 ## Features
 
@@ -18,14 +16,7 @@ todo
 - Power off
 - Volume flyout
 - Notification flyout
-
-## Core keybindings
-
-| Key | Action |
-|---|---|
-| Tab | Navigate pages |
-| Ctrl+P (or swipe down) | Reveal power button |
-| Ctrl+S | Open settings |
+- Extensive settings
 
 ## Installation
 
@@ -38,7 +29,7 @@ Necessary:
 | [Quickshell](https://github.com/quickshell-mirror/quickshell) | Runs the shell |
 | A Wayland compositor, e.g. [Niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland) | Hosts the shell |
 
-Optional - required for full features:
+Optional (required for full feature set):
 
 | Dependency | Use |
 |---|---|
@@ -67,11 +58,17 @@ cd pibble
 ./pibble toggle
 ```
 
-## Compositor integration
+## Core Keybindings
 
-Each pibble window sets a `namespace` via the wlr layer-shell protocol, which
-compositors can match on to apply their own rules (placement, blur, opacity,
-etc.):
+| Key | Action |
+|---|---|
+| `Tab` | Navigate pages |
+| `Ctrl+P` (or swipe down) | Reveal power button |
+| `Ctrl+S` | Open settings |
+
+## Namespaces
+
+Each pibble window has a layer-shell namespace which can be used to apply background effects in your compositor's configuration file.
 
 | Namespace | Window |
 |---|---|
@@ -79,20 +76,5 @@ etc.):
 | `pibble-notifications` | Notification flyout |
 | `pibble-volume` | Volume OSD |
 
-pibble also requests background blur behind the launcher itself via the
-[`ext-background-effect-v1`](https://wayland.app/protocols/ext-background-effect-v1)
-Wayland protocol (see the "Background blur" setting) — currently implemented
-by niri. On niri, you can tune or override this per window with a layer rule,
-e.g.:
 
-```kdl
-layer-rule {
-    match namespace="^pibble-launcher$"
-
-    background-effect {
-        blur false
-        xray false
-    }
-}
-```
 

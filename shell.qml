@@ -91,7 +91,8 @@ ShellRoot {
                 Rectangle {
                     id: trCard
                     required property var modelData
-                    readonly property var pal: modelData.id === "matugen" ? root.dynTheme : modelData
+                    readonly property var pal: modelData.id === "matugen" ? root.dynTheme
+                        : modelData.id === "custom" ? root.customTheme : modelData
                     readonly property bool active: tr.current === modelData.id
                     width: 80
                     height: 80
@@ -129,6 +130,331 @@ ShellRoot {
                     MouseArea {
                         anchors.fill: parent
                         onClicked: tr.setVal(trCard.modelData.id)
+                    }
+                }
+            }
+        }
+    }
+
+    // palette editor for the "custom" theme; always shown so the palette
+    // can be tuned before (or without) switching to it
+    component CustomColorRow: Item {
+        id: ccr
+        width: 780
+        height: pickerRow.y + pickerRow.height
+        // which of the three swatches the picker below is currently editing
+        property string slot: "accent"
+        readonly property string slotHex: slot === "fg" ? cfg.customFg : slot === "muted" ? cfg.customMuted : cfg.customAccent
+        // intermediate `color`-typed property so we can read Qt's built-in
+        // hsvHue/hsvSaturation/hsvValue instead of hand-rolling conversions
+        property color slotColorVal: ccr.slotHex
+        // hue is kept as its own state rather than purely derived from the
+        // color: it's undefined for achromatic colors (hsvHue reports -1 at
+        // zero saturation), and hex is only 8 bits per channel, so
+        // round-tripping through it near-losslessly recovers hue everywhere
+        // except very close to that zero-saturation edge, where a tiny
+        // quantization error swings hue wildly. Resyncing is skipped there
+        // (saturation floor below) so dragging the SV square doesn't jitter
+        // the hue slider - but it otherwise stays reactive (rather than
+        // only resyncing at explicit moments like a slot switch), because
+        // the settings file loads asynchronously: this row can finish
+        // constructing - and read back the adapter's declared defaults -
+        // before the real persisted color has arrived.
+        property real hue: 0
+        readonly property real sat: slotColorVal.hsvSaturation
+        readonly property real val: slotColorVal.hsvValue
+        function syncHueFromColor() {
+            if (slotColorVal.hsvHue >= 0 && slotColorVal.hsvSaturation > 0.05)
+                hue = slotColorVal.hsvHue;
+        }
+        onSlotColorValChanged: syncHueFromColor()
+        Component.onCompleted: syncHueFromColor()
+
+        function setSlotHex(hex: string) {
+            switch (slot) {
+            case "fg": cfg.customFg = hex; break;
+            case "muted": cfg.customMuted = hex; break;
+            default: cfg.customAccent = hex; break;
+            }
+        }
+        function setSlotHsv(h: real, s: real, v: real) {
+            setSlotHex(Qt.hsva(h, s, v, 1).toString());
+        }
+
+        // label sits beside the picker rather than stacked above it - same
+        // convention as ThemeRow's label beside its (much shorter) swatch
+        // row, just offset less since the picker is a lot taller
+        SLabel {
+            id: ccrLabel
+            anchors.left: parent.left
+            anchors.verticalCenter: undefined
+            y: 6
+            text: "Custom colors"
+        }
+        Row {
+            id: ccrResetRow
+            anchors.right: parent.right
+            // pinned to the label's vertical center explicitly, rather
+            // than relying on the label and a height:28 row happening to
+            // line up
+            anchors.verticalCenter: ccrLabel.verticalCenter
+            height: 28
+            spacing: 8
+
+            SReset {
+                key: "customColors"
+            }
+        }
+
+        Row {
+            id: pickerRow
+            // right-anchored with the same margin as the theme swatches
+            // above, so the SV square's left edge lines up with theirs;
+            // top-anchored to the reset button's vertical center (not its
+            // top), per request
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            anchors.top: ccrResetRow.verticalCenter
+            spacing: 20
+
+            // SV square + hue slider + hex entry, editing whichever swatch
+            // is selected on the right
+            Column {
+                spacing: 16
+
+                Item {
+                    id: svSquare
+                    width: 330
+                    height: 330
+
+                    Canvas {
+                        id: svCanvas
+                        anchors.fill: parent
+                        property real paintHue: ccr.hue
+                        onPaintHueChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            const g1 = ctx.createLinearGradient(0, 0, width, 0);
+                            g1.addColorStop(0, "#ffffff");
+                            g1.addColorStop(1, Qt.hsva(paintHue, 1, 1, 1).toString());
+                            ctx.fillStyle = g1;
+                            ctx.fillRect(0, 0, width, height);
+                            const g2 = ctx.createLinearGradient(0, 0, 0, height);
+                            g2.addColorStop(0, "rgba(0,0,0,0)");
+                            g2.addColorStop(1, "#000000");
+                            ctx.fillStyle = g2;
+                            ctx.fillRect(0, 0, width, height);
+                        }
+                    }
+                    MouseArea {
+                        id: svArea
+                        anchors.fill: parent
+                        preventStealing: true
+                        function apply(mx: real, my: real) {
+                            const s = Math.max(0, Math.min(1, mx / width));
+                            const v = Math.max(0, Math.min(1, 1 - my / height));
+                            ccr.setSlotHsv(ccr.hue, s, v);
+                        }
+                        onPressed: mouse => svArea.apply(mouse.x, mouse.y)
+                        onPositionChanged: mouse => { if (pressed) svArea.apply(mouse.x, mouse.y); }
+                        onReleased: root.saveSettings()
+                    }
+                    // "circle" crosshair: a white ring with a thin dark
+                    // outer ring for contrast against light colors
+                    Rectangle {
+                        width: 16
+                        height: 16
+                        radius: 8
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Qt.rgba(0, 0, 0, 0.45)
+                        x: ccr.sat * svSquare.width - width / 2
+                        y: (1 - ccr.val) * svSquare.height - height / 2
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: width / 2
+                            color: "transparent"
+                            border.width: 2
+                            border.color: "#ffffff"
+                        }
+                    }
+                }
+
+                Item {
+                    id: hueSlider
+                    width: svSquare.width
+                    height: 22
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 4
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            // deliberately desaturated so the bar reads
+                            // softer than the primaries it actually picks -
+                            // the hue it selects is unaffected, since that
+                            // comes from the x position, not this fill
+                            GradientStop { position: 0.0; color: Qt.hsva(0 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.17; color: Qt.hsva(1 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.33; color: Qt.hsva(2 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.5; color: Qt.hsva(3 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.67; color: Qt.hsva(4 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.83; color: Qt.hsva(5 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 1.0; color: Qt.hsva(6 / 6, 0.5, 0.85, 1) }
+                        }
+                    }
+                    MouseArea {
+                        id: hueArea
+                        anchors.fill: parent
+                        preventStealing: true
+                        function apply(mx: real) {
+                            const h = Math.max(0, Math.min(1, mx / width));
+                            // set directly rather than waiting for the
+                            // round-tripped color to report it back: at
+                            // zero saturation (e.g. the Mono defaults) hue
+                            // has no effect on the resulting color at all,
+                            // so the handle would otherwise never move
+                            ccr.hue = h;
+                            ccr.setSlotHsv(h, ccr.sat, ccr.val);
+                        }
+                        onPressed: mouse => hueArea.apply(mouse.x)
+                        onPositionChanged: mouse => { if (pressed) hueArea.apply(mouse.x); }
+                        onReleased: root.saveSettings()
+                    }
+                    Rectangle {
+                        width: 16
+                        height: 16
+                        radius: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: ccr.hue * hueSlider.width - width / 2
+                        color: Qt.hsva(ccr.hue, 0.5, 0.85, 1)
+                        border.width: 2
+                        border.color: "#ffffff"
+                    }
+                }
+
+                Rectangle {
+                    width: svSquare.width
+                    height: 42
+                    radius: 8
+                    color: Qt.alpha(root.accent, 0.06)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.2)
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 14
+                        spacing: 8
+
+                        Rectangle {
+                            width: 18
+                            height: 18
+                            radius: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: ccr.slotHex
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.15)
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "#"
+                            color: Qt.alpha(root.muted, 0.6)
+                            font { family: root.mono; pixelSize: root.fs(14) }
+                        }
+                        TextInput {
+                            id: hexInput
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 220
+                            text: ccr.slotHex.replace("#", "").toUpperCase()
+                            color: root.fg
+                            font { family: root.mono; pixelSize: root.fs(14) }
+                            selectByMouse: true
+                            maximumLength: 6
+                            // the binding above (declarative `text:`) only
+                            // reacts to slotHex/slot changes; user keystrokes
+                            // set `text` directly, so gate on activeFocus to
+                            // tell the two apart and avoid feeding a half
+                            // typed hex back into cfg
+                            onTextChanged: {
+                                if (!activeFocus)
+                                    return;
+                                const clean = text.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+                                if (clean !== text) {
+                                    text = clean;
+                                    return;
+                                }
+                                if (clean.length === 6)
+                                    ccr.setSlotHex("#" + clean);
+                            }
+                            onEditingFinished: {
+                                root.saveSettings();
+                                text = Qt.binding(() => ccr.slotHex.replace("#", "").toUpperCase());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Accent / Text / Muted slots, top-aligned like the swatch
+            // picker they sit under
+            Column {
+                spacing: 10
+
+                Repeater {
+                    model: [
+                        { key: "accent", label: "Accent" },
+                        { key: "fg", label: "Text" },
+                        { key: "muted", label: "Muted" }
+                    ]
+
+                    Rectangle {
+                        id: slotChip
+                        required property var modelData
+                        readonly property bool active: ccr.slot === modelData.key
+                        readonly property string hex: modelData.key === "fg" ? cfg.customFg : modelData.key === "muted" ? cfg.customMuted : cfg.customAccent
+                        width: 170
+                        height: 48
+                        radius: 10
+                        color: Qt.alpha(root.accent, active ? 0.16 : 0.06)
+                        border.width: active ? 2 : 1
+                        border.color: active ? root.accent : Qt.alpha(root.accent, 0.25)
+
+                        Row {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+
+                            Rectangle {
+                                width: 26
+                                height: 26
+                                radius: 7
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: slotChip.hex
+                                border.width: 1
+                                border.color: Qt.rgba(1, 1, 1, 0.15)
+                            }
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                Text {
+                                    text: slotChip.modelData.label
+                                    color: slotChip.active ? root.fg : root.muted
+                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                }
+                                Text {
+                                    text: slotChip.hex.toUpperCase()
+                                    color: Qt.alpha(root.muted, 0.8)
+                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                }
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: ccr.slot = slotChip.modelData.key
+                        }
                     }
                 }
             }
@@ -241,10 +567,20 @@ ShellRoot {
             property string fontFamily: ""
             property string iconTheme: ""
             property string theme: "matugen"
+            // user-editable palette for the "custom" theme; defaults match
+            // the retired Mono preset so a first-time pick starts from something sane
+            property string customAccent: "#cfcfcf"
+            property string customFg: "#f0f0f0"
+            property string customMuted: "#8a8a8a"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
             property string wallCommand: root.defaultWallCommand
+            // path of the last wallpaper applied through the launcher; the
+            // Dynamic theme samples this directly instead of asking the
+            // compositor what it's currently showing, since wallCommand is
+            // freeform and may not even go through the tool we'd query
+            property string currentWallpaper: ""
             property real dimOpacity: 0.4
             property string launchAnimation: "grow-top-left"
             // whether the launcher asks the compositor to blur behind it at
@@ -284,12 +620,15 @@ ShellRoot {
         { id: "frost", name: "Frost", accent: "#7ab8e0", fg: "#e6eef4", muted: "#83919c" },
         { id: "moss",  name: "Moss",  accent: "#a3c76a", fg: "#eef3e4", muted: "#8d9378" },
         { id: "rose",  name: "Rose",  accent: "#e07a9a", fg: "#f4e8ec", muted: "#9c8389" },
-        { id: "mono",  name: "Mono",  accent: "#cfcfcf", fg: "#f0f0f0", muted: "#8a8a8a" },
+        { id: "custom", name: "Custom", accent: "", fg: "", muted: "" },
         { id: "matugen", name: "Dynamic", accent: "", fg: "", muted: "" }
     ]
     // filled in from matugen (current wallpaper) at startup
     property var dynTheme: ({ accent: "#e8a24a", fg: "#f3ede4", muted: "#8a8378" })
+    // user-defined palette, edited via the color picker under the theme row
+    readonly property var customTheme: ({ accent: cfg.customAccent, fg: cfg.customFg, muted: cfg.customMuted })
     readonly property var launcherBase: cfg.theme === "matugen" ? dynTheme
+        : cfg.theme === "custom" ? customTheme
         : (themes.find(t => t.id === cfg.theme) ?? themes[0])
     readonly property var activeTheme: launcherBase
     readonly property color accent: activeTheme.accent
@@ -380,10 +719,11 @@ ShellRoot {
             cfg.notifStyle = "bubble";
             saveSettings();
         }
-        // the colors tab (custom palette + light/dark) was removed; fall
-        // back configs that had "custom" selected to the default scheme
-        if (cfg.theme === "custom") {
-            cfg.theme = "amber";
+        // the Mono preset was retired in favor of the custom color picker
+        // (seeded with Mono's old palette); configs that had it selected
+        // fall back to the default so a theme always shows as selected
+        if (cfg.theme === "mono") {
+            cfg.theme = "matugen";
             saveSettings();
         }
     }
@@ -391,12 +731,17 @@ ShellRoot {
 
     Process {
         id: matugenProc
-        // Needed at startup only for the dynamic theme; otherwise deferred
-        // until the settings pane wants the preview — its output triggers a
-        // theme-color rebind of every tile, which would hitch the intro.
+        // Runs once at startup to catch up with cfg.currentWallpaper (set on
+        // a prior run); after that, applyWallpaper() triggers it directly
+        // when a new wallpaper is picked, so this binding only needs to fire
+        // the initial run.
         running: cfg.theme === "matugen"
-        // a refresh requested while a run was in flight; honoured on exit so
-        // the palette still catches up with a just-applied wallpaper
+        // a refresh requested while a run was in flight. Never kill a run
+        // already in progress to start a newer one — a killed run surfaces
+        // as truncated JSON, which used to raise a spurious "Dynamic theme
+        // failed" notification — so callers queue this instead, and it's
+        // honoured on exit so the palette can't go stale on the wallpaper
+        // the busy run never saw.
         property bool rerun: false
         onRunningChanged: {
             if (!running && rerun) {
@@ -404,12 +749,17 @@ ShellRoot {
                 Qt.callLater(() => running = true);
             }
         }
+        // samples cfg.currentWallpaper (set by applyWallpaper) rather than
+        // asking the compositor what's on screen — wallCommand is a
+        // freeform user command and may not even go through the tool we'd
+        // query, so the picker's own record of what it applied is the only
+        // source that's guaranteed to match
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$PATH"
             command -v matugen >/dev/null || { echo NOMATUGEN; exit 0; }
-            img=$(awww query -n workspaces 2>/dev/null | sed -n 's/.*displaying: image: //p' | head -1)
+            img="$1"
             [ -n "$img" ] || exit 0
-            matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`]
+            matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`, "_", cfg.currentWallpaper]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOMATUGEN") {
@@ -772,21 +1122,10 @@ ShellRoot {
             shown = true;
             input.forceActiveFocus();
             // fresh data per open: the clipboard and wallpaper folder change
-            // between opens, and a dynamic theme follows the wallpaper
+            // between opens
             clipScan.running = false;
             clipScan.running = true;
             root.rescanWallpapers();
-            // refresh the dynamic palette, but never kill a run already in
-            // flight — a killed run surfaces as truncated JSON, which used to
-            // raise a spurious "Dynamic theme failed" notification. A refresh
-            // that lands mid-run is queued instead of dropped, so the palette
-            // can't go stale on the wallpaper the busy run never saw.
-            if (cfg.theme === "matugen") {
-                if (matugenProc.running)
-                    matugenProc.rerun = true;
-                else
-                    matugenProc.running = true;
-            }
         }
 
         function resetState() {
@@ -1167,6 +1506,15 @@ ShellRoot {
         function applyWallpaper(wall) {
             if (!wall)
                 return;
+            // record what was applied so the Dynamic theme can sample this
+            // exact file directly, instead of asking the compositor what's
+            // currently on screen (see matugenProc)
+            cfg.currentWallpaper = wall.path;
+            root.saveSettings();
+            if (matugenProc.running)
+                matugenProc.rerun = true;
+            else
+                matugenProc.running = true;
             // Runs the configurable command with $WALL and $BLUR exported.
             // The blurred variant is only ensured when the command actually
             // references $BLUR, so non-blur setups skip that work entirely.
@@ -2469,6 +2817,7 @@ ShellRoot {
                     SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 260 }
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
+                    CustomColorRow {}
                 }
 
                 // flyouts tab: volume + notification OSDs
@@ -2499,8 +2848,8 @@ ShellRoot {
                         }
                         Row {
                             anchors.right: parent.right
-                            anchors.rightMargin: 34
-                            spacing: 8
+                            anchors.rightMargin: 34 + 32
+                            spacing: 40
                             height: parent.height
 
                             Repeater {
@@ -3194,6 +3543,12 @@ ShellRoot {
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
             case "theme": cfg.theme = "matugen"; break;
+            case "customColors":
+                // the retired Mono preset's palette
+                cfg.customAccent = "#cfcfcf";
+                cfg.customFg = "#f0f0f0";
+                cfg.customMuted = "#8a8a8a";
+                break;
             case "wallpaperDir":
                 cfg.wallpaperDir = "~/Pictures/wallpapers";
                 root.rescanWallpapers();
