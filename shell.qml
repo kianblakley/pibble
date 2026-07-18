@@ -681,8 +681,22 @@ ShellRoot {
                         export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                         dir="$1"; shift
                         mkdir -p "$dir"
+                        # Downscale at generation time so the on-disk thumb is
+                        # small: the QML reader thread decodes the whole PNG
+                        # before sourceSize applies, so a full-res screenshot
+                        # would starve the app-icon decodes queued behind it.
                         for id in "$@"; do
-                            [ -s "$dir/$id.png" ] || cliphist decode "$id" > "$dir/$id.png"
+                            [ -s "$dir/$id.png" ] && continue
+                            tmp=$(mktemp)
+                            cliphist decode "$id" > "$tmp"
+                            if command -v magick >/dev/null; then
+                                magick "$tmp" -resize '480x640>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                            elif command -v convert >/dev/null; then
+                                convert "$tmp" -resize '480x640>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                            else
+                                cp "$tmp" "$dir/$id.png"
+                            fi
+                            rm -f "$tmp"
                         done`, "_", root.clipThumbDir].concat(imgs);
                     clipThumbs.running = true;
                 }
@@ -1051,18 +1065,35 @@ ShellRoot {
         }
         function navigate(dx: int, dy: int) {
             if (pane === "apps") {
-                selected = dy !== 0
+                const next = dy !== 0
                     ? vMove(selected, matches.length, cfg.appsCols, cfg.appsRows, dy)
                     : hMove(selected, matches.length, dx);
+                // Re-stagger when the move crosses onto a new page, so the
+                // tile wave replays instead of the whole grid popping at once.
+                // Set it before the assignment: the entry rebinding cascade
+                // that restarts springIn fires synchronously here, and it
+                // reads staggering to compute the per-tile delay.
+                pageStagger(appPageSize, selected, next);
+                selected = next;
             } else if (pane === "walls") {
-                wallSelected = dy !== 0
+                const next = dy !== 0
                     ? vMove(wallSelected, wallMatches.length, cfg.wallsCols, cfg.wallsRows, dy)
                     : hMove(wallSelected, wallMatches.length, dx);
+                pageStagger(wallPageSize, wallSelected, next);
+                wallSelected = next;
             } else if (pane === "clips") {
-                clipSelected = dy !== 0
+                const next = dy !== 0
                     ? vMove(clipSelected, clipMatches.length, cfg.clipsCols, clipRowsC, dy)
                     : hMove(clipSelected, clipMatches.length, dx);
+                pageStagger(clipPageSize, clipSelected, next);
+                clipSelected = next;
             }
+        }
+        // Arm the tile stagger when a navigation moves between pages (guarding
+        // the zero page-size case the page getters guard against too).
+        function pageStagger(size: int, before: int, after: int) {
+            if (size > 0 && Math.floor(before / size) !== Math.floor(after / size))
+                beginStagger();
         }
 
         // ---------- actions ----------
@@ -3287,7 +3318,6 @@ ShellRoot {
             switch (animStyle) {
             case "wave": return slot * 35;
             case "slide": return Math.floor(slot / cols) * 60;
-            case "fade": return slot * 15;
             }
             return 0;
         }
@@ -3300,11 +3330,13 @@ ShellRoot {
             interval: 600
             onTriggered: win.staggering = false
         }
+        function beginStagger() {
+            staggering = true;
+            staggerTimer.restart();
+        }
         onPaneChanged: {
-            if (pane !== "clock") {
-                staggering = true;
-                staggerTimer.restart();
-            }
+            if (pane !== "clock")
+                beginStagger();
         }
         function startReveal() {
             if (revealStarted || !backingWindowVisible)
@@ -3342,19 +3374,38 @@ ShellRoot {
             }
         }
         // clipboard image thumbnails, decoded as the scan lands and pinned
-        // so clip page flips hit the pixmap cache instead of re-decoding
+        // so clip page flips hit the pixmap cache instead of re-decoding.
+        // The thumbs are downscaled on disk at generation time (see
+        // clipThumbs), so these decodes are cheap and no longer starve the
+        // app-icon decodes sharing the single QML image reader thread.
+        //
+        // Safeguard: on the cold first open, hold the clip decodes until the
+        // app icons have warmed (warmedOnce), then release them one per frame
+        // (clipWarmTick) so a batch of thumbs still can't burst the reader
+        // thread ahead of the icons. Once warmed, the gate stays open and
+        // clips decode freely as their thumbs land — the icons are cached by
+        // then, so there is nothing left to starve. clipWarmTick is not reset
+        // per open for the same reason.
+        property int clipWarmTick: 0
+        FrameAnimation {
+            running: win.warmedOnce && win.clipWarmTick <= root.clips.length
+            onTriggered: win.clipWarmTick = currentFrame
+        }
         Item {
             visible: false
             Repeater {
                 model: root.clips
                 Image {
+                    required property int index
                     required property var modelData
                     width: 1
                     height: 1
                     asynchronous: true
                     fillMode: Image.PreserveAspectFit
                     sourceSize: Qt.size(480, 640)
-                    source: modelData.image === true && modelData.thumb ? "file://" + modelData.thumb : ""
+                    source: win.warmedOnce && win.clipWarmTick > index
+                            && modelData.image === true && modelData.thumb
+                            ? "file://" + modelData.thumb : ""
                 }
             }
         }
