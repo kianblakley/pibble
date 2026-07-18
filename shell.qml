@@ -245,7 +245,10 @@ ShellRoot {
             // $BLUR the blurred variant (only generated if referenced)
             property string wallCommand: root.defaultWallCommand
             property real dimOpacity: 0.4
-            property string revealOrigin: "top-left"
+            property string launchAnimation: "grow-top-left"
+            // whether the launcher asks the compositor to blur behind it at
+            // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
+            property bool bgBlur: true
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
             // flyouts (volume + notification OSDs); "alerts" gates every
             // notify-send pibble sends on its own behalf (errors, copy
@@ -826,23 +829,28 @@ ShellRoot {
         WlrLayershell.namespace: "app-launcher"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-        // The blur protocol has no strength parameter, so "fade" the blur by
-        // opening a circular hole of blur from the center. Quantized to an int
-        // diameter so the region's x/y/width/height always change as one step.
-        // niri maps the region from surface-local logical coordinates; use the
-        // screen's logical size (not the window's, which briefly reports its
-        // pre-configure 500x500 during startup and would place the early
-        // frames off-center).
+        // The blur protocol has no strength parameter, so the "grow" styles
+        // fake a blur fade by opening a circular hole of blur from a corner
+        // (or the center). Quantized to an int diameter so the region's
+        // x/y/width/height always change as one step. niri maps the region
+        // from surface-local logical coordinates; use the screen's logical
+        // size (not the window's, which briefly reports its pre-configure
+        // 500x500 during startup and would place the early frames
+        // off-center). No other compositor implements this region mapping
+        // yet, so "grow" only animates correctly on niri; "fade" (below)
+        // sidesteps the hole entirely and just cross-fades content opacity,
+        // which works anywhere.
         property real reveal: 0
+        readonly property bool fadeMode: cfg.launchAnimation === "fade"
         readonly property real revW: screen ? screen.width : 0
         readonly property real revH: screen ? screen.height : 0
         readonly property var originFrac: {
-            switch (cfg.revealOrigin) {
-            case "top-left": return [0, 0];
-            case "top-right": return [1, 0];
-            case "bottom-left": return [0, 1];
-            case "bottom-right": return [1, 1];
-            default: return [0.5, 0.5];
+            switch (cfg.launchAnimation) {
+            case "grow-top-left": return [0, 0];
+            case "grow-top-right": return [1, 0];
+            case "grow-bottom-left": return [0, 1];
+            case "grow-bottom-right": return [1, 1];
+            default: return [0.5, 0.5]; // grow-center, and fade (origin unused)
             }
         }
         readonly property real originX: originFrac[0] * revW
@@ -856,12 +864,25 @@ ShellRoot {
         // Clamped to 1px: an empty region reads as "no region set", which the
         // protocol treats as blur-the-whole-surface — a full-screen blur flash.
         readonly property int revealDiameter: Math.max(1, Math.ceil(2 * maxRevealRadius * reveal))
-        BackgroundEffect.blurRegion: Region {
+        // Requesting a region at all is what flips background-effect into
+        // "on request" on niri, which then defaults xray on too — so with
+        // the "Background blur" setting off, don't ask at all. With it on:
+        // "grow" styles get the animated hole; "fade" has no hole to grow,
+        // so it just asks for the whole surface, statically, for as long as
+        // the window is open.
+        BackgroundEffect.blurRegion: !cfg.bgBlur ? null : (win.fadeMode ? fadeBlurRegion : growRegion)
+        Region {
+            id: growRegion
             shape: RegionShape.Ellipse
             x: win.originX - win.revealDiameter / 2
             y: win.originY - win.revealDiameter / 2
             width: win.revealDiameter
             height: win.revealDiameter
+        }
+        Region {
+            id: fadeBlurRegion
+            width: win.revW
+            height: win.revH
         }
 
         // ---------- pane state ----------
@@ -1393,7 +1414,7 @@ ShellRoot {
                 property: "opacity"
                 from: 0
                 to: 1
-                duration: win.ad(450)
+                duration: win.ad(win.fadeMode ? 320 : 450)
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
@@ -1401,6 +1422,8 @@ ShellRoot {
                 property: "reveal"
                 from: 0
                 to: 1
+                // Only visible in "grow" styles — blurRegion is unset
+                // entirely in "fade", so this has no on-screen effect there.
                 duration: win.ad(520)
                 // Starts at moderate velocity (no ease-in dead zone where the
                 // dot seems stuck, no Out-style explosion), settles gently.
@@ -1416,12 +1439,13 @@ ShellRoot {
                     target: content
                     property: "opacity"
                     to: 0
-                    duration: win.ad(320)
+                    duration: win.ad(win.fadeMode ? 260 : 320)
                     easing.type: Easing.InCubic
                 }
                 NumberAnimation {
                     target: win
                     property: "reveal"
+                    // Only visible in "grow" styles, same as above.
                     to: 0
                     duration: win.ad(320)
                     easing.type: Easing.InQuad
@@ -1521,9 +1545,13 @@ ShellRoot {
                 transform: panePull
                 visible: win.pane === "clock"
                 onVisibleChanged: if (visible) fadeUp.restart()
-                // fade in only once the hole (from wherever it originates)
-                // has grown enough to reach and contain the clock
+                // "grow" styles: fade in only once the hole (from wherever it
+                // originates) has grown enough to reach and contain the
+                // clock. "fade" has no hole — content's own opacity fade
+                // (plus clockView's own fadeUp below) is the whole effect.
                 opacity: {
+                    if (win.fadeMode)
+                        return 1;
                     const rc = (Math.hypot(width, height) + 60) / 2;
                     const dist = Math.hypot(win.originX - win.revW / 2, win.originY - win.revH / 2);
                     const radius = win.revealDiameter / 2;
@@ -2630,7 +2658,7 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "revealOrigin"; label: "Launch animation origin"; valueWidth: 150 }
+                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150; sub: "grow only supports niri at the moment" }
 
                     Repeater {
                         model: [
@@ -2649,6 +2677,8 @@ ShellRoot {
                             sub: modelData.sub ?? ""
                         }
                     }
+
+                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only applies to compositors that support ext-background-effect-v1 protocols" }
 
                     // wallpaper path
                     Item {
@@ -2961,7 +2991,8 @@ ShellRoot {
             case "animStyle": return cfg.animStyle;
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
-            case "revealOrigin": return cfg.revealOrigin;
+            case "launchAnimation": return cfg.launchAnimation;
+            case "bgBlur": return cfg.bgBlur ? "on" : "off";
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
@@ -2975,7 +3006,7 @@ ShellRoot {
             }
             return "";
         }
-        readonly property var originChoices: ["center", "top-left", "top-right", "bottom-left", "bottom-right"]
+        readonly property var launchAnimChoices: ["grow-center", "grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "fade"]
         function cycleChoice(cur: string, list, dir: int): string {
             let i = list.indexOf(cur);
             if (i < 0)
@@ -3031,13 +3062,16 @@ ShellRoot {
             case "dimOpacity":
                 cfg.dimOpacity = Math.max(0, Math.min(1, Math.round((cfg.dimOpacity + dir * 0.05) * 100) / 100));
                 break;
-            case "revealOrigin": {
-                let i = originChoices.indexOf(cfg.revealOrigin);
+            case "launchAnimation": {
+                let i = launchAnimChoices.indexOf(cfg.launchAnimation);
                 if (i < 0)
                     i = 0;
-                cfg.revealOrigin = originChoices[((i + dir) % originChoices.length + originChoices.length) % originChoices.length];
+                cfg.launchAnimation = launchAnimChoices[((i + dir) % launchAnimChoices.length + launchAnimChoices.length) % launchAnimChoices.length];
                 break;
             }
+            case "bgBlur":
+                cfg.bgBlur = !cfg.bgBlur;
+                break;
             case "fontFamily": {
                 const list = [""].concat(root.fontFamilies);
                 let i = list.indexOf(cfg.fontFamily);
@@ -3114,7 +3148,8 @@ ShellRoot {
             case "animStyle": cfg.animStyle = "wave"; break;
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
-            case "revealOrigin": cfg.revealOrigin = "top-left"; break;
+            case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
+            case "bgBlur": cfg.bgBlur = true; break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
             case "theme": cfg.theme = "matugen"; break;
