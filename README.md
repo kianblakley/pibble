@@ -68,11 +68,11 @@ cd pibble
 
 ## Namespaces
 
-Each pibble window has a layer-shell namespace which can be used to apply background effects in your compositor's configuration file.
+Each window has a layer-shell namespace which can be used to apply background effects in your compositor's configuration file.
 
 | Namespace | Window |
 |---|---|
-| `pibble-launcher` | Main launcher window |
+| `pibble-launcher` | Main launcher |
 | `pibble-notifications` | Notification flyout |
 | `pibble-volume` | Volume OSD |
 

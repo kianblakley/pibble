@@ -682,6 +682,26 @@ ShellRoot {
         Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "dialog-error", summary, body]);
     }
 
+    // bundles version/build info, this run's recent log, and the latest
+    // crash report for this shell (if any) into one blob for bug reports;
+    // the clipboard write happens once debugInfoProc's stdout is collected
+    function copyDebugInfo() {
+        if (debugInfoProc.running)
+            return;
+        debugInfoProc.running = true;
+    }
+
+    // shown at the bottom of the general settings tab; empty when the shell
+    // isn't running from a git checkout (e.g. a packaged install)
+    property string pibbleCommit: ""
+    Process {
+        running: true
+        command: ["bash", "-c", `git -C "$1" rev-parse --short HEAD 2>/dev/null`, "_", Quickshell.shellDir]
+        stdout: StdioCollector {
+            onStreamFinished: root.pibbleCommit = text.trim()
+        }
+    }
+
     function humanBytes(n: int): string {
         if (n < 1024)
             return n + " B";
@@ -783,6 +803,45 @@ ShellRoot {
                     if (cfg.theme === "matugen")
                         root.notifyError("Matugen theme failed", "matugen returned no palette for the current wallpaper");
                 }
+            }
+        }
+    }
+
+    Process {
+        id: debugInfoProc
+        // matches by "Shell ID" (md5 of this shell.qml's path, same key
+        // quickshell stamps into crash report.txt) rather than run id, since
+        // a crash's run has already ended by the time anyone goes looking
+        command: ["bash", "-c", `
+            export PATH="$HOME/.local/bin:$PATH"
+            pid="$1"
+            shell_dir="$2"
+            shell_id="$3"
+            crashdir="$4"
+            echo "pibble debug info -- $(date -Iseconds)"
+            qs --version 2>/dev/null
+            echo "Shell: $shell_dir"
+            echo "Shell ID: $shell_id"
+            commit=$(git -C "$shell_dir" rev-parse --short HEAD 2>/dev/null)
+            [ -n "$commit" ] && echo "Commit: $commit"
+            echo
+            echo "----- recent log -----"
+            qs log --pid "$pid" --no-color -t 200 2>&1
+            latest=""
+            for d in $(ls -dt "$crashdir"/*/ 2>/dev/null); do
+                grep -q "Shell ID: $shell_id" "$d/report.txt" 2>/dev/null && { latest="$d"; break; }
+            done
+            if [ -n "$latest" ]; then
+                echo
+                echo "----- most recent crash: $latest -----"
+                cat "$latest/report.txt" 2>/dev/null
+            fi`, "_", "" + Quickshell.processId, Quickshell.shellDir, Quickshell.shellId,
+            (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/quickshell/crashes"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                Quickshell.clipboardText = text;
+                if (root.flyoutOn("alerts"))
+                    Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "edit-copy", "Copied to clipboard", text.slice(0, 4000)]);
             }
         }
     }
@@ -2818,6 +2877,114 @@ ShellRoot {
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
                     CustomColorRow {}
+
+                    // bundles version/build info, this run's recent log, and
+                    // the latest crash report (if any) for pasting into a
+                    // bug report; right-aligned with the same margin as
+                    // SReset elsewhere, even though this row has no reset
+                    Item {
+                        width: 780
+                        height: 40
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Copy debug info"
+                        }
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: debugBtnRow.implicitWidth + 28
+                            height: 34
+                            radius: 10
+                            color: Qt.alpha(root.accent, debugBtnArea.containsMouse ? 0.25 : 0.11)
+                            border.width: 1
+                            border.color: Qt.alpha(root.accent, 0.33)
+
+                            Row {
+                                id: debugBtnRow
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Text {
+                                    text: "⧉"
+                                    color: root.accent
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font { family: root.mono; pixelSize: root.fs(16); weight: Font.Bold }
+                                }
+                                Text {
+                                    text: "Copy"
+                                    color: root.accent
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font { family: root.mono; pixelSize: root.fs(15); weight: Font.Bold }
+                                }
+                            }
+                            MouseArea {
+                                id: debugBtnArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.copyDebugInfo()
+                            }
+                        }
+                    }
+
+                    // closes out the tab with a divider and the repo's
+                    // commit, centered underneath
+                    Item {
+                        width: 780
+                        height: 1 + 10 + versionText.implicitHeight
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Qt.alpha(root.muted, 0.25)
+                        }
+                        Text {
+                            id: versionText
+                            anchors.top: parent.top
+                            anchors.topMargin: 10
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: root.pibbleCommit !== ""
+                            text: root.pibbleCommit
+                            color: root.muted
+                            font { family: root.mono; pixelSize: root.fs(11) }
+
+                            property int clicks: 0
+                            property bool revealed: false
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: 420; easing.type: Easing.InOutQuad }
+                            }
+                            Timer {
+                                id: clickWindow
+                                interval: 500
+                                onTriggered: versionText.clicks = 0
+                            }
+                            Timer {
+                                id: reveal
+                                interval: 420
+                                onTriggered: {
+                                    versionText.text = "I vibe coded this using a microphone. Insanity";
+                                    versionText.opacity = 1;
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -8
+                                onClicked: {
+                                    if (versionText.revealed)
+                                        return;
+                                    versionText.clicks++;
+                                    clickWindow.restart();
+                                    if (versionText.clicks >= 3) {
+                                        versionText.revealed = true;
+                                        versionText.opacity = 0;
+                                        reveal.start();
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // flyouts tab: volume + notification OSDs
