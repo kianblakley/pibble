@@ -48,17 +48,12 @@ ShellRoot {
 
     component ThemeRow: Item {
         id: tr
-        property string cfgKey: "theme"
         property string sub: ""
-        readonly property bool fly: cfgKey === "flyTheme"
         width: 780
         height: 80 + (sub ? trSub.implicitHeight + 2 : 0)
-        readonly property string current: fly ? cfg.flyTheme : cfg.theme
+        readonly property string current: cfg.theme
         function setVal(v: string) {
-            if (fly)
-                cfg.flyTheme = v;
-            else
-                cfg.theme = v;
+            cfg.theme = v;
             root.saveSettings();
         }
 
@@ -74,7 +69,7 @@ ShellRoot {
             spacing: 8
 
             SReset {
-                key: tr.cfgKey
+                key: "theme"
             }
         }
         SSub {
@@ -190,7 +185,7 @@ ShellRoot {
         }
     }
 
-    readonly property string defaultWallCommand: 'awww img -n workspaces --transition-type fade --transition-duration 1 "$WALL" && awww img -n overview --transition-type fade --transition-duration 1 "$BLUR"'
+    readonly property string defaultWallCommand: 'awww img --transition-type fade --transition-duration 1 "$WALL"'
 
     component SReset: Rectangle {
         id: sreset
@@ -233,44 +228,41 @@ ShellRoot {
             property int appsRows: 3
             property int wallsCols: 3
             property int wallsRows: 3
-            property int clipsCols: 3
-            property int clipsRows: 3
-            property int clipsMax: 60
+            property int clipsCols: 4
+            property int clipsRows: 4
+            property int clipsMax: 100
             property var pages: ({ clock: true, apps: true, walls: true, clips: true })
             // cycle order of the pages (drag the chips in settings to change)
             property var pageOrder: ["clock", "apps", "walls", "clips"]
             property string animStyle: "wave"
+            // shared across the launcher and both flyouts
             property real fontScale: 1.0
             property string fontFamily: ""
             property string iconTheme: ""
-            property string theme: "amber"
+            property string theme: "matugen"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
             property string wallCommand: root.defaultWallCommand
             property real dimOpacity: 0.4
-            property string revealOrigin: "center"
+            property string revealOrigin: "top-left"
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
             // flyouts (volume + notification OSDs)
-            property string flyTheme: "amber"
-            property string flyFontFamily: ""
             property var flyouts: ({ volume: true, notifs: true })
-            property real volWidth: 340
-            property string volAnim: "slide"
-            // volume OSD content style: pill (a level bar) or one of three
-            // equalizer visualizers (mirror / spectrum / flicker)
-            property string volStyle: "pill"
+            property real volWidth: 420
+            property string volAnim: "pop"
+            // volume OSD content style: pill (a level bar) or sine (equalizer)
+            property string volStyle: "sine"
             // numeric volume % readout on the OSD
             property bool volShowPercent: true
             property int volTimeout: 2000
             property int notifTimeout: 5000
-            property real notifFontScale: 1.0
             // one notification at a time (queue across apps, replace within
             // an app): "bubble" = tinted circle + card, "pill" = card only
             property string notifStyle: "bubble"
-            // legacy: folded into flyTheme by healSettings; kept so old
-            // configs can still be read for the one-time migration
-            property string notifTheme: ""
+            // "pop" = the bubble/card pop-in and stagger animation, "none"
+            // disables all notification entry/exit animation
+            property string notifAnim: "pop"
         }
     }
     function saveSettings() {
@@ -301,18 +293,12 @@ ShellRoot {
     readonly property color surface: "#0a0908"
     readonly property string mono: cfg.fontFamily
 
-    // resolve a scheme id to its raw palette; unknown ids fall back to the
-    // launcher's scheme
-    function themeColors(sel) {
-        if (sel === "matugen")
-            return dynTheme;
-        return themes.find(t => t.id === sel) ?? launcherBase;
-    }
-    readonly property var flyTh: themeColors(cfg.flyTheme)
-    readonly property string flyMono: cfg.flyFontFamily === "system" ? "" : (cfg.flyFontFamily || mono)
-    // flyTheme "matugen" ("Dynamic"): near-black card, bubble tinted from
-    // the app icon; the volume level bar still follows the wallpaper palette
-    readonly property bool notifIconTint: cfg.flyTheme === "matugen"
+    // theme is shared by the launcher and both flyouts now
+    readonly property var flyTh: activeTheme
+    readonly property string flyMono: mono
+    // "matugen" ("Dynamic") theme: near-black card, bubble tinted from the
+    // app icon; the volume level bar still follows the wallpaper palette
+    readonly property bool notifIconTint: cfg.theme === "matugen"
     readonly property var notifTh: notifIconTint
         ? { accent: flyTh.accent, fg: "#f2f0ee", muted: "#908c87" }
         : flyTh
@@ -376,23 +362,6 @@ ShellRoot {
             cfg.theme = "matugen"; // renamed
             saveSettings();
         }
-        // pre-colors-tab configs always carry a non-empty notifTheme; fold
-        // it into the flyout scheme (both "default" icon-tint and "matugen"
-        // now live under the single "matugen" scheme)
-        if (cfg.notifTheme) {
-            cfg.flyTheme = (cfg.notifTheme === "default" || cfg.notifTheme === "matugen")
-                ? "matugen" : cfg.notifTheme;
-            cfg.notifTheme = "";
-            saveSettings();
-        }
-        // the standalone "dynamic" flyout scheme (icon-tinted notifications,
-        // launcher-scheme volume) was folded into "matugen" (now labelled
-        // "Dynamic" in settings), which already tints notifications from
-        // their app icon and colors the volume bar from the wallpaper
-        if (cfg.flyTheme === "dynamic") {
-            cfg.flyTheme = "matugen";
-            saveSettings();
-        }
         // the retired equalizer visualizers collapse into the sine wave
         if (["mirror", "spectrum", "flicker"].includes(cfg.volStyle)) {
             cfg.volStyle = "sine";
@@ -403,20 +372,10 @@ ShellRoot {
             cfg.notifStyle = "bubble";
             saveSettings();
         }
-        // the "follow" flyout theme option was removed; pin to the launcher
-        // theme it was following at the time
-        if (cfg.flyTheme === "follow") {
-            cfg.flyTheme = root.themes.some(t => t.id === cfg.theme) ? cfg.theme : "amber";
-            saveSettings();
-        }
         // the colors tab (custom palette + light/dark) was removed; fall
         // back configs that had "custom" selected to the default scheme
         if (cfg.theme === "custom") {
             cfg.theme = "amber";
-            saveSettings();
-        }
-        if (cfg.flyTheme === "custom") {
-            cfg.flyTheme = "amber";
             saveSettings();
         }
     }
@@ -965,7 +924,7 @@ ShellRoot {
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                const tabs = ["general", "flyouts"];
+                const tabs = ["general", "launcher", "flyouts"];
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
@@ -2304,7 +2263,8 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property int tabIdx: win.settingsTab === "general" ? 0 : 1
+                readonly property var tabOrder: ["general", "launcher", "flyouts"]
+                readonly property int tabIdx: Math.max(0, tabOrder.indexOf(win.settingsTab))
                 anchors.centerIn: parent
                 width: 860
                 height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
@@ -2345,7 +2305,8 @@ ShellRoot {
 
                         Repeater {
                             model: [
-                                { id: "general", label: "Launcher" },
+                                { id: "general", label: "General" },
+                                { id: "launcher", label: "Launcher" },
                                 { id: "flyouts", label: "Flyouts" }
                             ]
 
@@ -2393,12 +2354,27 @@ ShellRoot {
                     anchors.topMargin: 18
                     // constant height (tallest page): switching tabs never
                     // moves the pane, shorter pages stay top-aligned
-                    height: Math.max(settingsCol.height, flyCol.height)
+                    height: Math.max(genCol.height, settingsCol.height, flyCol.height)
+
+                // general tab: settings shared by the launcher and both flyouts
+                Column {
+                    id: genCol
+                    x: 20 + (0 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                    }
+                    spacing: 14
+
+                    SettingRow { key: "iconTheme"; label: "Icon theme"; sub: "applies on next launch"; valueWidth: 260 }
+                    SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 260 }
+                    SettingRow { key: "fontScale"; label: "Font size" }
+                    ThemeRow {}
+                }
 
                 // flyouts tab: volume + notification OSDs
                 Column {
                     id: flyCol
-                    x: 20 + (1 - settingsPane.tabIdx) * 840
+                    x: 20 + (2 - settingsPane.tabIdx) * 840
                     Behavior on x {
                         NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
@@ -2483,17 +2459,13 @@ ShellRoot {
                     SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
                     SettingRow { key: "notifStyle"; label: "Notification style" }
+                    SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "notifFontScale"; label: "Font size" }
-                    SettingRow { key: "flyFontFamily"; label: "Font"; valueWidth: 260 }
-                    SettingRow { key: "iconTheme"; label: "Icon theme"; sub: "applies on next launch"; valueWidth: 260 }
-
-                    ThemeRow { cfgKey: "flyTheme" }
                 }
 
                 Column {
                     id: settingsCol
-                    x: 20 + (0 - settingsPane.tabIdx) * 840
+                    x: 20 + (1 - settingsPane.tabIdx) * 840
                     Behavior on x {
                         NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
@@ -2635,10 +2607,7 @@ ShellRoot {
                             { key: "clipsGrid", label: "Clipboard grid" },
                             { key: "clipsMax", label: "Clipboard entries" },
                             { key: "animStyle", label: "Animation" },
-                            { key: "dimOpacity", label: "Background opacity" },
-                            { key: "fontScale", label: "Font size" },
-                            { key: "fontFamily", label: "Font" },
-                            { key: "iconTheme", label: "Icon theme", sub: "applies on next launch" }
+                            { key: "dimOpacity", label: "Background opacity" }
                         ]
 
                         SettingRow {
@@ -2646,11 +2615,8 @@ ShellRoot {
                             key: modelData.key
                             label: modelData.label
                             sub: modelData.sub ?? ""
-                            valueWidth: modelData.key === "iconTheme" || modelData.key === "fontFamily" ? 260 : 90
                         }
                     }
-
-                    ThemeRow { cfgKey: "theme" }
 
                     // wallpaper path
                     Item {
@@ -2967,14 +2933,13 @@ ShellRoot {
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
-            case "flyFontFamily": return cfg.flyFontFamily === "system" ? "system default" : (cfg.flyFontFamily || "follow launcher");
             case "volAnim": return cfg.volAnim;
             case "volStyle": return cfg.volStyle === "sine" ? "sine wave" : cfg.volStyle;
             case "volPercent": return cfg.volShowPercent ? "on" : "off";
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(0) + " s";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
-            case "notifFontScale": return Math.round(cfg.notifFontScale * 100) + "%";
             case "notifStyle": return cfg.notifStyle;
+            case "notifAnim": return cfg.notifAnim;
             }
             return "";
         }
@@ -3067,22 +3032,14 @@ ShellRoot {
             case "volTimeout":
                 cfg.volTimeout = Math.max(1000, Math.min(10000, cfg.volTimeout + dir * 1000));
                 break;
-            case "flyFontFamily": {
-                const list = ["", "system"].concat(root.fontFamilies);
-                let i = list.indexOf(cfg.flyFontFamily);
-                if (i < 0)
-                    i = 0;
-                cfg.flyFontFamily = list[((i + dir) % list.length + list.length) % list.length];
-                break;
-            }
             case "notifTimeout":
                 cfg.notifTimeout = Math.max(1000, Math.min(15000, cfg.notifTimeout + dir * 1000));
                 break;
-            case "notifFontScale":
-                cfg.notifFontScale = Math.max(0.7, Math.min(1.6, Math.round((cfg.notifFontScale + dir * 0.1) * 100) / 100));
-                break;
             case "notifStyle":
                 cfg.notifStyle = cycleChoice(cfg.notifStyle, ["bubble", "pill"], dir);
+                break;
+            case "notifAnim":
+                cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
             }
             root.saveSettings();
@@ -3116,35 +3073,33 @@ ShellRoot {
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
-            case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
+            case "clipsGrid": cfg.clipsCols = 4; cfg.clipsRows = 4; break;
             case "clipsMax":
-                cfg.clipsMax = 60;
+                cfg.clipsMax = 100;
                 clipScan.running = false;
                 clipScan.running = true;
                 break;
             case "animStyle": cfg.animStyle = "wave"; break;
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
-            case "revealOrigin": cfg.revealOrigin = "center"; break;
+            case "revealOrigin": cfg.revealOrigin = "top-left"; break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
-            case "theme": cfg.theme = "amber"; break;
+            case "theme": cfg.theme = "matugen"; break;
             case "wallpaperDir":
                 cfg.wallpaperDir = "~/Pictures/wallpapers";
                 root.rescanWallpapers();
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
-            case "volWidth": cfg.volWidth = 340; break;
-            case "flyFontFamily": cfg.flyFontFamily = ""; break;
-            case "flyTheme": cfg.flyTheme = "amber"; break;
+            case "volWidth": cfg.volWidth = 420; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
-            case "volAnim": cfg.volAnim = "slide"; break;
-            case "volStyle": cfg.volStyle = "pill"; break;
+            case "volAnim": cfg.volAnim = "pop"; break;
+            case "volStyle": cfg.volStyle = "sine"; break;
             case "volPercent": cfg.volShowPercent = true; break;
             case "volTimeout": cfg.volTimeout = 2000; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
-            case "notifFontScale": cfg.notifFontScale = 1.0; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
+            case "notifAnim": cfg.notifAnim = "pop"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
@@ -3712,7 +3667,7 @@ ShellRoot {
 
     // ---------- notification flyouts ----------
     function flyFs(px: int): int {
-        return Math.round(px * cfg.notifFontScale);
+        return Math.round(px * cfg.fontScale);
     }
 
     // Own org.freedesktop.Notifications only while the flyout is enabled;
@@ -3994,7 +3949,8 @@ ShellRoot {
 
             Timer {
                 id: phaseTimer
-                interval: flyWin.phase === "appear" ? (flyWin.bubble ? 430 : 60)
+                interval: cfg.notifAnim === "none" ? 0
+                    : flyWin.phase === "appear" ? (flyWin.bubble ? 430 : 60)
                     : flyWin.phase === "pulse" ? 210
                     : flyWin.lingerOut ? 640 : 340
                 onTriggered: {
@@ -4280,56 +4236,59 @@ ShellRoot {
                 }
             }
 
-            // icon keyframes ported from the reference CSS
+            // icon keyframes ported from the reference CSS; all durations
+            // collapse to 0 when notifAnim is "none" so the bubble/card land
+            // on their final pose instantly instead of animating in/out
+            readonly property bool noAnim: cfg.notifAnim === "none"
             SequentialAnimation {
                 id: iconIn
                 ParallelAnimation {
-                    NumberAnimation { target: fIcon; property: "opacity"; to: 1; duration: 220; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: 300; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: fIcon; property: "opacity"; to: 1; duration: flyWin.noAnim ? 0 : 220; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: flyWin.noAnim ? 0 : 300; easing.type: Easing.OutCubic }
                 }
-                NumberAnimation { target: fIcon; property: "scale"; to: 0.95; duration: 100; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: fIcon; property: "scale"; to: 1; duration: 100; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 0.95; duration: flyWin.noAnim ? 0 : 100; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1; duration: flyWin.noAnim ? 0 : 100; easing.type: Easing.InOutQuad }
             }
             SequentialAnimation {
                 id: iconPop
-                NumberAnimation { target: fIcon; property: "scale"; to: 1.32; duration: 170; easing.type: Easing.OutCubic }
-                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: 120; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: 95; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: 95; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.32; duration: flyWin.noAnim ? 0 : 170; easing.type: Easing.OutCubic }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: flyWin.noAnim ? 0 : 120; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.18; duration: flyWin.noAnim ? 0 : 95; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: fIcon; property: "scale"; to: 1.1; duration: flyWin.noAnim ? 0 : 95; easing.type: Easing.InOutQuad }
             }
             NumberAnimation {
                 id: iconSettle
                 target: fIcon
                 property: "scale"
                 to: 1.1
-                duration: 300
+                duration: flyWin.noAnim ? 0 : 300
                 easing.type: Easing.InOutQuad
             }
             ParallelAnimation {
                 id: iconOut
-                NumberAnimation { target: fIcon; property: "scale"; to: 0; duration: 260; easing.type: Easing.InBack }
-                NumberAnimation { target: fIcon; property: "opacity"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                NumberAnimation { target: fIcon; property: "scale"; to: 0; duration: flyWin.noAnim ? 0 : 260; easing.type: Easing.InBack }
+                NumberAnimation { target: fIcon; property: "opacity"; to: 0; duration: flyWin.noAnim ? 0 : 260; easing.type: Easing.InCubic }
             }
             Timer {
                 // bubble hold on dismiss: fires the icon exit once the card's
                 // slide/fade (~300ms) has finished
                 id: iconOutDelay
-                interval: 300
+                interval: flyWin.noAnim ? 0 : 300
                 onTriggered: iconOut.restart()
             }
             ParallelAnimation {
                 id: ringAnim
-                NumberAnimation { target: ring; property: "scale"; from: 1; to: 2.4; duration: 600; easing.type: Easing.OutCubic }
-                NumberAnimation { target: ring; property: "opacity"; from: 0.65; to: 0; duration: 600; easing.type: Easing.OutCubic }
+                NumberAnimation { target: ring; property: "scale"; from: 1; to: 2.4; duration: flyWin.noAnim ? 0 : 600; easing.type: Easing.OutCubic }
+                NumberAnimation { target: ring; property: "opacity"; from: 0.65; to: 0; duration: flyWin.noAnim ? 0 : 600; easing.type: Easing.OutCubic }
             }
             // shared clocks for the per-line staggers (ms timelines; each line
             // derives its own eased window from them in lp/lq below)
-            NumberAnimation { id: stagInAnim; target: fcard; property: "stagIn"; from: 0; to: 650; duration: 650 }
-            NumberAnimation { id: stagOutAnim; target: fcard; property: "stagOut"; from: 0; to: 300; duration: 300 }
+            NumberAnimation { id: stagInAnim; target: fcard; property: "stagIn"; from: 0; to: 650; duration: flyWin.noAnim ? 0 : 650 }
+            NumberAnimation { id: stagOutAnim; target: fcard; property: "stagOut"; from: 0; to: 300; duration: flyWin.noAnim ? 0 : 300 }
             SequentialAnimation {
                 id: wipeAnim
-                PauseAnimation { duration: 100 }
-                NumberAnimation { target: fcard; property: "imgWipe"; from: 0; to: 1; duration: 500; easing.type: Easing.OutQuint }
+                PauseAnimation { duration: flyWin.noAnim ? 0 : 100 }
+                NumberAnimation { target: fcard; property: "imgWipe"; from: 0; to: 1; duration: flyWin.noAnim ? 0 : 500; easing.type: Easing.OutQuint }
             }
 
             // ── card ──
@@ -4422,7 +4381,7 @@ ShellRoot {
                 Behavior on swipeX {
                     enabled: !fcard.inst && !fcard.dragging
                     NumberAnimation {
-                        duration: 300
+                        duration: flyWin.noAnim ? 0 : 300
                         easing.type: flyWin.phase === "dismiss" ? Easing.OutCubic : Easing.OutBack
                         easing.overshoot: 1.15
                     }
@@ -4430,13 +4389,13 @@ ShellRoot {
                 Behavior on cardO {
                     enabled: !fcard.inst
                     NumberAnimation {
-                        duration: flyWin.phase === "dismiss" ? 260 : 320
+                        duration: flyWin.noAnim ? 0 : (flyWin.phase === "dismiss" ? 260 : 320)
                         easing.type: flyWin.phase === "dismiss" ? Easing.InCubic : Easing.OutCubic
                     }
                 }
                 Behavior on cardYS {
                     enabled: !fcard.inst
-                    NumberAnimation { duration: 320; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                    NumberAnimation { duration: flyWin.noAnim ? 0 : 320; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
                 }
 
                 // rich media strip: left-to-right wipe reveal. The inner clipper
