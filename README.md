@@ -5,24 +5,33 @@
     pibble
 </h1>
 
-![Clock](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clock.png)
+| Clock |
+|---|
+| ![Clock](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clock.png) |
 
-| | |
-|---|---|
-| ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/appdrawer.png) | ![Wallpaper selector](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/wallpaperselector.png) |
-| ![Clipboard history](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clipboardhistory.png) | ![Flyouts](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/flyouts.png) |
-| ![Settings](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/settings.png) | ![Power button](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/powerbutton.png) |
+| App drawer |
+|---|
+| ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/appdrawer.png) |
 
-## Features
+| Wallpaper selector |
+|---|
+| ![Wallpaper selector](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/wallpaperselector.png) |
 
-- Clock
-- App drawer 
-- Wallpaper selector
-- Clipboard history 
-- Power off
-- Volume flyout
-- Notification flyout
-- Extensive settings
+| Clipboard history |
+|---|
+| ![Clipboard history](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clipboardhistory.png) |
+
+| Flyouts |
+|---|
+| ![Flyouts](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/flyouts.png) |
+
+| Settings |
+|---|
+| ![Settings](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/settings.png) |
+
+| Power button |
+|---|
+| ![Power button](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/powerbutton.png) |
 
 ## Installation
 
@@ -71,6 +80,7 @@ cd pibble
 | `Tab` | Navigate pages |
 | `Ctrl+P` (or swipe down) | Reveal power button |
 | `Ctrl+S` | Open settings |
+| `Escape` | Close the launcher |
 
 ## Namespaces
 
