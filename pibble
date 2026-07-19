@@ -3,18 +3,23 @@
 #   pibble          start the persistent daemon (for spawn-at-startup)
 #   pibble toggle   show/hide the launcher window (for the keybind),
 #                   starting the daemon first if it isn't running
-# Qt can't switch icon themes at runtime, so quickshell reads QS_ICON_THEME
-# at startup; we pull it out of the launcher's persisted settings.
 repo="$(dirname "$(readlink -f "$0")")"
-# quickshell keys persisted state by md5(path to shell.qml), so this stays
-# correct across renames/moves instead of hardcoding the current hash
-shell_id=$(printf '%s' "$repo/shell.qml" | md5sum | cut -d' ' -f1)
-settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
-theme=$(sed -n 's/.*"iconTheme": *"\([^"]*\)".*/\1/p' "$settings" 2>/dev/null | head -1)
-# no explicit choice: follow the system (GTK) icon theme, since Qt inside a
-# bare layer-shell session can't detect it and would fall back to hicolor
-[ -z "$theme" ] && theme=$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null | tr -d "'")
-[ -n "$theme" ] && export QS_ICON_THEME="$theme"
+
+# Qt can't switch icon themes at runtime, so quickshell reads QS_ICON_THEME
+# at startup; pulled from the launcher's persisted settings. Only called
+# right before spawning a new daemon, so a toggle against an already-running
+# daemon skips the settings read and gsettings round-trip entirely.
+export_icon_theme() {
+    # quickshell keys persisted state by md5(path to shell.qml), so this
+    # stays correct across renames/moves instead of hardcoding the current hash
+    shell_id=$(printf '%s' "$repo/shell.qml" | md5sum | cut -d' ' -f1)
+    settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
+    theme=$(sed -n 's/.*"iconTheme": *"\([^"]*\)".*/\1/p' "$settings" 2>/dev/null | head -1)
+    # no explicit choice: follow the system (GTK) icon theme, since Qt inside a
+    # bare layer-shell session can't detect it and would fall back to hicolor
+    [ -z "$theme" ] && theme=$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null | tr -d "'")
+    [ -n "$theme" ] && export QS_ICON_THEME="$theme"
+}
 
 # ipc calls fail on ambiguity if duplicate daemons exist; always talk to the
 # newest and reap any older duplicates.
@@ -34,6 +39,7 @@ toggle)
     reap_duplicates
     ipc toggle && exit 0
     # daemon not running: start it, then open the launcher
+    export_icon_theme
     setsid -f qs -p "$repo" >/dev/null 2>&1
     for _ in $(seq 1 50); do
         sleep 0.1
@@ -44,6 +50,7 @@ toggle)
 *)
     # never start a second daemon
     pgrep -f "^qs -p $repo\$" >/dev/null && exit 0
+    export_icon_theme
     exec qs -p "$repo"
     ;;
 esac
