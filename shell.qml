@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Widgets
 import Quickshell.Services.Pipewire
 import Quickshell.Services.Notifications
+import Quickshell.Services.UPower
 
 ShellRoot {
     id: root
@@ -605,6 +606,13 @@ ShellRoot {
             // "pop" = the bubble/card pop-in and stagger animation, "none"
             // disables all notification entry/exit animation
             property string notifAnim: "pop"
+            // clock-page weather readout (wttr.in); empty location auto-detects by IP
+            property bool weatherEnabled: true
+            property string weatherLocation: ""
+            // clock page layout: which of date/battery/weather show, and how
+            // they're grouped into lines around the clock (see win.clockLineGroups)
+            property var clockLines: [["time"], ["date"], ["battery", "weather"]]
+            property var clockShow: ({ date: true, battery: true, weather: true })
         }
     }
     function saveSettings() {
@@ -1169,6 +1177,82 @@ ShellRoot {
         precision: SystemClock.Minutes
     }
 
+    // ---------- weather (clock page) ----------
+    property string weatherText: ""
+    property bool weatherOk: false
+    Process {
+        id: weatherFetch
+        // location passed as $1, not interpolated into the script, since
+        // cfg.weatherLocation is user-editable free text; PATH is widened
+        // since Quickshell launches processes without a login shell's PATH,
+        // which otherwise silently hides curl on some setups
+        command: ["bash", "-c", `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"; curl -fs -m 5 "wttr.in/$1?format=%C+%t"`, "_", cfg.weatherLocation]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const t = text.trim();
+                root.weatherOk = t.length > 0 && !t.includes("Unknown location");
+                root.weatherText = root.weatherOk ? t : "";
+            }
+        }
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (text.trim())
+                    console.warn("pibble: weather fetch failed:", text.trim());
+            }
+        }
+    }
+    Timer {
+        interval: 15 * 60 * 1000
+        running: cfg.weatherEnabled
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            weatherFetch.running = false;
+            weatherFetch.running = true;
+        }
+    }
+    // maps the wttr.in condition text to a plain-glyph icon (⚙, ✓, etc are
+    // the same style used elsewhere in the shell)
+    function weatherIcon(text) {
+        const t = text.toLowerCase();
+        if (t.includes("thunder"))
+            return "⛈";
+        if (t.includes("snow") || t.includes("sleet") || t.includes("ice"))
+            return "❄";
+        if (t.includes("rain") || t.includes("drizzle") || t.includes("shower"))
+            return "☂";
+        if (t.includes("fog") || t.includes("mist") || t.includes("haze") || t.includes("overcast") || t.includes("cloud"))
+            return "☁";
+        if (t.includes("clear") || t.includes("sunny"))
+            return "☀";
+        return "";
+    }
+
+    // ---------- battery (clock page) ----------
+    readonly property var battDevice: UPower.displayDevice
+    readonly property bool batteryPresent: {
+        const d = root.battDevice;
+        return !!d && d.ready && d.isLaptopBattery;
+    }
+    readonly property bool batteryCharging: root.batteryPresent && root.battDevice.state === UPowerDeviceState.Charging
+    function formatDuration(totalSeconds: real): string {
+        const mins = Math.max(1, Math.round(totalSeconds / 60));
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+    // charging: percentage, with the battery-outline icon; discharging: how
+    // long is left (falls back to percentage if UPower hasn't estimated a
+    // time yet), with no icon at all
+    readonly property string batteryText: {
+        if (!root.batteryPresent)
+            return "";
+        if (root.batteryCharging)
+            return Math.round(root.battDevice.percentage * 100) + "%";
+        const secs = root.battDevice.timeToEmpty;
+        return secs > 0 ? root.formatDuration(secs) + " left" : Math.round(root.battDevice.percentage * 100) + "%";
+    }
+
     PanelWindow {
         id: win
 
@@ -1313,6 +1397,88 @@ ShellRoot {
             return activePanes[0];
         }
         readonly property bool drawerOpen: pane === "apps"
+
+        // ---------- clock line layout ----------
+        // cfg.clockLines is a list of lines; each line is a list of ids from
+        // {"time","date","battery","weather"} rendered on that line, joined
+        // by "·" when there's more than one. Healed here (not healSettings)
+        // so it self-repairs on every read, same as paneOrder above.
+        readonly property var clockLineGroups: {
+            const all = ["time", "date", "battery", "weather"];
+            const raw = Array.isArray(cfg.clockLines) ? cfg.clockLines : [];
+            const seen = new Set();
+            const groups = [];
+            for (const g of raw) {
+                if (!Array.isArray(g))
+                    continue;
+                const clean = g.filter(id => all.includes(id) && !seen.has(id));
+                clean.forEach(id => seen.add(id));
+                if (clean.length)
+                    groups.push(clean);
+            }
+            for (const id of all)
+                if (!seen.has(id))
+                    groups.push([id]);
+            return groups;
+        }
+        // same, but with unchecked items (cfg.clockShow) dropped and any
+        // now-empty lines removed — what the clock page actually renders
+        readonly property var clockVisibleGroups: {
+            const show = cfg.clockShow ?? {};
+            const out = [];
+            for (const g of clockLineGroups) {
+                const vis = g.filter(id => id === "time" || show[id] !== false);
+                if (vis.length)
+                    out.push(vis);
+            }
+            return out;
+        }
+        function clockChipPos(id: string): var {
+            const groups = clockLineGroups;
+            for (let gi = 0; gi < groups.length; gi++) {
+                const wi = groups[gi].indexOf(id);
+                if (wi >= 0)
+                    return { g: gi, w: wi };
+            }
+            return { g: 0, w: 0 };
+        }
+        // live reorder (drag to a gap between lines): pulls id out of
+        // wherever it is and drops it as its own standalone line at `atLine`
+        function reorderClockLine(id: string, atLine: int): void {
+            const groups = clockLineGroups.map(g => g.filter(x => x !== id)).filter(g => g.length);
+            const gi = Math.max(0, Math.min(groups.length, atLine));
+            groups.splice(gi, 0, [id]);
+            cfg.clockLines = groups;
+        }
+        // hold-to-merge (drag onto an existing line and hold): pulls id out
+        // of wherever it is and appends it onto the line at `intoLine`
+        function mergeClockChip(id: string, intoLine: int): void {
+            const groups = clockLineGroups.map(g => g.filter(x => x !== id)).filter(g => g.length);
+            if (intoLine < 0 || intoLine >= groups.length)
+                return;
+            groups[intoLine].push(id);
+            cfg.clockLines = groups;
+        }
+        // hold-to-split (press and hold without dragging): pulls id out of
+        // its (multi-item) line into a new standalone line right after it
+        function splitClockChip(id: string): void {
+            const groups = clockLineGroups.map(g => g.slice());
+            for (let gi = 0; gi < groups.length; gi++) {
+                const wi = groups[gi].indexOf(id);
+                if (wi >= 0 && groups[gi].length > 1) {
+                    groups[gi].splice(wi, 1);
+                    groups.splice(gi + 1, 0, [id]);
+                    cfg.clockLines = groups;
+                    return;
+                }
+            }
+        }
+        function toggleClockItem(id: string): void {
+            const show = Object.assign({ date: true, battery: true, weather: true }, cfg.clockShow ?? {});
+            show[id] = show[id] === false ? true : false;
+            cfg.clockShow = show;
+            root.saveSettings();
+        }
 
         function setPane(p: string) {
             input.text = "";
@@ -2011,17 +2177,71 @@ ShellRoot {
                     anchors.centerIn: parent
                     spacing: 8
 
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: Qt.formatDateTime(clock.date, "HH:mm")
-                        color: root.fg
-                        font { family: root.mono; pixelSize: root.fs(120); weight: Font.DemiBold; letterSpacing: 1 }
-                    }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: Qt.formatDateTime(clock.date, "dddd, MMMM d")
-                        color: root.muted
-                        font { family: root.mono; pixelSize: root.fs(17); letterSpacing: 3; capitalization: Font.AllUppercase }
+                    // one line per group in win.clockVisibleGroups; the
+                    // "time" line renders big only when it's alone on its
+                    // line, so merging it with other items falls back to the
+                    // small line-item size below
+                    Repeater {
+                        model: win.clockVisibleGroups
+
+                        Row {
+                            id: clockLine
+                            required property var modelData
+                            // re-filter for runtime availability (battery
+                            // present, weather fetched) so an unavailable
+                            // item doesn't leave a stray line or dot
+                            readonly property var presentIds: modelData.filter(id => id === "time" || id === "date"
+                                || (id === "battery" && root.batteryText.length > 0)
+                                || (id === "weather" && root.weatherOk))
+                            readonly property bool bigTime: presentIds.length === 1 && presentIds[0] === "time"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: bigTime ? 0 : 8
+                            visible: presentIds.length > 0
+
+                            Repeater {
+                                model: clockLine.presentIds
+
+                                Row {
+                                    id: seg
+                                    required property string modelData
+                                    required property int index
+                                    spacing: 5
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    Text {
+                                        visible: seg.index > 0
+                                        text: "·"
+                                        color: root.muted
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        font { family: root.mono; pixelSize: root.fs(14) }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: text.length > 0
+                                        text: seg.modelData === "battery" ? (root.batteryCharging ? "⚡" : "")
+                                            : seg.modelData === "weather" ? root.weatherIcon(root.weatherText) : ""
+                                        color: seg.modelData === "battery" ? root.accent : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(14) }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: seg.modelData === "time" ? Qt.formatDateTime(clock.date, "HH:mm")
+                                            : seg.modelData === "date" ? Qt.formatDateTime(clock.date, "dddd, MMMM d")
+                                            : seg.modelData === "battery" ? root.batteryText : root.weatherText
+                                        color: seg.modelData === "date" ? root.muted
+                                            : seg.modelData === "battery" ? (root.batteryCharging ? root.accent : root.muted)
+                                            : seg.modelData === "weather" ? root.muted : root.fg
+                                        font {
+                                            family: root.mono
+                                            pixelSize: seg.modelData === "time" && clockLine.bigTime ? root.fs(120) : root.fs(seg.modelData === "date" ? 17 : 14)
+                                            weight: seg.modelData === "time" && clockLine.bigTime ? Font.DemiBold : Font.Normal
+                                            letterSpacing: seg.modelData === "date" ? 3 : 1
+                                            capitalization: seg.modelData === "date" ? Font.AllUppercase : Font.MixedCase
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     ParallelAnimation {
@@ -3237,6 +3457,255 @@ ShellRoot {
                         }
                     }
 
+                    // clock-page layout: toggle & reorder date/battery/weather
+                    // around the clock (a non-untickable "clock" chip marks
+                    // the clock itself, and can be moved too — that's what
+                    // decides what ends up above vs below it). Leftmost chip
+                    // renders topmost, rightmost renders bottommost. Drag a
+                    // chip onto another and hold to combine them onto one
+                    // shared-border line; hold a chip that's already sharing
+                    // a line, without moving it, to split it back out.
+                    Item {
+                        width: 780
+                        height: 34 + 2 + clockSub.implicitHeight
+
+                        Item {
+                        id: clockMain
+                        width: parent.width
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Clock"
+                        }
+                        SReset {
+                            key: "clock"
+                            anchors.right: parent.right
+                        }
+                        Item {
+                            id: clockArea
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property int chipW: 110
+                            readonly property int slotGap: 16
+                            // cumulative x for slot `i`, accounting for wider
+                            // (combined) slots before it — slots aren't a
+                            // fixed pitch since a merged slot is wider
+                            function slotBaseX(slotIndex) {
+                                const groups = win.clockLineGroups;
+                                let x = 0;
+                                for (let i = 0; i < slotIndex; i++)
+                                    x += groups[i].length * chipW + slotGap;
+                                return x;
+                            }
+                            // where a dragged chip's center currently sits:
+                            // the inner ~60% of a slot's span is "on" that
+                            // slot (merge candidate, needs the hold); outside
+                            // that, closest slot boundary is a live-reorder
+                            // gap target
+                            function hitTest(centerX) {
+                                const groups = win.clockLineGroups;
+                                let x = 0;
+                                for (let i = 0; i < groups.length; i++) {
+                                    const w = groups[i].length * chipW;
+                                    const margin = w * 0.2;
+                                    if (centerX >= x + margin && centerX <= x + w - margin)
+                                        return { merge: true, index: i };
+                                    if (centerX < x + w / 2)
+                                        return { merge: false, index: i };
+                                    x += w + slotGap;
+                                }
+                                return { merge: false, index: groups.length };
+                            }
+                            width: slotBaseX(win.clockLineGroups.length)
+                            height: 28
+
+                            // shared-border background for any slot with more than one item
+                            Repeater {
+                                model: win.clockLineGroups
+
+                                Rectangle {
+                                    id: slotBg
+                                    required property var modelData
+                                    required property int index
+                                    visible: modelData.length > 1
+                                    x: clockArea.slotBaseX(index)
+                                    width: modelData.length * clockArea.chipW - 8
+                                    height: 28
+                                    radius: 6
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: Qt.alpha(root.muted, 0.35)
+                                    Behavior on x {
+                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                }
+                            }
+
+                            Repeater {
+                                model: ["time", "date", "battery", "weather"]
+
+                                Item {
+                                    id: clockChip
+                                    required property string modelData
+                                    readonly property var pos: win.clockChipPos(modelData)
+                                    readonly property bool checkable: modelData !== "time"
+                                    readonly property bool on: modelData === "time" ? true : (cfg.clockShow ?? {})[modelData] !== false
+                                    readonly property string label: modelData === "time" ? "clock" : modelData
+                                    width: clockArea.chipW - 8
+                                    height: 28
+
+                                    // same slot/dragOff split as pageChip: slotX comes from
+                                    // cfg (via win.clockChipPos), dragDX rides raw while held
+                                    // and re-enables its Behavior on release
+                                    property bool held: false
+                                    property bool moved: false
+                                    property real dragDX: 0
+                                    property real grabDX: 0
+                                    property int pendingMergeSlot: -1
+                                    // not readonly: Behavior below needs to assign into this
+                                    property real slotX: clockArea.slotBaseX(pos.g) + pos.w * clockArea.chipW
+                                    Behavior on slotX {
+                                        enabled: !clockChip.held
+                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Behavior on dragDX {
+                                        enabled: !clockChip.held
+                                        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                    }
+                                    x: slotX + dragDX
+                                    y: 0
+                                    z: held ? 10 : 1
+                                    scale: held ? 1.05 : 1
+                                    Behavior on scale {
+                                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                    }
+
+                                    Rectangle {
+                                        id: clockCheckbox
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 18
+                                        radius: 4
+                                        visible: clockChip.checkable
+                                        color: clockChip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
+                                        // flashes accent while a merge is charging up, so the
+                                        // hold-to-combine gesture has some feedback mid-drag
+                                        border.width: 1
+                                        border.color: clockChip.pendingMergeSlot >= 0 ? root.accent
+                                            : clockChip.on ? root.accent : Qt.alpha(root.muted, 0.6)
+                                        Behavior on border.color {
+                                            ColorAnimation { duration: 150 }
+                                        }
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: clockChip.on
+                                            text: "✓"
+                                            color: "#141210"
+                                            font { pixelSize: 13; weight: Font.Bold }
+                                        }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: clockChip.checkable ? clockCheckbox.right : parent.left
+                                        anchors.leftMargin: clockChip.checkable ? 6 : 0
+                                        text: clockChip.label
+                                        color: clockChip.on ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(12) }
+                                    }
+
+                                    TapHandler {
+                                        enabled: clockChip.checkable
+                                        onTapped: win.toggleClockItem(clockChip.modelData)
+                                    }
+
+                                    // fires once if the chip is pressed and held without being
+                                    // dragged; splits it out of a shared line (no-op if it's
+                                    // already standalone)
+                                    Timer {
+                                        id: holdTimer
+                                        interval: 750
+                                        onTriggered: win.splitClockChip(clockChip.modelData)
+                                    }
+                                    // restarted every time the hovered-while-dragging target
+                                    // slot changes; fires after sitting on the same slot long
+                                    // enough to commit the merge
+                                    Timer {
+                                        id: mergeTimer
+                                        interval: 750
+                                        onTriggered: {
+                                            if (clockChip.pendingMergeSlot >= 0)
+                                                win.mergeClockChip(clockChip.modelData, clockChip.pendingMergeSlot);
+                                        }
+                                    }
+
+                                    DragHandler {
+                                        id: clockDrag
+                                        target: null
+                                        yAxis.enabled: false
+                                        onActiveChanged: {
+                                            if (active) {
+                                                clockChip.held = true;
+                                                clockChip.moved = false;
+                                                clockChip.grabDX = centroid.scenePosition.x - clockChip.x;
+                                                holdTimer.restart();
+                                            } else {
+                                                holdTimer.stop();
+                                                mergeTimer.stop();
+                                                clockChip.pendingMergeSlot = -1;
+                                                clockChip.held = false;
+                                                clockChip.dragDX = 0;
+                                                root.saveSettings();
+                                            }
+                                        }
+                                        onCentroidChanged: {
+                                            if (!active)
+                                                return;
+                                            const nx = centroid.scenePosition.x - clockChip.grabDX;
+                                            const dx = nx - clockChip.slotX;
+                                            // small dead zone: a stationary press should be free
+                                            // to become a hold-to-split rather than a drag
+                                            if (!clockChip.moved && Math.abs(dx) > 6) {
+                                                clockChip.moved = true;
+                                                holdTimer.stop();
+                                            }
+                                            if (!clockChip.moved)
+                                                return;
+                                            clockChip.dragDX = dx;
+
+                                            const hit = clockArea.hitTest(clockChip.x + clockChip.width / 2);
+                                            const ownSlot = clockChip.pos.g;
+
+                                            if (hit.merge && hit.index !== ownSlot) {
+                                                if (clockChip.pendingMergeSlot !== hit.index) {
+                                                    clockChip.pendingMergeSlot = hit.index;
+                                                    mergeTimer.restart();
+                                                }
+                                            } else {
+                                                if (clockChip.pendingMergeSlot !== -1) {
+                                                    clockChip.pendingMergeSlot = -1;
+                                                    mergeTimer.stop();
+                                                }
+                                                if (!hit.merge && (hit.index !== ownSlot || win.clockLineGroups[ownSlot].length > 1))
+                                                    win.reorderClockLine(clockChip.modelData, hit.index);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        }
+
+                        SSub {
+                            id: clockSub
+                            anchors.top: clockMain.bottom
+                            anchors.topMargin: 2
+                            text: "drag to reorder, hold to combine"
+                        }
+                    }
+
                     SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150 }
                     SettingRow { key: "animStyle"; label: "Tile animation" }
 
@@ -3715,6 +4184,10 @@ ShellRoot {
             case "pages":
                 cfg.pages = ({ clock: true, apps: true, walls: true, clips: true });
                 cfg.pageOrder = ["clock", "apps", "walls", "clips"];
+                break;
+            case "clock":
+                cfg.clockLines = [["time"], ["date"], ["battery", "weather"]];
+                cfg.clockShow = ({ date: true, battery: true, weather: true });
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
