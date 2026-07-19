@@ -548,7 +548,17 @@ ShellRoot {
         // its next save
         watchChanges: true
         onFileChanged: reload()
-        onLoaded: root.healSettings()
+        // this can re-fire on every save (writeAdapter's own write loops
+        // back through the watcher above), so the Dynamic-theme kickoff is
+        // guarded to only ever fire once, on the true initial load
+        onLoaded: {
+            root.healSettings();
+            if (!matugenProc.startupKicked) {
+                matugenProc.startupKicked = true;
+                if (cfg.theme === "matugen")
+                    root.runMatugen();
+            }
+        }
 
         JsonAdapter {
             id: cfg
@@ -759,17 +769,23 @@ ShellRoot {
 
     Process {
         id: matugenProc
-        // Runs once at startup to catch up with cfg.currentWallpaper (set on
-        // a prior run); after that, applyWallpaper() triggers it directly
-        // when a new wallpaper is picked, so this binding only needs to fire
-        // the initial run.
-        running: cfg.theme === "matugen"
-        // a refresh requested while a run was in flight. Never kill a run
-        // already in progress to start a newer one — a killed run surfaces
-        // as truncated JSON, which used to raise a spurious "Dynamic theme
-        // failed" notification — so callers queue this instead, and it's
-        // honoured on exit so the palette can't go stale on the wallpaper
-        // the busy run never saw.
+        // Kicked off imperatively from settingsStore.onLoaded (once, for the
+        // initial run) and from applyWallpaper() (on every wallpaper pick)
+        // — never via a `running: cfg.theme === "matugen"`-style binding.
+        // That was tried and races: settingsStore's file load is async, so
+        // cfg.currentWallpaper is still "" (the JsonAdapter's blank default)
+        // when the tree is first constructed, even though cfg.theme already
+        // reads "matugen" (its default too). The natural fix looked like
+        // adding `&& cfg.currentWallpaper !== ""` to the binding, but that
+        // still loses: once the load completes, `running` and `command`
+        // both react to the same cfg.currentWallpaper change as sibling
+        // bindings on this Process, and Qt doesn't guarantee `command` has
+        // re-evaluated to the loaded path before `running`'s flip spawns
+        // the process — so it reliably ran with an empty $WALL anyway.
+        // Driving both imperatively, one statement after the other, forces
+        // the ordering: by the time `running = true` executes, `command`'s
+        // binding has already settled on the just-loaded value.
+        property bool startupKicked: false
         property bool rerun: false
         onRunningChanged: {
             if (!running && rerun) {
@@ -813,6 +829,14 @@ ShellRoot {
                 }
             }
         }
+    }
+    // starts (or queues a rerun of) matugenProc for the current wallpaper;
+    // shared by the initial-load kickoff and applyWallpaper()
+    function runMatugen() {
+        if (matugenProc.running)
+            matugenProc.rerun = true;
+        else
+            matugenProc.running = true;
     }
 
     Process {
@@ -1459,6 +1483,34 @@ ShellRoot {
             groups[intoLine].push(id);
             cfg.clockLines = groups;
         }
+        // live in-line reorder (drag within a line it's already sharing):
+        // repositions id among its current line's other members without
+        // touching grouping, so it doesn't need the merge hold
+        function reorderWithinLine(id: string, w: int): void {
+            const groups = clockLineGroups.map(g => g.slice());
+            const gi = groups.findIndex(g => g.includes(id));
+            if (gi < 0)
+                return;
+            const g = groups[gi];
+            const from = g.indexOf(id);
+            const to = Math.max(0, Math.min(g.length - 1, w));
+            if (from === to)
+                return;
+            g.splice(from, 1);
+            g.splice(to, 0, id);
+            cfg.clockLines = groups;
+        }
+        // whole-line reorder (drag the shared border itself, not a chip):
+        // moves an entire line to a new position among the other lines
+        function moveClockLine(fromIndex: int, atLine: int): void {
+            const groups = clockLineGroups.map(g => g.slice());
+            if (fromIndex < 0 || fromIndex >= groups.length)
+                return;
+            const [line] = groups.splice(fromIndex, 1);
+            const gi = Math.max(0, Math.min(groups.length, atLine));
+            groups.splice(gi, 0, line);
+            cfg.clockLines = groups;
+        }
         // hold-to-split (press and hold without dragging): pulls id out of
         // its (multi-item) line into a new standalone line right after it
         function splitClockChip(id: string): void {
@@ -1736,10 +1788,7 @@ ShellRoot {
             // currently on screen (see matugenProc)
             cfg.currentWallpaper = wall.path;
             root.saveSettings();
-            if (matugenProc.running)
-                matugenProc.rerun = true;
-            else
-                matugenProc.running = true;
+            root.runMatugen();
             // Runs the configurable command with $WALL and $BLUR exported.
             // The blurred variant is only ensured when the command actually
             // references $BLUR, so non-blur setups skip that work entirely.
@@ -1980,8 +2029,8 @@ ShellRoot {
                     root.scansStarted = true;
                     iconThemeScan.running = true;
                     fontScan.running = true;
-                    if (!matugenProc.running && cfg.theme !== "matugen")
-                        matugenProc.running = true;
+                    if (cfg.theme !== "matugen")
+                        root.runMatugen();
                 }
             }
             NumberAnimation {
@@ -2221,7 +2270,13 @@ ShellRoot {
                                         text: seg.modelData === "battery" ? (root.batteryCharging ? "⚡" : "")
                                             : seg.modelData === "weather" ? root.weatherIcon(root.weatherText) : ""
                                         color: seg.modelData === "battery" ? root.accent : root.muted
-                                        font { family: root.mono; pixelSize: root.fs(14) }
+                                        font {
+                                            family: root.mono
+                                            // weather glyphs (☀ ☁ ☂ ❄ ⛈) carry much less ink
+                                            // than the battery bolt at the same pixel size, so
+                                            // they need a bump to read as the same visual size
+                                            pixelSize: seg.modelData === "weather" ? root.fs(22) : root.fs(14)
+                                        }
                                     }
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
@@ -3378,6 +3433,7 @@ ShellRoot {
                                     property real grabDX: 0
                                     property real slotX: ord * pagesArea.slotW
                                     Behavior on slotX {
+                                        enabled: !pageChip.held
                                         NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
                                     }
                                     Behavior on dragOff {
@@ -3440,8 +3496,14 @@ ShellRoot {
                                                 return;
                                             pageChip.dragOff = centroid.scenePosition.x - pageChip.grabDX - pageChip.slotX;
                                             const idx = Math.max(0, Math.min(3, Math.round(pageChip.x / pagesArea.slotW)));
-                                            if (idx !== pageChip.ord)
+                                            if (idx !== pageChip.ord) {
                                                 win.movePage(pageChip.modelData, idx);
+                                                // slotX just jumped to the new ord (its Behavior
+                                                // is disabled while held); resync dragOff against
+                                                // it immediately so x doesn't lag behind the
+                                                // pointer until the next pointer-move event
+                                                pageChip.dragOff = centroid.scenePosition.x - pageChip.grabDX - pageChip.slotX;
+                                            }
                                         }
                                     }
                                 }
@@ -3463,8 +3525,14 @@ ShellRoot {
                     // decides what ends up above vs below it). Leftmost chip
                     // renders topmost, rightmost renders bottommost. Drag a
                     // chip onto another and hold to combine them onto one
-                    // shared-border line; hold a chip that's already sharing
-                    // a line, without moving it, to split it back out.
+                    // shared-border line; drag within a shared line to
+                    // reorder its members live; drag a shared-line member
+                    // out past its line's edge and hold to split it back
+                    // out (same hold as merging, so it can't be knocked
+                    // loose by accident); hold a chip that's already
+                    // sharing a line, without moving it, to split it out in
+                    // place. Drag the shared border itself (not a chip) to
+                    // move the whole line.
                     Item {
                         width: 780
                         height: 34 + 2 + clockSub.implicitHeight
@@ -3488,7 +3556,10 @@ ShellRoot {
                             anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
                             readonly property int chipW: 110
-                            readonly property int slotGap: 16
+                            // matches the Pages chip gap (pagesArea.slotW - the
+                            // chip's own width) so spacing reads the same
+                            // whether chips are standalone or combined
+                            readonly property int slotGap: 8
                             // cumulative x for slot `i`, accounting for wider
                             // (combined) slots before it — slots aren't a
                             // fixed pitch since a merged slot is wider
@@ -3501,44 +3572,129 @@ ShellRoot {
                             }
                             // where a dragged chip's center currently sits:
                             // the inner ~60% of a slot's span is "on" that
-                            // slot (merge candidate, needs the hold); outside
-                            // that, closest slot boundary is a live-reorder
-                            // gap target
+                            // slot (merge candidate, needs the hold, and also
+                            // reports which member position within it for
+                            // in-line reordering); outside that, closest slot
+                            // boundary is a live-reorder gap target
                             function hitTest(centerX) {
                                 const groups = win.clockLineGroups;
                                 let x = 0;
                                 for (let i = 0; i < groups.length; i++) {
                                     const w = groups[i].length * chipW;
                                     const margin = w * 0.2;
-                                    if (centerX >= x + margin && centerX <= x + w - margin)
-                                        return { merge: true, index: i };
+                                    if (centerX >= x + margin && centerX <= x + w - margin) {
+                                        const slot = Math.max(0, Math.min(groups[i].length - 1, Math.floor((centerX - x) / chipW)));
+                                        return { merge: true, index: i, slot };
+                                    }
                                     if (centerX < x + w / 2)
                                         return { merge: false, index: i };
                                     x += w + slotGap;
                                 }
                                 return { merge: false, index: groups.length };
                             }
+                            // same idea as hitTest, but for dragging a whole
+                            // line by its shared border: computed over the
+                            // other lines only (excludeIndex is the one being
+                            // dragged), returning a post-removal insert index
+                            // ready for win.moveClockLine
+                            function lineHitTest(excludeIndex, centerX) {
+                                const groups = win.clockLineGroups;
+                                let x = 0, k = 0;
+                                for (let i = 0; i < groups.length; i++) {
+                                    if (i === excludeIndex)
+                                        continue;
+                                    const w = groups[i].length * chipW;
+                                    if (centerX < x + w / 2)
+                                        return k;
+                                    x += w + slotGap;
+                                    k++;
+                                }
+                                return k;
+                            }
                             width: slotBaseX(win.clockLineGroups.length)
                             height: 28
 
-                            // shared-border background for any slot with more than one item
+                            // which line (by fixed slot index) is currently being
+                            // dragged by its shared border, and where that line's
+                            // group has actually landed after live moveClockLine
+                            // calls — kept separate from the delegate's own fixed
+                            // `index` since moveClockLine can hand that array
+                            // position to a *different* delegate mid-drag
+                            property int lineDragOwner: -1
+                            property int lineDragCurIndex: -1
+
+                            // shared-border background for any line with more than
+                            // one item. Keyed by a fixed slot count (not by
+                            // win.clockLineGroups itself) so delegates persist
+                            // across reorders instead of being torn down and
+                            // recreated on every drag step — that recreation was
+                            // what made the border lag/flicker out of alignment
+                            // with its child chips while dragging
                             Repeater {
-                                model: win.clockLineGroups
+                                model: 4
 
                                 Rectangle {
                                     id: slotBg
-                                    required property var modelData
                                     required property int index
-                                    visible: modelData.length > 1
-                                    x: clockArea.slotBaseX(index)
-                                    width: modelData.length * clockArea.chipW - 8
+                                    readonly property bool isDragOwner: clockArea.lineDragOwner === index
+                                    // an untouched delegate whose fixed slot happens
+                                    // to be where the dragged line currently sits
+                                    // would otherwise duplicate the drag-owner's box
+                                    readonly property bool suppressed: !isDragOwner && clockArea.lineDragOwner >= 0 && index === clockArea.lineDragCurIndex
+                                    readonly property var g: isDragOwner ? (win.clockLineGroups[clockArea.lineDragCurIndex] ?? [])
+                                        : (win.clockLineGroups[index] ?? [])
+                                    visible: g.length > 1 && !suppressed
+                                    property real heldX: 0
+                                    property real grabDX: 0
+                                    x: isDragOwner ? heldX : clockArea.slotBaseX(index)
+                                    width: Math.max(0, g.length * clockArea.chipW - 8)
                                     height: 28
                                     radius: 6
                                     color: "transparent"
                                     border.width: 1
                                     border.color: Qt.alpha(root.muted, 0.35)
+                                    scale: isDragOwner ? 1.02 : 1
+                                    z: isDragOwner ? 5 : 0
                                     Behavior on x {
+                                        enabled: !slotBg.isDragOwner
                                         NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Behavior on width {
+                                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                    }
+
+                                    // dragging empty space inside the border (not a
+                                    // chip — those sit on top and grab the point
+                                    // first) moves the whole line as a unit
+                                    DragHandler {
+                                        target: null
+                                        yAxis.enabled: false
+                                        onActiveChanged: {
+                                            if (active) {
+                                                clockArea.lineDragOwner = slotBg.index;
+                                                clockArea.lineDragCurIndex = slotBg.index;
+                                                slotBg.heldX = clockArea.slotBaseX(slotBg.index);
+                                                slotBg.grabDX = centroid.scenePosition.x - slotBg.heldX;
+                                            } else {
+                                                clockArea.lineDragOwner = -1;
+                                                clockArea.lineDragCurIndex = -1;
+                                                root.saveSettings();
+                                            }
+                                        }
+                                        onCentroidChanged: {
+                                            if (!active)
+                                                return;
+                                            slotBg.heldX = centroid.scenePosition.x - slotBg.grabDX;
+                                            const centerX = slotBg.heldX + slotBg.width / 2;
+                                            const idx = clockArea.lineHitTest(clockArea.lineDragCurIndex, centerX);
+                                            if (idx !== clockArea.lineDragCurIndex) {
+                                                win.moveClockLine(clockArea.lineDragCurIndex, idx);
+                                                clockArea.lineDragCurIndex = idx;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3564,6 +3720,7 @@ ShellRoot {
                                     property real dragDX: 0
                                     property real grabDX: 0
                                     property int pendingMergeSlot: -1
+                                    property int pendingExitSlot: -1
                                     // not readonly: Behavior below needs to assign into this
                                     property real slotX: clockArea.slotBaseX(pos.g) + pos.w * clockArea.chipW
                                     Behavior on slotX {
@@ -3590,10 +3747,11 @@ ShellRoot {
                                         radius: 4
                                         visible: clockChip.checkable
                                         color: clockChip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
-                                        // flashes accent while a merge is charging up, so the
-                                        // hold-to-combine gesture has some feedback mid-drag
+                                        // flashes accent while a merge or an exit-from-a-
+                                        // combined-line is charging up, so the hold gesture
+                                        // has some feedback mid-drag
                                         border.width: 1
-                                        border.color: clockChip.pendingMergeSlot >= 0 ? root.accent
+                                        border.color: (clockChip.pendingMergeSlot >= 0 || clockChip.pendingExitSlot >= 0) ? root.accent
                                             : clockChip.on ? root.accent : Qt.alpha(root.muted, 0.6)
                                         Behavior on border.color {
                                             ColorAnimation { duration: 150 }
@@ -3636,8 +3794,30 @@ ShellRoot {
                                         id: mergeTimer
                                         interval: 750
                                         onTriggered: {
-                                            if (clockChip.pendingMergeSlot >= 0)
+                                            if (clockChip.pendingMergeSlot >= 0) {
                                                 win.mergeClockChip(clockChip.modelData, clockChip.pendingMergeSlot);
+                                                // slotX just jumped to the new group (Behavior is
+                                                // disabled while held, so it snapped); resync so
+                                                // the chip doesn't visibly hop away from the
+                                                // pointer until the drag's next move event
+                                                if (clockChip.held)
+                                                    clockChip.dragDX = (clockDrag.centroid.scenePosition.x - clockChip.grabDX) - clockChip.slotX;
+                                            }
+                                        }
+                                    }
+                                    // mirrors mergeTimer for the opposite direction: dragging
+                                    // a chip that's already sharing a line out past that
+                                    // line's edge charges this instead of leaving instantly,
+                                    // so a combined chip can't be knocked loose by accident
+                                    Timer {
+                                        id: exitTimer
+                                        interval: 750
+                                        onTriggered: {
+                                            if (clockChip.pendingExitSlot >= 0) {
+                                                win.reorderClockLine(clockChip.modelData, clockChip.pendingExitSlot);
+                                                if (clockChip.held)
+                                                    clockChip.dragDX = (clockDrag.centroid.scenePosition.x - clockChip.grabDX) - clockChip.slotX;
+                                            }
                                         }
                                     }
 
@@ -3654,7 +3834,9 @@ ShellRoot {
                                             } else {
                                                 holdTimer.stop();
                                                 mergeTimer.stop();
+                                                exitTimer.stop();
                                                 clockChip.pendingMergeSlot = -1;
+                                                clockChip.pendingExitSlot = -1;
                                                 clockChip.held = false;
                                                 clockChip.dragDX = 0;
                                                 root.saveSettings();
@@ -3677,19 +3859,47 @@ ShellRoot {
 
                                             const hit = clockArea.hitTest(clockChip.x + clockChip.width / 2);
                                             const ownSlot = clockChip.pos.g;
+                                            const ownGroupSize = win.clockLineGroups[ownSlot]?.length ?? 1;
 
-                                            if (hit.merge && hit.index !== ownSlot) {
+                                            if (hit.merge && hit.index === ownSlot) {
+                                                // reordering within a line it's already sharing:
+                                                // live, no hold needed
+                                                clockChip.pendingMergeSlot = -1;
+                                                clockChip.pendingExitSlot = -1;
+                                                mergeTimer.stop();
+                                                exitTimer.stop();
+                                                if (hit.slot !== clockChip.pos.w)
+                                                    win.reorderWithinLine(clockChip.modelData, hit.slot);
+                                                // reorderWithinLine may have just shifted slotX
+                                                // (Behavior disabled while held, so it snapped);
+                                                // resync so x doesn't lag behind the pointer
+                                                clockChip.dragDX = nx - clockChip.slotX;
+                                            } else if (hit.merge && hit.index !== ownSlot) {
+                                                // dragged onto a different line: hold to merge
+                                                clockChip.pendingExitSlot = -1;
+                                                exitTimer.stop();
                                                 if (clockChip.pendingMergeSlot !== hit.index) {
                                                     clockChip.pendingMergeSlot = hit.index;
                                                     mergeTimer.restart();
                                                 }
                                             } else {
-                                                if (clockChip.pendingMergeSlot !== -1) {
-                                                    clockChip.pendingMergeSlot = -1;
-                                                    mergeTimer.stop();
+                                                clockChip.pendingMergeSlot = -1;
+                                                mergeTimer.stop();
+                                                if (ownGroupSize > 1) {
+                                                    // already sharing a line: leaving it needs a
+                                                    // hold, same as merging into one does
+                                                    if (clockChip.pendingExitSlot !== hit.index) {
+                                                        clockChip.pendingExitSlot = hit.index;
+                                                        exitTimer.restart();
+                                                    }
+                                                } else {
+                                                    clockChip.pendingExitSlot = -1;
+                                                    exitTimer.stop();
+                                                    if (hit.index !== ownSlot) {
+                                                        win.reorderClockLine(clockChip.modelData, hit.index);
+                                                        clockChip.dragDX = nx - clockChip.slotX;
+                                                    }
                                                 }
-                                                if (!hit.merge && (hit.index !== ownSlot || win.clockLineGroups[ownSlot].length > 1))
-                                                    win.reorderClockLine(clockChip.modelData, hit.index);
                                             }
                                         }
                                     }
