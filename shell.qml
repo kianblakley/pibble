@@ -2157,6 +2157,14 @@ ShellRoot {
                     id: clockView
                     anchors.centerIn: parent
                     spacing: 8
+                    // a line's own opacity fade (below) changes whether the
+                    // Column counts it in the layout; animate that reflow
+                    // too so sibling lines slide to their new spot instead
+                    // of jumping (e.g. the battery/weather line growing in
+                    // once weather finishes its first fetch)
+                    move: Transition {
+                        NumberAnimation { property: "y"; duration: 240; easing.type: Easing.OutCubic }
+                    }
 
                     // one line per group in win.clockVisibleGroups; the
                     // "time" line renders big only when it's alone on its
@@ -2168,44 +2176,76 @@ ShellRoot {
                         Row {
                             id: clockLine
                             required property var modelData
-                            // re-filter for runtime availability (battery
-                            // present, weather fetched) so an unavailable
-                            // item doesn't leave a stray line or dot
-                            readonly property var presentIds: modelData.filter(id => id === "time" || id === "date"
-                                || (id === "battery" && root.batteryText.length > 0)
-                                || (id === "weather" && root.weatherOk))
-                            readonly property bool bigTime: presentIds.length === 1 && presentIds[0] === "time"
+                            // membership in modelData is settings-driven and
+                            // stable; runtime availability (battery present,
+                            // weather fetched) only ever fades a segment in
+                            // place via its own opacity below — it never adds
+                            // to or removes from this Repeater's model, so
+                            // Row's move transition can animate every reflow
+                            // instead of anything popping
+                            function isAvailable(id) {
+                                return id === "time" || id === "date"
+                                    || (id === "battery" && root.batteryText.length > 0)
+                                    || (id === "weather" && root.weatherOk);
+                            }
+                            readonly property var availableIds: modelData.filter(isAvailable)
+                            readonly property bool bigTime: modelData.length === 1 && modelData[0] === "time"
                             anchors.horizontalCenter: parent.horizontalCenter
-                            // the charging icon appearing/disappearing changes
-                            // this line's total width, which recenters it;
-                            // smooth that recenter too so the line doesn't
-                            // hop sideways while the icon fades
+                            // a segment appearing/disappearing changes this
+                            // line's total width, which recenters it; smooth
+                            // that recenter too so the line doesn't hop
+                            // sideways while a segment fades
                             Behavior on x {
                                 NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
                             }
+                            move: Transition {
+                                NumberAnimation { property: "x"; duration: 220; easing.type: Easing.OutCubic }
+                            }
                             spacing: bigTime ? 0 : 8
-                            visible: presentIds.length > 0
+                            // fades the whole line in/out (e.g. weather still
+                            // loading, or no battery on this machine) rather
+                            // than popping it in/out of the Column; stays in
+                            // the layout until nearly invisible so the fade
+                            // reads as a smooth grow, not a snap
+                            opacity: availableIds.length > 0 ? 1 : 0
+                            visible: opacity > 0.01
+                            Behavior on opacity {
+                                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                            }
 
                             Repeater {
-                                model: clockLine.presentIds
+                                // static per-line membership — see
+                                // clockLine.isAvailable above
+                                model: clockLine.modelData
 
                                 Row {
                                     id: seg
                                     required property string modelData
                                     required property int index
+                                    readonly property bool available: clockLine.isAvailable(modelData)
+                                    readonly property bool isFirstVisible: clockLine.availableIds.length > 0 && clockLine.availableIds[0] === modelData
                                     spacing: 5
                                     anchors.verticalCenter: parent.verticalCenter
-                                    // segIcon fades in/out in place rather than
-                                    // popping, but Row still repositions its
-                                    // sibling (the value Text) the instant that
-                                    // happens; animate that reflow too so the
-                                    // value doesn't jump while the icon fades
+                                    // an unavailable segment (no battery, or
+                                    // weather not fetched yet) fades out in
+                                    // place instead of leaving the model, same
+                                    // trick as segIcon below, one level up
+                                    opacity: available ? 1 : 0
+                                    visible: opacity > 0.01
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                    }
+                                    // segIcon/segValue fade in/out in place
+                                    // rather than popping, but Row still
+                                    // repositions siblings the instant that
+                                    // happens; animate that reflow too so
+                                    // nothing jumps while a segment fades
                                     move: Transition {
                                         NumberAnimation { property: "x"; duration: 220; easing.type: Easing.OutCubic }
                                     }
 
                                     Text {
-                                        visible: seg.index > 0
+                                        visible: !seg.isFirstVisible
                                         text: "·"
                                         color: root.muted
                                         anchors.verticalCenter: parent.verticalCenter
@@ -2236,10 +2276,16 @@ ShellRoot {
                                         font { family: root.tablerFont; pixelSize: root.fs(16) }
                                     }
                                     Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: seg.modelData === "time" ? Qt.formatDateTime(clock.date, "HH:mm")
+                                        // same freeze trick as segIcon above: hold the
+                                        // last real value while the segment fades out so
+                                        // the text doesn't blank before it's gone
+                                        readonly property string valueText: seg.modelData === "time" ? Qt.formatDateTime(clock.date, "HH:mm")
                                             : seg.modelData === "date" ? Qt.formatDateTime(clock.date, "dddd, MMMM d")
                                             : seg.modelData === "battery" ? root.batteryText : root.weatherText
+                                        property string frozenValue: valueText
+                                        onValueTextChanged: if (valueText.length > 0) frozenValue = valueText
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: frozenValue
                                         color: seg.modelData === "date" ? root.muted
                                             : seg.modelData === "battery" ? (root.batteryCharging ? root.accent : root.muted)
                                             : seg.modelData === "weather" ? root.muted : root.fg
