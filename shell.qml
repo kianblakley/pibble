@@ -1408,7 +1408,11 @@ ShellRoot {
         // healed so all four pages are always present exactly once
         readonly property var paneOrder: {
             const def = ["clock", "apps", "walls", "clips"];
-            const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : []).filter(p => def.includes(p));
+            // pageOrder read back from settings.json is a QVariantList
+            // wrapper: array-like but not a JS Array, so gating on
+            // Array.isArray discarded every saved order on restart
+            const saved = cfg.pageOrder;
+            const o = (saved && typeof saved === "object" && saved.length !== undefined ? Array.from(saved) : []).filter(p => def.includes(p));
             for (const d of def)
                 if (!o.includes(d))
                     o.push(d);
