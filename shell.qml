@@ -2911,9 +2911,9 @@ ShellRoot {
                             c.absStep = win.wallSelected + i - restSpan;
                     }
                 })
-                readonly property int barWidth: 170
-                readonly property int barHeight: 480
-                readonly property int slotSpacing: 205
+                readonly property int barWidth: 205
+                readonly property int barHeight: 440
+                readonly property int slotSpacing: 240
                 readonly property real parallaxPx: cfg.wallpaperStyle === "windows-flat" ? 0 : 75
                 readonly property int captionGap: 14
                 width: (2 * halfVisible + 1) * slotSpacing
