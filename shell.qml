@@ -576,7 +576,7 @@ ShellRoot {
         id: gp
         property string target: "apps"
         readonly property var spec: root.gridTargets[gp.target]
-        readonly property bool wallsBars: gp.target === "walls" && cfg.wallpaperStyle === "windows"
+        readonly property bool wallsBars: gp.target === "walls" && cfg.wallpaperStyle !== "tiles"
         readonly property int curCols: cfg[gp.spec.colsProp]
         readonly property int curRows: cfg[gp.spec.rowsProp]
         readonly property int curVisible: cfg.wallsVisible
@@ -780,9 +780,10 @@ ShellRoot {
             property string customAccent: "#cfcfcf"
             property string customFg: "#f0f0f0"
             property string customMuted: "#8a8a8a"
-            // "tiles" is the grid picker; "windows" is a horizontal parallax
-            // carousel (see wallCarousel)
-            property string wallpaperStyle: "tiles"
+            // "tiles" is the grid picker; "windows" and "windows-flat" are
+            // the horizontal carousel (see wallCarousel), the latter with
+            // the backdrop parallax pan disabled
+            property string wallpaperStyle: "windows"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -992,8 +993,8 @@ ShellRoot {
             cfg.theme = "matugen";
             saveSettings();
         }
-        if (cfg.wallpaperStyle !== "tiles" && cfg.wallpaperStyle !== "windows") {
-            cfg.wallpaperStyle = "tiles";
+        if (!["tiles", "windows", "windows-flat"].includes(cfg.wallpaperStyle)) {
+            cfg.wallpaperStyle = "windows";
             saveSettings();
         }
     }
@@ -1898,7 +1899,7 @@ ShellRoot {
                 pageStagger(appPageSize, selected, next);
                 selected = next;
             } else if (pane === "walls") {
-                if (cfg.wallpaperStyle === "windows") {
+                if (cfg.wallpaperStyle !== "tiles") {
                     moveCarousel(dy !== 0 ? dy : dx);
                 } else {
                     const next = dy !== 0
@@ -2913,18 +2914,18 @@ ShellRoot {
                 readonly property int barWidth: 170
                 readonly property int barHeight: 480
                 readonly property int slotSpacing: 205
-                readonly property real parallaxPx: 75
+                readonly property real parallaxPx: cfg.wallpaperStyle === "windows-flat" ? 0 : 75
                 readonly property int captionGap: 14
                 width: (2 * halfVisible + 1) * slotSpacing
                 height: barHeight + captionGap + 22
                 transform: panePull
                 opacity: 0.004
-                visible: cfg.wallpaperStyle === "windows" && win.pane === "walls"
+                visible: cfg.wallpaperStyle !== "tiles" && win.pane === "walls"
 
                 Connections {
                     target: win
                     function onPaneChanged() {
-                        if (win.pane === "walls" && cfg.wallpaperStyle === "windows")
+                        if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
                             carouselIn.restart();
                     }
                 }
@@ -2972,6 +2973,14 @@ ShellRoot {
                             function onWallCarouselAnimChanged() { wcCell.rebalance(); }
                             function onWallMatchesChanged() {
                                 wcCell.absStep = wcCell.index - wallCarousel.restSpan;
+                            }
+                            // replay the spring when the selector opens: the
+                            // cell was already filled while it was hidden, so
+                            // onWallChanged alone won't fire (see wallCell's
+                            // identical hook for the "tiles" style)
+                            function onPaneChanged() {
+                                if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles" && wcCell.filled)
+                                    wcSpringIn.restart();
                             }
                         }
 
@@ -4101,7 +4110,7 @@ ShellRoot {
 
                     SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
 
-                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style" }
+                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style"; valueWidth: 170 }
 
                     // wallpaper path
                     Item {
@@ -4494,7 +4503,7 @@ ShellRoot {
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifStyle": return cfg.notifStyle;
             case "notifAnim": return cfg.notifAnim;
-            case "wallpaperStyle": return cfg.wallpaperStyle;
+            case "wallpaperStyle": return cfg.wallpaperStyle === "windows-flat" ? "windows no parallax" : cfg.wallpaperStyle;
             }
             return "";
         }
@@ -4572,7 +4581,7 @@ ShellRoot {
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
             case "wallpaperStyle":
-                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "windows"], dir);
+                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "windows", "windows-flat"], dir);
                 break;
             }
             root.saveSettings();
@@ -4643,7 +4652,7 @@ ShellRoot {
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
-            case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
+            case "wallpaperStyle": cfg.wallpaperStyle = "windows"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
