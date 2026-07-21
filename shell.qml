@@ -554,6 +554,43 @@ ShellRoot {
         }
     }
 
+    // one physical-looking key in a keybinding chord (keybindings tab): a
+    // flat "cap" over a slightly darker "base" peeking out underneath reads
+    // as a keycap without needing a dedicated icon font — tabler-icons only
+    // ships a matching glyph for a couple of keys (Return's corner-down-left
+    // arrow being the clean one), so most labels just render as text.
+    component KeyCap: Item {
+        id: keycap
+        property string label: ""
+        readonly property string glyph: label === "Return" ? root.ti.cornerDownLeft : ""
+        implicitWidth: Math.max(28, capText.implicitWidth + 16)
+        implicitHeight: 26
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 3
+            radius: 6
+            color: Qt.alpha(root.fg, 0.16)
+        }
+        Rectangle {
+            width: parent.width
+            height: parent.height - 3
+            radius: 6
+            color: Qt.alpha(root.accent, 0.14)
+            border.width: 1
+            border.color: Qt.alpha(root.accent, 0.4)
+
+            Text {
+                id: capText
+                anchors.centerIn: parent
+                text: keycap.glyph || keycap.label
+                color: root.fg
+                font.family: keycap.glyph ? root.tablerFont : root.mono
+                font.pixelSize: root.fs(12)
+            }
+        }
+    }
+
     // visible grid-of-tiles size picker (Grids settings tab): hovering
     // previews a cols×rows selection Excel-insert-table style, clicking
     // commits it. `target` indexes root.gridTargets for which page's cfg
@@ -907,7 +944,10 @@ ShellRoot {
         refresh: "",
         copy: "",
         bell: "",
-        alertTriangle: ""
+        alertTriangle: "",
+        // "corner-down-left" — closest tabler-icons glyph to a physical
+        // Return/Enter key’s arrow; used by KeyCap in the keybindings tab
+        cornerDownLeft: ""
     })
 
     function fs(px: int): int {
@@ -4508,24 +4548,40 @@ ShellRoot {
                                 anchors.right: parent.right
                             }
                             Rectangle {
+                                id: bindBox
+                                readonly property bool capturing: win.capturingBind === bindRow.modelData.action
+                                readonly property string bindStr: cfg.keybinds[bindRow.modelData.action] ?? win.bindDefaults[bindRow.modelData.action] ?? ""
+                                readonly property var keyTokens: bindStr.split("+")
                                 anchors.right: parent.right
                                 anchors.rightMargin: 34
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.max(110, bindText.implicitWidth + 26)
+                                width: Math.max(110, (capturing ? captureText.implicitWidth : capRow.implicitWidth) + 26)
                                 height: 30
                                 radius: 8
-                                color: Qt.alpha(root.accent, win.capturingBind === bindRow.modelData.action ? 0.3 : 0.11)
+                                color: Qt.alpha(root.accent, capturing ? 0.3 : 0.11)
                                 border.width: 1
-                                border.color: win.capturingBind === bindRow.modelData.action ? root.accent : Qt.alpha(root.accent, 0.33)
+                                border.color: capturing ? root.accent : Qt.alpha(root.accent, 0.33)
 
                                 Text {
-                                    id: bindText
+                                    id: captureText
                                     anchors.centerIn: parent
-                                    text: win.capturingBind === bindRow.modelData.action
-                                        ? "press a key…"
-                                        : (cfg.keybinds[bindRow.modelData.action] ?? win.bindDefaults[bindRow.modelData.action] ?? "")
+                                    visible: bindBox.capturing
+                                    text: "press a key…"
                                     color: root.fg
                                     font { family: root.mono; pixelSize: root.fs(13) }
+                                }
+                                Row {
+                                    id: capRow
+                                    anchors.centerIn: parent
+                                    visible: !bindBox.capturing
+                                    spacing: 4
+                                    Repeater {
+                                        model: bindBox.keyTokens
+                                        KeyCap {
+                                            required property string modelData
+                                            label: modelData
+                                        }
+                                    }
                                 }
                                 MouseArea {
                                     anchors.fill: parent
