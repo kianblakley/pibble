@@ -1268,17 +1268,30 @@ ShellRoot {
                 // get cleaned up promptly.
                 const wantBlur = cfg.wallCommand.includes("$BLUR");
                 Quickshell.execDetached(["bash", "-c", `
-                    walldir="$1" cachedir="$2" gb="$3"; shift 3
+                    walldir="$1" cachedir="$2" gb="$3" alerts="$4"; shift 4
                     mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
+                    warned=0
                     live=""
                     for f in "$@"; do
                         b=$(basename "$f")
                         stem="\${b%.*}" ext="\${b##*.}"
                         key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
                         live="$live $key"
-                        [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] || magick "$f" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$ext"
+                        needthumb=0 needblur=0
+                        [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] || needthumb=1
                         if [ "$gb" = "1" ]; then
-                            [ "$cachedir/blurred/$key.$ext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || magick "$f" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$ext"
+                            [ "$cachedir/blurred/$key.$ext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
+                        fi
+                        if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
+                            if ! command -v magick >/dev/null 2>&1; then
+                                if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
+                                    warned=1
+                                    notify-send -a launcher -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews — install it for sharper, faster previews."
+                                fi
+                            else
+                                [ "$needthumb" = "1" ] && magick "$f" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$ext"
+                                [ "$needblur" = "1" ] && magick "$f" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$ext"
+                            fi
                         fi
                     done
                     for d in "$cachedir/thumbnails" "$cachedir/blurred"; do
@@ -1287,7 +1300,7 @@ ShellRoot {
                             k=$(basename "$c"); k="\${k%.*}"
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
-                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0"].concat(walls.map(w => w.path)));
+                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"].concat(walls.map(w => w.path)));
             }
         }
     }
@@ -1364,8 +1377,9 @@ ShellRoot {
                 if (imgs.length) {
                     clipThumbs.command = ["bash", "-c", `
                         export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                        dir="$1"; shift
+                        dir="$1" alerts="$2"; shift 2
                         mkdir -p "$dir"
+                        warned=0
                         # Downscale at generation time so the on-disk thumb is
                         # small: the QML reader thread decodes the whole PNG
                         # before sourceSize applies, so a full-res screenshot
@@ -1379,10 +1393,14 @@ ShellRoot {
                             elif command -v convert >/dev/null; then
                                 convert "$tmp" -resize '480x640>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
                             else
+                                if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
+                                    warned=1
+                                    notify-send -a launcher -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails — install one to keep memory/decode cost down for large screenshots."
+                                fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
                             rm -f "$tmp"
-                        done`, "_", root.clipThumbDir].concat(imgs);
+                        done`, "_", root.clipThumbDir, root.flyoutOn("alerts") ? "1" : "0"].concat(imgs);
                     clipThumbs.running = true;
                 }
             }
@@ -2035,7 +2053,13 @@ ShellRoot {
                 if [ "$5" = "1" ] && [ -z "$BLUR" ]; then
                     mkdir -p "$3/blurred"
                     BLUR="$3/blurred/$(basename "$1")"
-                    [ -e "$BLUR" ] || magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
+                    if [ ! -e "$BLUR" ]; then
+                        if command -v magick >/dev/null 2>&1; then
+                            magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
+                        elif [ "$6" = "1" ]; then
+                            notify-send -a launcher -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR — install it to enable blur."
+                        fi
+                    fi
                 fi
                 export WALL BLUR
                 eval "$4" || { [ "$6" = "1" ] && notify-send -a launcher -i dialog-error "Wallpaper command failed" "$4"; }
@@ -2102,6 +2126,10 @@ ShellRoot {
             // cached thumbnails stay valid.
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+                if ! command -v wl-copy >/dev/null 2>&1; then
+                    [ "$5" = "1" ] && notify-send -a launcher -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard — install it to copy from this page."
+                    exit 0
+                fi
                 tmp=$(mktemp)
                 cliphist decode "$1" > "$tmp"
                 wl-copy < "$tmp"
