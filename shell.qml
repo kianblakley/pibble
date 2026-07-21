@@ -1326,17 +1326,24 @@ ShellRoot {
     // scratch file for the notification tint's icon-grab round trip (see
     // the flyout notification Canvas below)
     readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher-tint.png"
-    // re-checked (and re-notified) every time the clips pane is navigated
-    // to, not just once per problem — the user wants a reminder each visit
+    // re-checked (and re-notified) every time the clips pane is freshly
+    // navigated to, not just once per problem — the user wants a reminder
+    // each visit. Gated by clipAlertedThisVisit (reset in setPane) so the
+    // periodic background rescan that keeps the page live (see clipLiveTimer)
+    // doesn't turn that into a notification every couple of seconds.
+    property bool clipAlertedThisVisit: false
     function checkClipAlert() {
-        if (win.pane !== "clips")
+        if (win.pane !== "clips" || clipAlertedThisVisit)
             return;
-        if (!cliphistAvailable)
+        if (!cliphistAvailable) {
+            clipAlertedThisVisit = true;
             notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
-        else if (!clipWatcherRunning)
+        } else if (!clipWatcherRunning) {
+            clipAlertedThisVisit = true;
             notifyError("Clipboard watcher not running",
                 "Nothing is piping clipboard changes into cliphist — clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
                 root.clipWatcherFixCommand + "\nTap to copy.");
+        }
     }
 
     Process {
@@ -1417,6 +1424,19 @@ ShellRoot {
                     clipThumbs.running = true;
                 }
             }
+        }
+    }
+    // keeps the clips page live while it's actually being looked at: cliphist
+    // has no watch/push API, so a copy made elsewhere while the launcher is
+    // open would otherwise only show up after closing and reopening
+    Timer {
+        id: clipLiveTimer
+        interval: 2000
+        repeat: true
+        running: win.shown && win.pane === "clips"
+        onTriggered: {
+            clipScan.running = false;
+            clipScan.running = true;
         }
     }
     Process {
@@ -1745,8 +1765,12 @@ ShellRoot {
             capturingBind = "";
             expandedClip = null;
             pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
-            if (pane === "clips")
+            if (pane === "clips") {
+                // fresh navigation: allow one more alert even if the last
+                // visit already showed it (see checkClipAlert)
+                root.clipAlertedThisVisit = false;
                 root.checkClipAlert();
+            }
         }
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
