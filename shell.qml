@@ -783,7 +783,7 @@ ShellRoot {
             // "tiles" is the grid picker; "windows" and "windows-flat" are
             // the horizontal carousel (see wallCarousel), the latter with
             // the backdrop parallax pan disabled
-            property string wallpaperStyle: "windows"
+            property string wallpaperStyle: "tiles"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -994,7 +994,7 @@ ShellRoot {
             saveSettings();
         }
         if (!["tiles", "windows", "windows-flat"].includes(cfg.wallpaperStyle)) {
-            cfg.wallpaperStyle = "windows";
+            cfg.wallpaperStyle = "tiles";
             saveSettings();
         }
     }
@@ -1743,7 +1743,7 @@ ShellRoot {
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                const tabs = ["general", "launcher", "grids", "flyouts"];
+                const tabs = ["general", "pages", "keybindings", "flyouts"];
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
@@ -3539,7 +3539,7 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property var tabOrder: ["general", "launcher", "grids", "flyouts"]
+                readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"]
                 readonly property int tabIdx: Math.max(0, tabOrder.indexOf(win.settingsTab))
                 anchors.centerIn: parent
                 width: 860
@@ -3582,8 +3582,8 @@ ShellRoot {
                         Repeater {
                             model: [
                                 { id: "general", label: "General" },
-                                { id: "launcher", label: "Launcher" },
-                                { id: "grids", label: "Grids" },
+                                { id: "pages", label: "Pages" },
+                                { id: "keybindings", label: "Keybindings" },
                                 { id: "flyouts", label: "Flyouts" }
                             ]
 
@@ -3631,7 +3631,7 @@ ShellRoot {
                     anchors.topMargin: 18
                     // constant height (tallest page): switching tabs never
                     // moves the pane, shorter pages stay top-aligned
-                    height: Math.max(genCol.height, settingsCol.height, gridsCol.height, flyCol.height)
+                    height: Math.max(genCol.height, settingsCol.height, keybindCol.height, flyCol.height)
 
                 // general tab: settings shared by the launcher and both flyouts
                 Column {
@@ -3642,6 +3642,7 @@ ShellRoot {
                     }
                     spacing: 14
 
+                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150 }
                     SettingRow { key: "iconTheme"; label: "Icon theme"; sub: "applies on next launch"; valueWidth: 260 }
                     SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 260 }
                     SettingRow { key: "fontScale"; label: "Font size" }
@@ -4014,6 +4015,68 @@ ShellRoot {
                         }
                     }
 
+                    // grid size: one visible tile grid, switchable between the
+                    // three pages that have a configurable grid size
+                    Item {
+                        width: 780
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Grid size"
+                        }
+                        SReset {
+                            key: root.gridTargets[win.gridTarget].resetKey
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34 + 32
+                            spacing: 24
+                            height: parent.height
+
+                            Repeater {
+                                model: ["apps", "walls", "clips"]
+
+                                Item {
+                                    id: gridTargetChip
+                                    required property string modelData
+                                    readonly property bool active: win.gridTarget === modelData
+                                    width: gridTargetText.implicitWidth
+                                    height: parent.height
+
+                                    Text {
+                                        id: gridTargetText
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.gridTargets[gridTargetChip.modelData].label
+                                        color: gridTargetChip.active ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(13) }
+                                    }
+                                    Rectangle {
+                                        anchors.top: gridTargetText.bottom
+                                        anchors.topMargin: 4
+                                        width: parent.width
+                                        height: 2
+                                        radius: 1
+                                        color: root.accent
+                                        opacity: gridTargetChip.active ? 1 : 0
+                                        Behavior on opacity {
+                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: win.gridTarget = gridTargetChip.modelData
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GridSizeTiles {
+                        target: win.gridTarget
+                    }
+
                     // clock-page layout: three stationary tickboxes (date,
                     // battery, weather). The grouping itself is fixed, not
                     // user-arranged: the clock always sits on its own line up
@@ -4091,7 +4154,6 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150 }
                     SettingRow { key: "animStyle"; label: "Tile animation" }
 
                     Repeater {
@@ -4238,7 +4300,17 @@ ShellRoot {
                         }
                     }
 
-                    // keybinds
+                }
+
+                // keybindings tab
+                Column {
+                    id: keybindCol
+                    x: 20 + (2 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                    }
+                    spacing: 14
+
                     Repeater {
                         model: [
                             { action: "cycle", label: "Cycle pages" },
@@ -4292,78 +4364,6 @@ ShellRoot {
                                 }
                             }
                         }
-                    }
-
-                }
-
-                // Grids tab: one visible tile grid, switchable between the
-                // three pages that have a configurable grid size
-                Column {
-                    id: gridsCol
-                    x: 20 + (2 - settingsPane.tabIdx) * 840
-                    Behavior on x {
-                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
-                    }
-                    spacing: 14
-
-                    Item {
-                        width: 780
-                        height: 34
-
-                        SLabel {
-                            anchors.left: parent.left
-                            text: "Grid size"
-                        }
-                        SReset {
-                            key: root.gridTargets[win.gridTarget].resetKey
-                            anchors.right: parent.right
-                        }
-                        Row {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 34 + 32
-                            spacing: 24
-                            height: parent.height
-
-                            Repeater {
-                                model: ["apps", "walls", "clips"]
-
-                                Item {
-                                    id: gridTargetChip
-                                    required property string modelData
-                                    readonly property bool active: win.gridTarget === modelData
-                                    width: gridTargetText.implicitWidth
-                                    height: parent.height
-
-                                    Text {
-                                        id: gridTargetText
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: root.gridTargets[gridTargetChip.modelData].label
-                                        color: gridTargetChip.active ? root.fg : root.muted
-                                        font { family: root.mono; pixelSize: root.fs(13) }
-                                    }
-                                    Rectangle {
-                                        anchors.top: gridTargetText.bottom
-                                        anchors.topMargin: 4
-                                        width: parent.width
-                                        height: 2
-                                        radius: 1
-                                        color: root.accent
-                                        opacity: gridTargetChip.active ? 1 : 0
-                                        Behavior on opacity {
-                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: win.gridTarget = gridTargetChip.modelData
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    GridSizeTiles {
-                        target: win.gridTarget
                     }
                 }
                 } // tabViewport
@@ -4652,7 +4652,7 @@ ShellRoot {
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
-            case "wallpaperStyle": cfg.wallpaperStyle = "windows"; break;
+            case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
