@@ -2825,6 +2825,16 @@ ShellRoot {
                         }
                     }
                 }
+
+                Text {
+                    visible: win.matches.length === 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 40
+                    text: root.allApps.length === 0 ? "no apps found" : "no matches"
+                    color: root.muted
+                    font { family: root.mono; pixelSize: root.fs(14) }
+                }
             }
 
             // Wallpaper selector
@@ -3231,6 +3241,17 @@ ShellRoot {
                 }
             }
 
+            // Wallpaper empty state: shared between the tiles grid and the
+            // windows carousel, since only one of them is ever visible.
+            Text {
+                visible: win.pane === "walls" && win.wallMatches.length === 0
+                anchors.centerIn: parent
+                transform: panePull
+                text: root.wallpapers.length === 0 ? "no wallpapers found" : "no matches"
+                color: root.muted
+                font { family: root.mono; pixelSize: root.fs(14) }
+            }
+
             // Clipboard history: masonry grid of variable-height tiles
             Item {
                 id: clipDrawer
@@ -3261,6 +3282,15 @@ ShellRoot {
                     anchors.top: parent.top
                     anchors.topMargin: 40
                     text: "clipboard history is empty"
+                    color: root.muted
+                    font { family: root.mono; pixelSize: root.fs(14) }
+                }
+                Text {
+                    visible: root.clips.length > 0 && win.clipMatches.length === 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 40
+                    text: "no matches"
                     color: root.muted
                     font { family: root.mono; pixelSize: root.fs(14) }
                 }
