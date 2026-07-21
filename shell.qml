@@ -798,7 +798,7 @@ ShellRoot {
             // whether the launcher asks the compositor to blur behind it at
             // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
             property bool bgBlur: true
-            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
+            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
             // flyouts (volume + notification OSDs); "alerts" gates every
             // notify-send pibble sends on its own behalf (errors, copy
             // confirmations) independent of whether other apps' notifications show
@@ -1536,6 +1536,9 @@ ShellRoot {
             powerArmed = false;
             powerDragging = false;
             powerRaw = 0;
+            rebootArmed = false;
+            rebootDragging = false;
+            rebootRaw = 0;
             // panes keep the opacity their last entry animation ended at;
             // reset them or the warm-up pass flashes them fully visible
             drawer.opacity = 0.004;
@@ -1700,14 +1703,16 @@ ShellRoot {
                 setPane("settings");
             }
         }
-        // ---------- swipe-to-power ----------
+        // ---------- swipe-to-power / swipe-to-reboot ----------
         // Dragging down on empty space pulls the pane content down (rubber
         // band) and reveals a ring that strokes itself closed as you drag,
         // like a swipe-to-refresh. Releasing with the ring complete (or the
         // power keybind) arms the "power off?" prompt; Enter then powers
-        // off, anything else (Escape, a click, another key) lets go.
+        // off, anything else (Escape, a click, another key) lets go. Dragging
+        // up does the same from the bottom edge, arming a "reboot?" prompt
+        // instead — same physics, opposite sign, mirrored geometry.
         property bool powerDragging: false
-        property real powerGrabY: 0
+        property real dragGrabY: 0
         property real powerRaw: 0 // raw downward drag distance (finger travel)
         property bool powerArmed: false
         readonly property real powerThreshold: 300
@@ -1738,6 +1743,34 @@ ShellRoot {
         }
         function powerOff() {
             Quickshell.execDetached(["systemctl", "poweroff"]);
+            exit();
+        }
+
+        property bool rebootDragging: false
+        property real rebootRaw: 0 // raw upward drag distance (finger travel)
+        property bool rebootArmed: false
+        readonly property real rebootThreshold: 300
+        readonly property real rebootProgress: Math.min(1, rebootRaw / rebootThreshold)
+        readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / 260))
+        Behavior on rebootRaw {
+            enabled: !win.rebootDragging
+            NumberAnimation { duration: win.ad(320); easing.type: Easing.OutCubic }
+        }
+        Timer {
+            interval: 6000
+            running: win.rebootArmed && !win.rebootDragging
+            onTriggered: win.disarmReboot()
+        }
+        function disarmReboot() {
+            rebootArmed = false;
+            rebootRaw = 0;
+        }
+        function playReboot() {
+            rebootArmed = true;
+            rebootRaw = rebootThreshold;
+        }
+        function rebootNow() {
+            Quickshell.execDetached(["systemctl", "reboot"]);
             exit();
         }
         function cyclePane(dir: int) {
@@ -2139,7 +2172,7 @@ ShellRoot {
         }
 
         // ---------- keybinds ----------
-        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P" })
+        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
         property string capturingBind: ""
         function keyName(event): string {
             const special = new Map([
@@ -2302,11 +2335,12 @@ ShellRoot {
                 }
             }
 
-            // the swipe-to-power rubber band, shared: every pane references
-            // this one instance, so the pull physics live in a single place
+            // the swipe-to-power/reboot rubber band, shared: every pane
+            // references this one instance, so the pull physics live in a
+            // single place. Power pulls content down, reboot pulls it up.
             Translate {
                 id: panePull
-                y: win.powerPull
+                y: win.powerPull - win.rebootPull
             }
 
             Rectangle {
@@ -2327,6 +2361,8 @@ ShellRoot {
                 onClicked: {
                     if (win.powerArmed)
                         win.disarmPower();
+                    else if (win.rebootArmed)
+                        win.disarmReboot();
                     else if (win.expandedClip)
                         win.collapseClip();
                     else
@@ -2344,10 +2380,12 @@ ShellRoot {
                     }
                 }
 
-                // swipe-to-power: a downward drag that starts on empty space
-                // (tile MouseAreas grab their own presses). Same scene-coords
-                // pattern as the notification swipe: the content moving under
-                // the cursor must not feed back into the drag.
+                // swipe-to-power/reboot: a vertical drag that starts on empty
+                // space (tile MouseAreas grab their own presses). Same
+                // scene-coords pattern as the notification swipe: the content
+                // moving under the cursor must not feed back into the drag.
+                // One signed delta drives both gestures: downward feeds
+                // powerRaw, upward feeds rebootRaw, the other stays at 0.
                 DragHandler {
                     target: null
                     xAxis.enabled: false
@@ -2355,9 +2393,11 @@ ShellRoot {
                     onActiveChanged: {
                         if (active) {
                             win.powerDragging = true;
-                            win.powerGrabY = centroid.scenePosition.y - win.powerRaw;
+                            win.rebootDragging = true;
+                            win.dragGrabY = centroid.scenePosition.y - win.powerRaw + win.rebootRaw;
                         } else {
                             win.powerDragging = false;
+                            win.rebootDragging = false;
                             if (win.powerProgress >= 1) {
                                 // hold the completed pose and wait for Enter
                                 win.powerArmed = true;
@@ -2365,11 +2405,20 @@ ShellRoot {
                             } else {
                                 win.disarmPower(); // springs back up
                             }
+                            if (win.rebootProgress >= 1) {
+                                win.rebootArmed = true;
+                                win.rebootRaw = win.rebootThreshold;
+                            } else {
+                                win.disarmReboot();
+                            }
                         }
                     }
                     onCentroidChanged: {
-                        if (active)
-                            win.powerRaw = Math.max(0, centroid.scenePosition.y - win.powerGrabY);
+                        if (active) {
+                            const delta = centroid.scenePosition.y - win.dragGrabY;
+                            win.powerRaw = Math.max(0, delta);
+                            win.rebootRaw = Math.max(0, -delta);
+                        }
                     }
                 }
             }
@@ -4318,6 +4367,7 @@ ShellRoot {
                             { action: "launch", label: "Launch / apply" },
                             { action: "settings", label: "Settings" },
                             { action: "power", label: "Power off prompt" },
+                            { action: "reboot", label: "Reboot prompt" },
                             { action: "exit", label: "Exit / back" }
                         ]
 
@@ -4369,14 +4419,15 @@ ShellRoot {
                 } // tabViewport
             }
 
-            // Swipe-to-power pull indicator: extra dim over the whole screen,
-            // and a small ring that rides down ahead of the pulled content,
-            // stroking itself closed as the drag progresses. On completion a
-            // "power off?" prompt fades in; Enter confirms.
+            // Swipe-to-power/reboot pull indicator: extra dim over the whole
+            // screen, and a small ring that rides ahead of the pulled
+            // content (down from the top for power, up from the bottom for
+            // reboot), stroking itself closed as the drag progresses. On
+            // completion a confirmation prompt fades in; Enter confirms.
             Rectangle {
                 anchors.fill: parent
                 color: "black"
-                opacity: 0.5 * win.powerProgress
+                opacity: 0.5 * Math.max(win.powerProgress, win.rebootProgress)
             }
             Item {
                 id: powerRing
@@ -4422,6 +4473,55 @@ ShellRoot {
                 // crawls through its last few percent, so waiting for exactly
                 // 1.0 reads as a long pause after the circle looks complete
                 opacity: win.powerProgress >= 0.85 ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
+                font { family: root.mono; pixelSize: root.fs(18); letterSpacing: 2 }
+            }
+
+            // reboot ring: mirror of powerRing, riding up from the bottom
+            // edge instead of down from the top.
+            Item {
+                id: rebootRing
+                visible: win.rebootRaw > 1
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: -height + win.rebootPull * 2.6 - 200 * win.rebootProgress
+                width: 36
+                height: 36
+                opacity: Math.min(1, win.rebootRaw / 80)
+
+                Canvas {
+                    id: rebootRingCanvas
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        ctx.reset();
+                        ctx.lineWidth = 3.6;
+                        ctx.lineCap = "round";
+                        ctx.strokeStyle = root.accent;
+                        ctx.beginPath();
+                        ctx.arc(width / 2, height / 2, 10, -Math.PI / 2,
+                            -Math.PI / 2 + Math.PI * 2 * win.rebootProgress, false);
+                        ctx.stroke();
+                    }
+                }
+                Connections {
+                    target: win
+                    function onRebootProgressChanged() {
+                        rebootRingCanvas.requestPaint();
+                    }
+                }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                // trails above the ring by the same gap powerText trails
+                // below powerRing, mirrored around the bottom edge
+                anchors.bottomMargin: win.rebootPull * 2.6 - 200 * win.rebootProgress + 12
+                text: "reboot?"
+                color: root.fg
+                opacity: win.rebootProgress >= 0.85 ? 1 : 0
                 Behavior on opacity {
                     NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
                 }
@@ -4705,6 +4805,18 @@ ShellRoot {
                         win.disarmPower();
                     return;
                 }
+                // armed reboot prompt: same confirm/cancel dance as power
+                if (win.rebootArmed) {
+                    event.accepted = true;
+                    if ([Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta].includes(event.key))
+                        return;
+                    const bare = ks.replace(/^(?:Ctrl\+|Alt\+|Shift\+)+/, "");
+                    if (bare === (kb.launch ?? "Return"))
+                        win.rebootNow();
+                    else
+                        win.disarmReboot();
+                    return;
+                }
                 if (ks === (kb.exit ?? "Escape")) {
                     // layered: expanded clip -> settings -> whole app
                     if (win.expandedClip)
@@ -4719,6 +4831,9 @@ ShellRoot {
                     event.accepted = true;
                 } else if (ks === (kb.power ?? "Ctrl+P")) {
                     win.playPower();
+                    event.accepted = true;
+                } else if (ks === (kb.reboot ?? "Ctrl+R")) {
+                    win.playReboot();
                     event.accepted = true;
                 } else if (ks === (kb.reverseCycle ?? "Shift+Tab")) {
                     win.cyclePane(-1);
