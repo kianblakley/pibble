@@ -515,6 +515,20 @@ ShellRoot {
 
     readonly property string defaultWallCommand: 'awww img --transition-type fade --transition-duration 1 "$WALL"'
 
+    // pages whose grid size is editable via the tile picker on the Grids
+    // settings tab, and the bounds adjustSetting()/the old ‹›-based rows
+    // enforced (kept in sync with those cases below)
+    readonly property var gridTargets: ({
+        apps: { label: "Apps", colsProp: "appsCols", rowsProp: "appsRows", minCols: 3, maxCols: 6, minRows: 2, maxRows: 6, resetKey: "appsGrid" },
+        walls: { label: "Wallpapers", colsProp: "wallsCols", rowsProp: "wallsRows", minCols: 2, maxCols: 4, minRows: 2, maxRows: 4, resetKey: "wallsGrid" },
+        clips: { label: "Clipboard", colsProp: "clipsCols", rowsProp: "clipsRows", minCols: 2, maxCols: 4, minRows: 2, maxRows: 4, resetKey: "clipsGrid" }
+    })
+    // largest cols/rows any target needs — the tile picker's canvas is
+    // always sized to this, so switching targets never resizes it; only
+    // which tiles are in bounds (and thus visible) changes
+    readonly property int gridPickerMaxCols: Math.max(...Object.values(root.gridTargets).map(t => t.maxCols))
+    readonly property int gridPickerMaxRows: Math.max(...Object.values(root.gridTargets).map(t => t.maxRows))
+
     component SReset: Rectangle {
         id: sreset
         property string key
@@ -534,6 +548,122 @@ ShellRoot {
             anchors.fill: parent
             hoverEnabled: true
             onClicked: win.resetSetting(sreset.key)
+        }
+    }
+
+    // visible grid-of-tiles size picker (Grids settings tab): hovering
+    // previews a cols×rows selection Excel-insert-table style, clicking
+    // commits it. `target` indexes root.gridTargets for which page's cfg
+    // cols/rows properties and bounds apply. The tile canvas is always laid
+    // out at root.gridPickerMaxCols × gridPickerMaxRows (the largest any
+    // target needs) so switching targets never resizes it — tiles outside
+    // the active target's bounds just pop out, and any that come back into
+    // bounds pop in, instead of the grid instantly snapping to a new shape.
+    component GridSizeTiles: Item {
+        id: gp
+        property string target: "apps"
+        readonly property var spec: root.gridTargets[gp.target]
+        readonly property int curCols: cfg[gp.spec.colsProp]
+        readonly property int curRows: cfg[gp.spec.rowsProp]
+        // >0 while hovered (a preview size); 0 falls back to the committed
+        // size. Reset on exit/target switch so the preview always reflects
+        // the grid actually under the mouse instead of a stale hover from
+        // before the mouse left or before switching pages.
+        property int hoverCols: 0
+        property int hoverRows: 0
+        onTargetChanged: {
+            gp.hoverCols = 0;
+            gp.hoverRows = 0;
+        }
+        readonly property int shownCols: gp.hoverCols > 0 ? gp.hoverCols : gp.curCols
+        readonly property int shownRows: gp.hoverRows > 0 ? gp.hoverRows : gp.curRows
+        readonly property int tileSize: 26
+        readonly property int tileGap: 6
+        readonly property int step: gp.tileSize + gp.tileGap
+        readonly property int gridW: root.gridPickerMaxCols * gp.tileSize + (root.gridPickerMaxCols - 1) * gp.tileGap
+        readonly property int gridH: root.gridPickerMaxRows * gp.tileSize + (root.gridPickerMaxRows - 1) * gp.tileGap
+        readonly property int activeW: gp.spec.maxCols * gp.tileSize + (gp.spec.maxCols - 1) * gp.tileGap
+        readonly property int activeH: gp.spec.maxRows * gp.tileSize + (gp.spec.maxRows - 1) * gp.tileGap
+        // the active target's grid sits centered within the fixed canvas,
+        // so a 4×4 target's tiles aren't stuck in the corner of a 6×6 canvas
+        readonly property int offsetX: Math.round((gp.gridW - gp.activeW) / 2)
+        readonly property int offsetY: Math.round((gp.gridH - gp.activeH) / 2)
+
+        width: 780
+        height: gp.gridH + 14 + sizeLabel.implicitHeight
+
+        Item {
+            id: tilesWrap
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: gp.gridW
+            height: gp.gridH
+
+            Repeater {
+                model: root.gridPickerMaxCols * root.gridPickerMaxRows
+
+                Rectangle {
+                    id: tile
+                    required property int index
+                    readonly property int col: index % root.gridPickerMaxCols
+                    readonly property int row: Math.floor(index / root.gridPickerMaxCols)
+                    // whether this tile exists at all for the active target
+                    // (drives the pop in/out on target switch)
+                    readonly property bool inBounds: tile.col < gp.spec.maxCols && tile.row < gp.spec.maxRows
+                    // live hover/click preview, Excel-insert-style — falls
+                    // back to the committed size when nothing is hovered
+                    readonly property bool previewed: tile.col < gp.shownCols && tile.row < gp.shownRows
+                    // the actually-saved size — always outlined, even while
+                    // a hover preview is filling in a different size
+                    readonly property bool committed: tile.col < gp.curCols && tile.row < gp.curRows
+                    x: gp.offsetX + tile.col * gp.step
+                    y: gp.offsetY + tile.row * gp.step
+                    width: gp.tileSize
+                    height: gp.tileSize
+                    radius: 5
+                    opacity: tile.inBounds ? 1 : 0
+                    scale: tile.inBounds ? 1 : 0
+                    color: tile.previewed ? Qt.alpha(root.accent, 0.35) : "transparent"
+                    border.width: tile.committed ? 2 : 1
+                    border.color: tile.committed ? root.accent : Qt.alpha(root.muted, 0.3)
+                    Behavior on x { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
+                    Behavior on y { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: 90 } }
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on opacity { NumberAnimation { duration: win.ad(180); easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutBack; easing.overshoot: 1.8 } }
+                }
+            }
+
+            MouseArea {
+                x: gp.offsetX
+                y: gp.offsetY
+                width: gp.activeW
+                height: gp.activeH
+                hoverEnabled: true
+                onPositionChanged: mouse => {
+                    gp.hoverCols = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
+                    gp.hoverRows = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                }
+                onExited: {
+                    gp.hoverCols = 0;
+                    gp.hoverRows = 0;
+                }
+                onClicked: mouse => {
+                    cfg[gp.spec.colsProp] = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
+                    cfg[gp.spec.rowsProp] = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                    root.saveSettings();
+                }
+            }
+        }
+
+        Text {
+            id: sizeLabel
+            anchors.top: tilesWrap.bottom
+            anchors.topMargin: 12
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: gp.shownCols + " × " + gp.shownRows
+            color: root.fg
+            font { family: root.mono; pixelSize: root.fs(13) }
         }
     }
 
@@ -1475,6 +1605,8 @@ ShellRoot {
         // settings remembers where it was opened from
         property string paneBeforeSettings: "clock"
         property string settingsTab: "general"
+        // which page's grid the tile picker on the Grids tab is editing
+        property string gridTarget: "apps"
         function toggleSettings() {
             if (pane === "settings") {
                 setPane(paneBeforeSettings);
@@ -1526,7 +1658,7 @@ ShellRoot {
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                const tabs = ["general", "launcher", "flyouts"];
+                const tabs = ["general", "launcher", "grids", "flyouts"];
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
@@ -3048,7 +3180,7 @@ ShellRoot {
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property var tabOrder: ["general", "launcher", "flyouts"]
+                readonly property var tabOrder: ["general", "launcher", "grids", "flyouts"]
                 readonly property int tabIdx: Math.max(0, tabOrder.indexOf(win.settingsTab))
                 anchors.centerIn: parent
                 width: 860
@@ -3092,6 +3224,7 @@ ShellRoot {
                             model: [
                                 { id: "general", label: "General" },
                                 { id: "launcher", label: "Launcher" },
+                                { id: "grids", label: "Grids" },
                                 { id: "flyouts", label: "Flyouts" }
                             ]
 
@@ -3139,7 +3272,7 @@ ShellRoot {
                     anchors.topMargin: 18
                     // constant height (tallest page): switching tabs never
                     // moves the pane, shorter pages stay top-aligned
-                    height: Math.max(genCol.height, settingsCol.height, flyCol.height)
+                    height: Math.max(genCol.height, settingsCol.height, gridsCol.height, flyCol.height)
 
                 // general tab: settings shared by the launcher and both flyouts
                 Column {
@@ -3290,7 +3423,7 @@ ShellRoot {
                 // flyouts tab: volume + notification OSDs
                 Column {
                     id: flyCol
-                    x: 20 + (2 - settingsPane.tabIdx) * 840
+                    x: 20 + (3 - settingsPane.tabIdx) * 840
                     Behavior on x {
                         NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
                     }
@@ -3604,9 +3737,6 @@ ShellRoot {
 
                     Repeater {
                         model: [
-                            { key: "appsGrid", label: "Apps grid" },
-                            { key: "wallsGrid", label: "Wallpaper grid" },
-                            { key: "clipsGrid", label: "Clipboard grid" },
                             { key: "clipsMax", label: "Clipboard entries" },
                             { key: "dimOpacity", label: "Background opacity" }
                         ]
@@ -3804,6 +3934,77 @@ ShellRoot {
                     }
 
                 }
+
+                // Grids tab: one visible tile grid, switchable between the
+                // three pages that have a configurable grid size
+                Column {
+                    id: gridsCol
+                    x: 20 + (2 - settingsPane.tabIdx) * 840
+                    Behavior on x {
+                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                    }
+                    spacing: 14
+
+                    Item {
+                        width: 780
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Grid size"
+                        }
+                        SReset {
+                            key: root.gridTargets[win.gridTarget].resetKey
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34 + 32
+                            spacing: 24
+                            height: parent.height
+
+                            Repeater {
+                                model: ["apps", "walls", "clips"]
+
+                                Item {
+                                    id: gridTargetChip
+                                    required property string modelData
+                                    readonly property bool active: win.gridTarget === modelData
+                                    width: gridTargetText.implicitWidth
+                                    height: parent.height
+
+                                    Text {
+                                        id: gridTargetText
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.gridTargets[gridTargetChip.modelData].label
+                                        color: gridTargetChip.active ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(13) }
+                                    }
+                                    Rectangle {
+                                        anchors.top: gridTargetText.bottom
+                                        anchors.topMargin: 4
+                                        width: parent.width
+                                        height: 2
+                                        radius: 1
+                                        color: root.accent
+                                        opacity: gridTargetChip.active ? 1 : 0
+                                        Behavior on opacity {
+                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: win.gridTarget = gridTargetChip.modelData
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GridSizeTiles {
+                        target: win.gridTarget
+                    }
+                }
                 } // tabViewport
             }
 
@@ -3925,9 +4126,6 @@ ShellRoot {
 
         function settingValue(key: string): string {
             switch (key) {
-            case "appsGrid": return cfg.appsCols + " × " + cfg.appsRows;
-            case "wallsGrid": return cfg.wallsCols + " × " + cfg.wallsRows;
-            case "clipsGrid": return cfg.clipsCols + " × " + clipRowsC;
             case "clipsMax": return "" + cfg.clipsMax;
             case "animStyle": return cfg.animStyle;
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
@@ -3956,34 +4154,6 @@ ShellRoot {
         }
         function adjustSetting(key: string, dir: int) {
             switch (key) {
-            case "appsGrid":
-                // sweep through cols within each row count
-                if (dir > 0) {
-                    if (cfg.appsCols < 6) cfg.appsCols++;
-                    else if (cfg.appsRows < 5) { cfg.appsRows++; cfg.appsCols = 3; }
-                } else {
-                    if (cfg.appsCols > 3) cfg.appsCols--;
-                    else if (cfg.appsRows > 2) { cfg.appsRows--; cfg.appsCols = 6; }
-                }
-                break;
-            case "wallsGrid":
-                if (dir > 0) {
-                    if (cfg.wallsCols < 4) cfg.wallsCols++;
-                    else if (cfg.wallsRows < 4) { cfg.wallsRows++; cfg.wallsCols = 2; }
-                } else {
-                    if (cfg.wallsCols > 2) cfg.wallsCols--;
-                    else if (cfg.wallsRows > 2) { cfg.wallsRows--; cfg.wallsCols = 4; }
-                }
-                break;
-            case "clipsGrid":
-                if (dir > 0) {
-                    if (cfg.clipsCols < 4) cfg.clipsCols++;
-                    else if (clipRowsC < 4) { cfg.clipsRows = clipRowsC + 1; cfg.clipsCols = 2; }
-                } else {
-                    if (cfg.clipsCols > 2) cfg.clipsCols--;
-                    else if (clipRowsC > 2) { cfg.clipsRows = clipRowsC - 1; cfg.clipsCols = 4; }
-                }
-                break;
             case "clipsMax":
                 cfg.clipsMax = Math.max(20, Math.min(200, cfg.clipsMax + dir * 20));
                 clipScan.running = false;
