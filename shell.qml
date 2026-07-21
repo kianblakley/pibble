@@ -921,6 +921,17 @@ ShellRoot {
         Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "dialog-error", summary, body]);
     }
 
+    // the two `wl-paste --watch` invocations cliphist needs to see both text
+    // and image copies; shared between the alert body and the flyout's
+    // tap-to-copy action (see the "Clipboard watcher not running" case in
+    // the notification flyout below) so they can never drift apart
+    readonly property string clipWatcherFixCommand: "wl-paste --type text --watch cliphist store\nwl-paste --type image --watch cliphist store"
+    function copyToClipboard(text: string): void {
+        Quickshell.clipboardText = text;
+        if (flyoutOn("alerts"))
+            Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "edit-copy", "Copied to clipboard", text]);
+    }
+
     // bundles version/build info, this run's recent log, and the latest
     // crash report for this shell (if any) into one blob for bug reports;
     // the clipboard write happens once debugInfoProc's stdout is collected
@@ -1323,7 +1334,9 @@ ShellRoot {
         if (!cliphistAvailable)
             notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
         else if (!clipWatcherRunning)
-            notifyError("Clipboard watcher not running", "wl-paste --watch cliphist store isn't running — clipboard history won't update.");
+            notifyError("Clipboard watcher not running",
+                "Nothing is piping clipboard changes into cliphist — clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
+                root.clipWatcherFixCommand + "\nTap to copy.");
     }
 
     Process {
@@ -6455,8 +6468,15 @@ ShellRoot {
                 TapHandler {
                     // a tap (not a drag) expands the clipped body
                     onTapped: {
-                        if (fcard.expandable || fcard.expanded)
-                            fcard.expanded = !fcard.expanded;
+                        if (fcard.expandable || fcard.expanded) {
+                            const wasExpanded = fcard.expanded;
+                            fcard.expanded = !wasExpanded;
+                            // expanding the "watcher not running" alert we
+                            // sent ourselves doubles as "copy the fix" — the
+                            // commands are the only actionable content in it
+                            if (!wasExpanded && flyWin.view.own && flyWin.view.summary === "Clipboard watcher not running")
+                                root.copyToClipboard(root.clipWatcherFixCommand);
+                        }
                     }
                 }
             }
