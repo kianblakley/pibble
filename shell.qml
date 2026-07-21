@@ -525,8 +525,11 @@ ShellRoot {
     })
     // largest cols/rows any target needs — the tile picker's canvas is
     // always sized to this, so switching targets never resizes it; only
-    // which tiles are in bounds (and thus visible) changes
-    readonly property int gridPickerMaxCols: Math.max(...Object.values(root.gridTargets).map(t => t.maxCols))
+    // which tiles are in bounds (and thus visible) changes. Cols is also
+    // floored at wallsBarSlots so the walls target's "windows" bar picker
+    // (see GridSizeTiles) always has a real tile column for every bar.
+    readonly property int wallsBarSlots: 9
+    readonly property int gridPickerMaxCols: Math.max(root.wallsBarSlots, ...Object.values(root.gridTargets).map(t => t.maxCols))
     readonly property int gridPickerMaxRows: Math.max(...Object.values(root.gridTargets).map(t => t.maxRows))
 
     component SReset: Rectangle {
@@ -559,24 +562,41 @@ ShellRoot {
     // target needs) so switching targets never resizes it — tiles outside
     // the active target's bounds just pop out, and any that come back into
     // bounds pop in, instead of the grid instantly snapping to a new shape.
+    // When the walls target is showing the "windows" carousel style, each
+    // bar is exactly the footprint a 1-wide × spec.maxRows-tall column of
+    // tiles already occupies (same col x, same offsetY, same width) — the
+    // row-0 tile of that column simply grows to cover the whole column
+    // height while rows 1..maxRows-1 beneath it shrink away, so the same
+    // Behaviors that already animate x/y/opacity/scale read as those tiles
+    // conjoining into one bar (and splitting back apart on the way out).
+    // Columns beyond wallsBarSlots, and rows past a bar's height in taller
+    // targets like apps, just pop in/out exactly as they do when switching
+    // targets — no separate animation path for them.
     component GridSizeTiles: Item {
         id: gp
         property string target: "apps"
         readonly property var spec: root.gridTargets[gp.target]
+        readonly property bool wallsBars: gp.target === "walls" && cfg.wallpaperStyle === "windows"
         readonly property int curCols: cfg[gp.spec.colsProp]
         readonly property int curRows: cfg[gp.spec.rowsProp]
+        readonly property int curVisible: cfg.wallsVisible
         // >0 while hovered (a preview size); 0 falls back to the committed
         // size. Reset on exit/target switch so the preview always reflects
         // the grid actually under the mouse instead of a stale hover from
         // before the mouse left or before switching pages.
         property int hoverCols: 0
         property int hoverRows: 0
-        onTargetChanged: {
+        property int hoverVisible: 0
+        onTargetChanged: gp.resetHover()
+        onWallsBarsChanged: gp.resetHover()
+        function resetHover() {
             gp.hoverCols = 0;
             gp.hoverRows = 0;
+            gp.hoverVisible = 0;
         }
         readonly property int shownCols: gp.hoverCols > 0 ? gp.hoverCols : gp.curCols
         readonly property int shownRows: gp.hoverRows > 0 ? gp.hoverRows : gp.curRows
+        readonly property int shownVisible: gp.hoverVisible > 0 ? gp.hoverVisible : gp.curVisible
         readonly property int tileSize: 26
         readonly property int tileGap: 6
         readonly property int step: gp.tileSize + gp.tileGap
@@ -588,6 +608,21 @@ ShellRoot {
         // so a 4×4 target's tiles aren't stuck in the corner of a 6×6 canvas
         readonly property int offsetX: Math.round((gp.gridW - gp.activeW) / 2)
         readonly property int offsetY: Math.round((gp.gridH - gp.activeH) / 2)
+
+        // bar-mode selection: root.wallsBarSlots columns (0..barCenter*2),
+        // always odd 3–9, symmetric around the center column. Bars use the
+        // walls spec's own column offset/step, not a separate layout, so a
+        // bar sits exactly where that column's tiles already sit.
+        readonly property int barSlots: root.wallsBarSlots
+        readonly property int barCenter: Math.floor(gp.barSlots / 2)
+        readonly property int barsOffsetX: Math.round((gp.gridW - (gp.barSlots * gp.step - gp.tileGap)) / 2)
+        function halfFor(n: int): int {
+            return Math.floor((n - 1) / 2);
+        }
+        function visibleForBar(idx: int): int {
+            const half = Math.max(1, Math.min(gp.halfFor(gp.barSlots), Math.abs(idx - gp.barCenter)));
+            return half * 2 + 1;
+        }
 
         width: 780
         height: gp.gridH + 14 + sizeLabel.implicitHeight
@@ -606,19 +641,39 @@ ShellRoot {
                     required property int index
                     readonly property int col: index % root.gridPickerMaxCols
                     readonly property int row: Math.floor(index / root.gridPickerMaxCols)
+                    readonly property int barDist: Math.abs(tile.col - gp.barCenter)
+                    // the tile that becomes a bar's visible body: row 0 of
+                    // any in-range column, stretched down over its column
+                    readonly property bool isBarBody: gp.wallsBars && tile.row === 0 && tile.col < gp.barSlots
+                    // the rest of that same column (rows 1..spec.maxRows-1):
+                    // these are what visibly conjoin — they slide up to the
+                    // bar's top edge while shrinking away, rather than
+                    // fading out in place like a tile that's simply out of
+                    // bounds (rows past spec.maxRows, e.g. the apps tab's
+                    // taller columns, still do exactly that)
+                    readonly property bool mergingIntoBar: gp.wallsBars && tile.col < gp.barSlots
+                        && tile.row > 0 && tile.row < gp.spec.maxRows
                     // whether this tile exists at all for the active target
-                    // (drives the pop in/out on target switch)
-                    readonly property bool inBounds: tile.col < gp.spec.maxCols && tile.row < gp.spec.maxRows
+                    // (drives the pop in/out on target switch, and — in bar
+                    // mode — the rest of a bar's column shrinking away
+                    // beneath the row-0 tile that grew to cover it)
+                    readonly property bool inBounds: gp.wallsBars
+                        ? tile.isBarBody
+                        : (tile.col < gp.spec.maxCols && tile.row < gp.spec.maxRows)
                     // live hover/click preview, Excel-insert-style — falls
                     // back to the committed size when nothing is hovered
-                    readonly property bool previewed: tile.col < gp.shownCols && tile.row < gp.shownRows
+                    readonly property bool previewed: gp.wallsBars
+                        ? tile.barDist <= gp.halfFor(gp.shownVisible)
+                        : (tile.col < gp.shownCols && tile.row < gp.shownRows)
                     // the actually-saved size — always outlined, even while
                     // a hover preview is filling in a different size
-                    readonly property bool committed: tile.col < gp.curCols && tile.row < gp.curRows
-                    x: gp.offsetX + tile.col * gp.step
-                    y: gp.offsetY + tile.row * gp.step
+                    readonly property bool committed: gp.wallsBars
+                        ? tile.barDist <= gp.halfFor(gp.curVisible)
+                        : (tile.col < gp.curCols && tile.row < gp.curRows)
+                    x: gp.wallsBars ? (gp.barsOffsetX + tile.col * gp.step) : (gp.offsetX + tile.col * gp.step)
+                    y: gp.offsetY + (tile.mergingIntoBar ? 0 : tile.row * gp.step)
                     width: gp.tileSize
-                    height: gp.tileSize
+                    height: tile.isBarBody ? gp.activeH : gp.tileSize
                     radius: 5
                     opacity: tile.inBounds ? 1 : 0
                     scale: tile.inBounds ? 1 : 0
@@ -627,6 +682,8 @@ ShellRoot {
                     border.color: tile.committed ? root.accent : Qt.alpha(root.muted, 0.3)
                     Behavior on x { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
                     Behavior on y { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
+                    Behavior on height { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
                     Behavior on border.color { ColorAnimation { duration: 90 } }
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Behavior on opacity { NumberAnimation { duration: win.ad(180); easing.type: Easing.OutCubic } }
@@ -635,22 +692,29 @@ ShellRoot {
             }
 
             MouseArea {
-                x: gp.offsetX
+                x: gp.wallsBars ? gp.barsOffsetX : gp.offsetX
                 y: gp.offsetY
-                width: gp.activeW
+                width: gp.wallsBars ? (gp.barSlots * gp.step - gp.tileGap) : gp.activeW
                 height: gp.activeH
                 hoverEnabled: true
                 onPositionChanged: mouse => {
-                    gp.hoverCols = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
-                    gp.hoverRows = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                    if (gp.wallsBars) {
+                        const idx = Math.max(0, Math.min(gp.barSlots - 1, Math.round(mouse.x / gp.step)));
+                        gp.hoverVisible = gp.visibleForBar(idx);
+                    } else {
+                        gp.hoverCols = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
+                        gp.hoverRows = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                    }
                 }
-                onExited: {
-                    gp.hoverCols = 0;
-                    gp.hoverRows = 0;
-                }
+                onExited: gp.resetHover()
                 onClicked: mouse => {
-                    cfg[gp.spec.colsProp] = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
-                    cfg[gp.spec.rowsProp] = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                    if (gp.wallsBars) {
+                        const idx = Math.max(0, Math.min(gp.barSlots - 1, Math.round(mouse.x / gp.step)));
+                        cfg.wallsVisible = gp.visibleForBar(idx);
+                    } else {
+                        cfg[gp.spec.colsProp] = Math.max(gp.spec.minCols, Math.min(gp.spec.maxCols, Math.floor(mouse.x / gp.step) + 1));
+                        cfg[gp.spec.rowsProp] = Math.max(gp.spec.minRows, Math.min(gp.spec.maxRows, Math.floor(mouse.y / gp.step) + 1));
+                    }
                     root.saveSettings();
                 }
             }
@@ -661,7 +725,7 @@ ShellRoot {
             anchors.top: tilesWrap.bottom
             anchors.topMargin: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            text: gp.shownCols + " × " + gp.shownRows
+            text: gp.wallsBars ? (gp.shownVisible + " visible") : (gp.shownCols + " × " + gp.shownRows)
             color: root.fg
             font { family: root.mono; pixelSize: root.fs(13) }
         }
@@ -697,7 +761,7 @@ ShellRoot {
             property int wallsCols: 3
             property int wallsRows: 3
             // bars visible in the "windows" carousel: the selected center
-            // plus equal wings, so always odd (healSettings clamps to 3–11)
+            // plus equal wings, so always odd (healSettings clamps to 3–9)
             property int wallsVisible: 7
             property int clipsCols: 4
             property int clipsRows: 4
@@ -896,10 +960,10 @@ ShellRoot {
             saveSettings();
         }
         // the windows carousel shows a selected center bar plus equal
-        // wings, so the visible count must be odd; clamp to 3–11 and
+        // wings, so the visible count must be odd; clamp to 3–9 and
         // round even hand-edited values down
-        if (cfg.wallsVisible < 3 || cfg.wallsVisible > 11 || cfg.wallsVisible % 2 === 0) {
-            cfg.wallsVisible = Math.max(3, Math.min(11,
+        if (cfg.wallsVisible < 3 || cfg.wallsVisible > 9 || cfg.wallsVisible % 2 === 0) {
+            cfg.wallsVisible = Math.max(3, Math.min(9,
                 cfg.wallsVisible % 2 === 0 ? cfg.wallsVisible - 1 : cfg.wallsVisible));
             saveSettings();
         }
@@ -3038,38 +3102,6 @@ ShellRoot {
                     }
                 }
 
-                // Selection frame: the selected wallpaper always eases into
-                // the center slot, so the highlight is a single static
-                // overlay — a per-cell border would hop between cells the
-                // instant rank crosses 0.5 mid-slide. Explicit z, because
-                // document order alone leaves it under the Repeater's
-                // delegates: the settled center cell coincides with this
-                // footprint exactly and its image wipes out the ring.
-                Item {
-                    x: (parent.width - wallCarousel.barWidth) / 2
-                    y: 0
-                    z: 10
-                    width: wallCarousel.barWidth
-                    height: wallCarousel.barHeight
-                    visible: win.wallMatches.length > 0
-
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: -5
-                        radius: 17
-                        color: "transparent"
-                        border.width: 3
-                        border.color: Qt.alpha(root.accent, 0.33)
-                    }
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 12
-                        color: "transparent"
-                        border.width: 1
-                        border.color: root.accent
-                    }
-                }
-
                 Text {
                     anchors.top: parent.top
                     anchors.topMargin: wallCarousel.barHeight + wallCarousel.captionGap
@@ -4576,7 +4608,7 @@ ShellRoot {
                 cfg.clockShow = ({ date: true, battery: true, weather: true });
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
-            case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; break;
+            case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; cfg.wallsVisible = 7; break;
             case "clipsGrid": cfg.clipsCols = 4; cfg.clipsRows = 4; break;
             case "clipsMax":
                 cfg.clipsMax = 100;
