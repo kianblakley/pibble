@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # App-launcher shell daemon control.
-#   pibble          start the persistent daemon (for spawn-at-startup)
-#   pibble toggle   show/hide the launcher window (for the keybind),
-#                   starting the daemon first if it isn't running
+#   pibble start     start the persistent daemon (for spawn-at-startup)
+#   pibble stop      stop the daemon
+#   pibble restart   stop, then start
+#   pibble toggle    show/hide the launcher window (for the keybind),
+#                    starting the daemon first if it isn't running
+#   pibble replay    re-fire the last few notifications as a stacked burst
+#                    (see "Replay count" in flyout settings)
+#   pibble help      show this message (also what a bare `pibble` does)
 repo="$(dirname "$(readlink -f "$0")")"
 
 # Qt can't switch icon themes at runtime, so quickshell reads QS_ICON_THEME
@@ -26,15 +31,58 @@ export_icon_theme() {
 ipc() {
     qs -p "$repo" ipc -n call launcher "$1" 2>/dev/null
 }
+running_pids() {
+    pgrep -f "^qs -p $repo\$"
+}
 reap_duplicates() {
-    mapfile -t pids < <(pgrep -f "^qs -p $repo\$" | sort -n)
+    mapfile -t pids < <(running_pids | sort -n)
     while [ "${#pids[@]}" -gt 1 ]; do
         kill "${pids[0]}" 2>/dev/null
         pids=("${pids[@]:1}")
     done
 }
+stop_daemon() {
+    reap_duplicates
+    pids=$(running_pids)
+    [ -n "$pids" ] && kill $pids
+}
+
+usage() {
+    cat <<'USAGE'
+pibble — desktop shell daemon control
+
+Usage: pibble <command>
+
+Commands:
+  start     start the persistent daemon (for spawn-at-startup)
+  stop      stop the daemon
+  restart   stop, then start the daemon
+  toggle    show/hide the launcher window, starting the daemon first if needed
+  replay    re-fire the last few notifications as a stacked burst
+  help      show this message (also what a bare `pibble` does)
+USAGE
+}
 
 case "$1" in
+start)
+    # never start a second daemon
+    running_pids >/dev/null && exit 0
+    export_icon_theme
+    exec qs -p "$repo"
+    ;;
+stop)
+    stop_daemon
+    exit 0
+    ;;
+restart)
+    stop_daemon
+    for _ in $(seq 1 50); do
+        running_pids >/dev/null || break
+        sleep 0.1
+    done
+    export_icon_theme
+    setsid -f qs -p "$repo" >/dev/null 2>&1
+    ;;
 toggle)
     reap_duplicates
     ipc toggle && exit 0
@@ -47,10 +95,18 @@ toggle)
     done
     exit 1
     ;;
+replay)
+    reap_duplicates
+    ipc replay && exit 0
+    echo "pibble: daemon not running — run 'pibble start' first" >&2
+    exit 1
+    ;;
+help | "")
+    usage
+    ;;
 *)
-    # never start a second daemon
-    pgrep -f "^qs -p $repo\$" >/dev/null && exit 0
-    export_icon_theme
-    exec qs -p "$repo"
+    echo "pibble: unknown command '$1'" >&2
+    usage >&2
+    exit 1
     ;;
 esac

@@ -61,7 +61,7 @@ cd pibble
 **3. Start the daemon**
 
 ```sh
-./pibble
+./pibble start
 ```
 
 **4. Toggle the launcher**
@@ -70,12 +70,15 @@ cd pibble
 ./pibble toggle
 ```
 
+Run `./pibble help` (or `./pibble` with no arguments) for the full command list — `start` / `stop` / `restart` the daemon, `toggle` the launcher, and `replay` to re-fire the last few notifications.
+
 ## Core Keybindings
 
 | Key | Action |
 |---|---|
 | `Tab` | Navigate pages |
 | `Ctrl+P` (or swipe down) | Reveal power button |
+| `Ctrl+R` (or swipe up) | Reveal reboot button |
 | `Ctrl+S` | Open settings |
 | `Escape` | Close the launcher |
 

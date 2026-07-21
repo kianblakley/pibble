@@ -854,6 +854,9 @@ ShellRoot {
             // "pop" = the bubble/card pop-in and stagger animation, "none"
             // disables all notification entry/exit animation
             property string notifAnim: "pop"
+            // how many of the most recent cached notifications `pibble
+            // replay` re-fires (see notifCache below); 1-5
+            property int replayCount: 1
             // clock-page weather readout (wttr.in); empty location auto-detects by IP
             property bool weatherEnabled: true
             property string weatherLocation: ""
@@ -864,6 +867,42 @@ ShellRoot {
     }
     function saveSettings() {
         settingsStore.writeAdapter();
+    }
+
+    // ---------- notification cache (pibble replay) ----------
+    // The last 5 notifications pibble has shown, most recent first, kept on
+    // disk so `pibble replay` (a plain CLI invocation, no QML state of its
+    // own) can ask the running daemon to re-fire the last cfg.replayCount of
+    // them via IPC. Capped at 5 unconditionally — cfg.replayCount only
+    // trims how many of the cached 5 actually get replayed.
+    FileView {
+        id: notifCacheStore
+        path: Quickshell.statePath("notif-cache.json")
+        blockLoading: true
+        printErrors: false
+        watchChanges: true
+        onFileChanged: reload()
+
+        JsonAdapter {
+            id: notifCache
+            property var items: []
+        }
+    }
+    function cacheNotification(n): void {
+        const entry = {
+            app: String(n.appName ?? "") || String(n.desktopEntry ?? "") || "notification",
+            icon: String(n.appIcon ?? ""),
+            summary: String(n.summary ?? ""),
+            body: String(n.body ?? "")
+        };
+        notifCache.items = [entry].concat(notifCache.items).slice(0, 5);
+        notifCacheStore.writeAdapter();
+    }
+    function replayNotifications(): void {
+        const n = Math.max(1, Math.min(5, cfg.replayCount));
+        const items = notifCache.items.slice(0, n);
+        if (items.length && flyNotifLoader.item)
+            flyNotifLoader.item.showReplay(items);
     }
 
     // ---------- theme ----------
@@ -1017,6 +1056,10 @@ ShellRoot {
         if (cfg.wallsVisible < 3 || cfg.wallsVisible > 9 || cfg.wallsVisible % 2 === 0) {
             cfg.wallsVisible = Math.max(3, Math.min(9,
                 cfg.wallsVisible % 2 === 0 ? cfg.wallsVisible - 1 : cfg.wallsVisible));
+            saveSettings();
+        }
+        if (cfg.replayCount < 1 || cfg.replayCount > 5) {
+            cfg.replayCount = Math.max(1, Math.min(5, cfg.replayCount));
             saveSettings();
         }
         // One-time migrations, keyed strictly on values only old configs
@@ -1225,6 +1268,12 @@ ShellRoot {
         function close(): void {
             if (win.shown)
                 win.exit();
+        }
+        // `pibble replay`: re-fires the last cfg.replayCount cached
+        // notifications as a stacked burst, independent of whether the
+        // launcher window itself is open
+        function replay(): void {
+            root.replayNotifications();
         }
     }
 
@@ -4082,6 +4131,7 @@ ShellRoot {
                     SettingRow { key: "notifStyle"; label: "Notification style" }
                     SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
+                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` re-fires" }
                 }
 
                 Column {
@@ -4779,6 +4829,7 @@ ShellRoot {
             case "volPercent": return cfg.volShowPercent ? "on" : "off";
             case "volTimeout": return (cfg.volTimeout / 1000).toFixed(0) + " s";
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
+            case "replayCount": return "" + cfg.replayCount;
             case "notifStyle": return cfg.notifStyle;
             case "notifAnim": return cfg.notifAnim;
             case "wallpaperStyle": return cfg.wallpaperStyle === "windows-flat" ? "windows no parallax" : cfg.wallpaperStyle;
@@ -4851,6 +4902,9 @@ ShellRoot {
                 break;
             case "notifTimeout":
                 cfg.notifTimeout = Math.max(1000, Math.min(15000, cfg.notifTimeout + dir * 1000));
+                break;
+            case "replayCount":
+                cfg.replayCount = Math.max(1, Math.min(5, cfg.replayCount + dir));
                 break;
             case "notifStyle":
                 cfg.notifStyle = cycleChoice(cfg.notifStyle, ["bubble", "pill"], dir);
@@ -4928,6 +4982,7 @@ ShellRoot {
             case "volPercent": cfg.volShowPercent = true; break;
             case "volTimeout": cfg.volTimeout = 2000; break;
             case "notifTimeout": cfg.notifTimeout = 5000; break;
+            case "replayCount": cfg.replayCount = 1; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
             case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
@@ -5533,6 +5588,7 @@ ShellRoot {
             imageSupported: true
             onNotification: n => {
                 n.tracked = true;
+                root.cacheNotification(n);
                 flyNotifLoader.item?.accept(n);
             }
         }
@@ -5578,7 +5634,25 @@ ShellRoot {
                 ColorAnimation { duration: 220 }
             }
 
-            visible: phase !== "hidden"
+            // ---------- replay burst (pibble replay) ----------
+            // Unlike a live arrival (queued, one card at a time), a replay
+            // fires every requested card together, stacked under one
+            // another — the point is showing what was missed at a glance,
+            // not re-running the arrival choreography.
+            property var replayItems: []
+            property bool replayShown: false
+            function showReplay(items) {
+                replayItems = items;
+                replayShown = true;
+                replayTimer.restart();
+            }
+            Timer {
+                id: replayTimer
+                interval: cfg.notifTimeout
+                onTriggered: flyWin.replayShown = false
+            }
+
+            visible: phase !== "hidden" || replayShown
             anchors.top: true
             anchors.right: true
             // fixed size: everything animates inside (see the OSD architecture
@@ -6136,6 +6210,88 @@ ShellRoot {
                 id: wipeAnim
                 PauseAnimation { duration: flyWin.noAnim ? 0 : 100 }
                 NumberAnimation { target: fcard; property: "imgWipe"; from: 0; to: 1; duration: flyWin.noAnim ? 0 : 500; easing.type: Easing.OutQuint }
+            }
+
+            // ── replay burst ──
+            Column {
+                id: replayColumn
+                visible: flyWin.replayShown
+                opacity: flyWin.replayShown ? 1 : 0
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 16
+                spacing: 10
+                Behavior on opacity {
+                    NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                }
+
+                Repeater {
+                    model: flyWin.replayItems
+
+                    Rectangle {
+                        id: replayCard
+                        required property var modelData
+                        width: 360
+                        height: replayBody.visible ? 78 : 54
+                        radius: 14
+                        color: Qt.alpha(root.notifTh.fg, 0.06)
+                        border.width: 1
+                        border.color: Qt.alpha(flyWin.nColor, 0.35)
+
+                        Rectangle {
+                            width: 36
+                            height: 36
+                            radius: 10
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.margins: 9
+                            color: Qt.alpha(flyWin.nColor, 0.18)
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.notifGlyph(replayCard.modelData.icon, replayCard.modelData.summary)
+                                color: flyWin.nColor
+                                font { family: root.tablerFont; pixelSize: 16 }
+                            }
+                        }
+                        Text {
+                            id: replayApp
+                            anchors.left: parent.left
+                            anchors.leftMargin: 54
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            anchors.top: parent.top
+                            anchors.topMargin: 10
+                            text: replayCard.modelData.app + "  ·  " + replayCard.modelData.summary
+                            elide: Text.ElideRight
+                            color: root.notifTh.fg
+                            font { family: root.mono; pixelSize: root.flyFs(12); bold: true }
+                        }
+                        Text {
+                            id: replayBody
+                            visible: replayCard.modelData.body !== ""
+                            anchors.left: parent.left
+                            anchors.leftMargin: 54
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            anchors.top: replayApp.bottom
+                            anchors.topMargin: 4
+                            maximumLineCount: 2
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideRight
+                            text: replayCard.modelData.body
+                            color: root.notifTh.muted
+                            font { family: root.mono; pixelSize: root.flyFs(11) }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                flyWin.replayItems = flyWin.replayItems.filter(x => x !== replayCard.modelData);
+                                if (flyWin.replayItems.length === 0)
+                                    flyWin.replayShown = false;
+                            }
+                        }
+                    }
+                }
             }
 
             // ── card ──
