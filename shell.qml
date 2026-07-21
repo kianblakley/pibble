@@ -1497,6 +1497,33 @@ ShellRoot {
     // always icon + percentage, charging or not
     readonly property string batteryText: root.batteryPresent ? Math.round(root.battDevice.percentage * 100) + "%" : ""
 
+    // fires once per discharge dip below 5%, not once per tick; re-arms once
+    // the level recovers with some headroom (plugging in, or just climbing
+    // back past the boundary) so it can't flap right at the threshold
+    property bool lowBatteryAlerted: false
+    function checkLowBattery() {
+        if (!root.batteryPresent || root.batteryCharging) {
+            lowBatteryAlerted = false;
+            return;
+        }
+        const pct = root.battDevice.percentage * 100;
+        if (pct <= 5) {
+            if (!lowBatteryAlerted) {
+                lowBatteryAlerted = true;
+                if (flyoutOn("alerts"))
+                    Quickshell.execDetached(["notify-send", "-a", "launcher", "-u", "critical",
+                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining — plug in soon."]);
+            }
+        } else if (pct > 8) {
+            lowBatteryAlerted = false;
+        }
+    }
+    Connections {
+        target: root.battDevice
+        function onPercentageChanged() { root.checkLowBattery(); }
+        function onStateChanged() { root.checkLowBattery(); }
+    }
+
     PanelWindow {
         id: win
 
