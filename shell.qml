@@ -696,6 +696,9 @@ ShellRoot {
             property int appsRows: 3
             property int wallsCols: 3
             property int wallsRows: 3
+            // bars visible in the "windows" carousel: the selected center
+            // plus equal wings, so always odd (healSettings clamps to 3–11)
+            property int wallsVisible: 7
             property int clipsCols: 4
             property int clipsRows: 4
             property int clipsMax: 100
@@ -713,6 +716,9 @@ ShellRoot {
             property string customAccent: "#cfcfcf"
             property string customFg: "#f0f0f0"
             property string customMuted: "#8a8a8a"
+            // "tiles" is the grid picker; "windows" is a horizontal parallax
+            // carousel (see wallCarousel)
+            property string wallpaperStyle: "tiles"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -889,6 +895,14 @@ ShellRoot {
             cfg.clipsRows = Math.max(2, Math.min(4, cfg.clipsRows));
             saveSettings();
         }
+        // the windows carousel shows a selected center bar plus equal
+        // wings, so the visible count must be odd; clamp to 3–11 and
+        // round even hand-edited values down
+        if (cfg.wallsVisible < 3 || cfg.wallsVisible > 11 || cfg.wallsVisible % 2 === 0) {
+            cfg.wallsVisible = Math.max(3, Math.min(11,
+                cfg.wallsVisible % 2 === 0 ? cfg.wallsVisible - 1 : cfg.wallsVisible));
+            saveSettings();
+        }
         // One-time migrations, keyed strictly on values only old configs
         // can contain — every branch must be a no-op on a fresh or healed
         // config, because this also runs if a load ever surfaces adapter
@@ -912,6 +926,10 @@ ShellRoot {
         // fall back to the default so a theme always shows as selected
         if (cfg.theme === "mono") {
             cfg.theme = "matugen";
+            saveSettings();
+        }
+        if (cfg.wallpaperStyle !== "tiles" && cfg.wallpaperStyle !== "windows") {
+            cfg.wallpaperStyle = "tiles";
             saveSettings();
         }
     }
@@ -1448,6 +1466,7 @@ ShellRoot {
             settingsTab = "general";
             selected = 0;
             wallSelected = 0;
+            wallCarouselStep = 0;
             clipSelected = 0;
             powerArmed = false;
             powerDragging = false;
@@ -1456,6 +1475,7 @@ ShellRoot {
             // reset them or the warm-up pass flashes them fully visible
             drawer.opacity = 0.004;
             wallDrawer.opacity = 0.004;
+            wallCarousel.opacity = 0.004;
             clipDrawer.opacity = 0.004;
             settingsPane.opacity = 0.004;
         }
@@ -1710,9 +1730,32 @@ ShellRoot {
             return scored.map(x => x.w);
         }
         property int wallSelected: 0
-        onWallMatchesChanged: wallSelected = 0
+        onWallMatchesChanged: {
+            wallSelected = 0;
+            wallCarouselStep = 0;
+        }
         readonly property int wallPageSize: cfg.wallsCols * cfg.wallsRows
         readonly property int wallPage: wallPageSize > 0 ? Math.floor(wallSelected / wallPageSize) : 0
+
+        // ---------- wallpaper carousel ("windows" style) ----------
+        // Unbounded step counter driving the carousel's animated position:
+        // it only ever moves by ±1 per navigation (never wraps), so a
+        // Behavior on wallCarouselAnim always eases in the direction the
+        // user actually scrolled, even when wallSelected itself wraps
+        // around the end of the list. wallSelected stays the authoritative
+        // bounded index (what applyWallpaper()/activate() read).
+        property int wallCarouselStep: 0
+        property real wallCarouselAnim: wallCarouselStep
+        Behavior on wallCarouselAnim {
+            NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
+        }
+        function moveCarousel(dir: int) {
+            const count = wallMatches.length;
+            if (!count)
+                return;
+            wallSelected = ((wallSelected + dir) % count + count) % count;
+            wallCarouselStep += dir;
+        }
 
         property var clipMatches: {
             const q = input.text.toLowerCase().trim();
@@ -1791,11 +1834,15 @@ ShellRoot {
                 pageStagger(appPageSize, selected, next);
                 selected = next;
             } else if (pane === "walls") {
-                const next = dy !== 0
-                    ? vMove(wallSelected, wallMatches.length, cfg.wallsCols, cfg.wallsRows, dy)
-                    : hMove(wallSelected, wallMatches.length, dx);
-                pageStagger(wallPageSize, wallSelected, next);
-                wallSelected = next;
+                if (cfg.wallpaperStyle === "windows") {
+                    moveCarousel(dy !== 0 ? dy : dx);
+                } else {
+                    const next = dy !== 0
+                        ? vMove(wallSelected, wallMatches.length, cfg.wallsCols, cfg.wallsRows, dy)
+                        : hMove(wallSelected, wallMatches.length, dx);
+                    pageStagger(wallPageSize, wallSelected, next);
+                    wallSelected = next;
+                }
             } else if (pane === "clips") {
                 const next = dy !== 0
                     ? vMove(clipSelected, clipMatches.length, cfg.clipsCols, clipRowsC, dy)
@@ -2621,11 +2668,12 @@ ShellRoot {
                 opacity: 0.004
                 // during warm-up, show the pane only after all thumbnail
                 // textures are uploaded, so its first frame reuses them
-                visible: win.pane === "walls" || (win.warmingWalls && win.wallWarmTick > root.wallpapers.length)
+                visible: cfg.wallpaperStyle === "tiles"
+                    && (win.pane === "walls" || (win.warmingWalls && win.wallWarmTick > root.wallpapers.length))
                 Connections {
                     target: win
                     function onPaneChanged() {
-                        if (win.pane === "walls")
+                        if (win.pane === "walls" && cfg.wallpaperStyle === "tiles")
                             wallIn.restart();
                     }
                 }
@@ -2765,6 +2813,276 @@ ShellRoot {
                             }
                         }
                     }
+                }
+            }
+
+            // Wallpaper selector — "windows" style: an infinite horizontal
+            // carousel of narrow parallax "windows", the selected wallpaper
+            // always centered (see cfg.wallpaperStyle, win.moveCarousel()).
+            Item {
+                id: wallCarousel
+                anchors.centerIn: parent
+                // slots actually shown; delegates beyond that (up to
+                // restSpan) sit pre-positioned but faded out, ready to slide
+                // into view without popping in from nowhere
+                readonly property int halfVisible: Math.floor((cfg.wallsVisible - 1) / 2)
+                readonly property int bufferSlots: 2
+                readonly property int restSpan: halfVisible + bufferSlots
+                readonly property int totalSlots: 2 * restSpan + 1
+                // A count change strands the Repeater's surviving delegates:
+                // their absStep was imperatively relabeled by rebalance()
+                // (congruent mod the *old* totalSlots), and freshly added
+                // ones init assuming step 0 — so rebuild the whole
+                // contiguous window around the current selection, keeping
+                // wallCarouselStep congruent with wallSelected. callLater
+                // lets the Repeater finish adding/removing delegates first;
+                // the carousel is hidden while the settings pane is open,
+                // so the relayout is never seen.
+                onTotalSlotsChanged: Qt.callLater(() => {
+                    win.wallCarouselStep = win.wallSelected;
+                    for (let i = 0; i < wcRepeater.count; i++) {
+                        const c = wcRepeater.itemAt(i);
+                        if (c)
+                            c.absStep = win.wallSelected + i - restSpan;
+                    }
+                })
+                readonly property int barWidth: 170
+                readonly property int barHeight: 480
+                readonly property int slotSpacing: 205
+                readonly property real parallaxPx: 75
+                readonly property int captionGap: 14
+                width: (2 * halfVisible + 1) * slotSpacing
+                height: barHeight + captionGap + 22
+                transform: panePull
+                opacity: 0.004
+                visible: cfg.wallpaperStyle === "windows" && win.pane === "walls"
+
+                Connections {
+                    target: win
+                    function onPaneChanged() {
+                        if (win.pane === "walls" && cfg.wallpaperStyle === "windows")
+                            carouselIn.restart();
+                    }
+                }
+
+                ParallelAnimation {
+                    id: carouselIn
+                    NumberAnimation { target: wallCarousel; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: wallCarousel; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: wallCarousel; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                }
+
+                Repeater {
+                    id: wcRepeater
+                    // fixed count: delegate identity (and its absStep) must
+                    // stay stable across steps so the strip visibly slides
+                    // instead of the content teleporting into static slots
+                    model: wallCarousel.totalSlots
+
+                    Item {
+                        id: wcCell
+                        required property int index
+                        property int absStep: index - wallCarousel.restSpan
+                        readonly property real rank: absStep - win.wallCarouselAnim
+                        readonly property int count: win.wallMatches.length
+                        readonly property int wallIndex: count > 0 ? ((absStep % count) + count) % count : -1
+                        readonly property var wall: wallIndex >= 0 ? win.wallMatches[wallIndex] : null
+                        readonly property bool isCenter: wallIndex >= 0 && wallIndex === win.wallSelected && Math.abs(rank) < 0.5
+                        // left-to-right visual slot, for the same wave/slide
+                        // stagger the tile grids use (see win.animDelay)
+                        readonly property int visSlot: Math.max(0, Math.min(wallCarousel.halfVisible * 2,
+                            Math.round(rank) + wallCarousel.halfVisible))
+
+                        // once a cell has drifted a full step past the resting
+                        // buffer, relabel it to the opposite edge (±totalSlots
+                        // keeps it congruent mod the ring) — by then it's
+                        // faded to 0 opacity, so the relabel is invisible
+                        function rebalance() {
+                            while (absStep - win.wallCarouselAnim > wallCarousel.restSpan + 1)
+                                absStep -= wallCarousel.totalSlots;
+                            while (absStep - win.wallCarouselAnim < -(wallCarousel.restSpan + 1))
+                                absStep += wallCarousel.totalSlots;
+                        }
+                        Connections {
+                            target: win
+                            function onWallCarouselAnimChanged() { wcCell.rebalance(); }
+                            function onWallMatchesChanged() {
+                                wcCell.absStep = wcCell.index - wallCarousel.restSpan;
+                            }
+                        }
+
+                        x: parent.width / 2 - width / 2 + rank * wallCarousel.slotSpacing
+                        y: 0
+                        width: wallCarousel.barWidth
+                        height: wallCarousel.barHeight
+                        z: -Math.abs(rank)
+                        // continuous in rank (exactly 1 at rank 0) — an
+                        // isCenter branch here would snap scale mid-slide
+                        // the moment rank crosses 0.5
+                        scale: Math.max(0.82, 1 - Math.abs(rank) * 0.05)
+                        opacity: wall === null ? 0 : Math.max(0, Math.min(1, wallCarousel.halfVisible + 1 - Math.abs(rank)))
+
+                        // entrance/exit spring for this window's content,
+                        // replayed whenever filtering changes which wallpaper
+                        // it shows — same wave/pop/fade/slide/none language
+                        // (cfg.animStyle) and stagger the tile grids use
+                        property var shownWall: null
+                        property bool filled: false
+                        onWallChanged: {
+                            if (wall) {
+                                const isNew = !filled || !shownWall || shownWall.path !== wall.path;
+                                shownWall = wall;
+                                filled = true;
+                                if (isNew) {
+                                    wcSpringOut.stop();
+                                    wcSpringIn.restart();
+                                }
+                            } else if (filled) {
+                                filled = false;
+                                wcSpringIn.stop();
+                                wcSpringOut.restart();
+                            }
+                        }
+
+                        Item {
+                            id: wcWrap
+                            anchors.fill: parent
+                            opacity: 0
+
+                            ClippingRectangle {
+                                id: wcThumb
+                                anchors.fill: parent
+                                radius: 12
+                                color: Qt.alpha(root.accent, 0.08)
+
+                                Image {
+                                    // wider than the bar and panned opposite the
+                                    // scroll direction, so each window reads as
+                                    // a fixed frame onto a slowly-drifting
+                                    // backdrop. The pan is driven by the cell's
+                                    // rank — bounded, unlike wallCarouselAnim,
+                                    // whose unbounded growth would slide the
+                                    // backdrop out of the frame after a few
+                                    // steps in one direction — and the image is
+                                    // wide enough to cover the whole fade range
+                                    // (|rank| <= halfVisible + 1; past that the
+                                    // cell is fully transparent, so further
+                                    // overshoot is invisible). The full-res
+                                    // source (not the 480x270 tile thumbnail,
+                                    // which is already cropped tight to a
+                                    // landscape frame and has no spare width to
+                                    // pan through) decoded at bar height keeps
+                                    // the pan free of seams.
+                                    width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
+                                    height: parent.height
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    x: (parent.width - width) / 2 - wcCell.rank * wallCarousel.parallaxPx
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                    sourceSize: Qt.size(0, wallCarousel.barHeight)
+                                    source: wcCell.wall ? "file://" + wcCell.wall.path : ""
+                                }
+                            }
+                            // Stroke above the image, not a border on wcThumb:
+                            // settled cells rest on half-pixel x (parent
+                            // width is an odd multiple of slotSpacing) and
+                            // side cells have fractional edges from the rank
+                            // scale, so the clip mask and an underlying
+                            // border rasterize a pixel apart — the image eats
+                            // the right/bottom stroke and roughens the
+                            // corners (same image-over-border effect the
+                            // selection frame's z comment describes).
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 12
+                                color: "transparent"
+                                border.width: 1
+                                border.color: Qt.alpha(root.accent, 0.33)
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: wcCell.wall !== null
+                                onClicked: {
+                                    if (wcCell.isCenter)
+                                        win.applyWallpaper(wcCell.wall);
+                                    else
+                                        win.moveCarousel(Math.round(wcCell.rank));
+                                }
+                            }
+                        }
+
+                        SequentialAnimation {
+                            id: wcSpringIn
+                            PropertyAction { target: wcWrap; property: "opacity"; value: 0 }
+                            PropertyAction { target: wcWrap; property: "scale"; value: win.animFromScale }
+                            PropertyAction { target: wcWrap; property: "y"; value: win.animFromY }
+                            PauseAnimation { duration: win.animDelay(wcCell.visSlot, wallCarousel.halfVisible * 2 + 1) }
+                            ParallelAnimation {
+                                NumberAnimation { target: wcWrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
+                                NumberAnimation { target: wcWrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                                NumberAnimation { target: wcWrap; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                            }
+                        }
+                        SequentialAnimation {
+                            id: wcSpringOut
+                            ParallelAnimation {
+                                NumberAnimation { target: wcWrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                NumberAnimation { target: wcWrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
+                            }
+                            ParallelAnimation {
+                                NumberAnimation { target: wcWrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
+                                NumberAnimation { target: wcWrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
+                                NumberAnimation { target: wcWrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
+                            }
+                        }
+                    }
+                }
+
+                // Selection frame: the selected wallpaper always eases into
+                // the center slot, so the highlight is a single static
+                // overlay — a per-cell border would hop between cells the
+                // instant rank crosses 0.5 mid-slide. Explicit z, because
+                // document order alone leaves it under the Repeater's
+                // delegates: the settled center cell coincides with this
+                // footprint exactly and its image wipes out the ring.
+                Item {
+                    x: (parent.width - wallCarousel.barWidth) / 2
+                    y: 0
+                    z: 10
+                    width: wallCarousel.barWidth
+                    height: wallCarousel.barHeight
+                    visible: win.wallMatches.length > 0
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -5
+                        radius: 17
+                        color: "transparent"
+                        border.width: 3
+                        border.color: Qt.alpha(root.accent, 0.33)
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 12
+                        color: "transparent"
+                        border.width: 1
+                        border.color: root.accent
+                    }
+                }
+
+                Text {
+                    anchors.top: parent.top
+                    anchors.topMargin: wallCarousel.barHeight + wallCarousel.captionGap
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: Math.min(implicitWidth, wallCarousel.width)
+                    text: {
+                        const w = win.wallMatches[win.wallSelected];
+                        return w ? win.wallName(w) : "";
+                    }
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                    color: root.fg
+                    font { family: root.mono; pixelSize: root.fs(13) }
                 }
             }
 
@@ -3751,6 +4069,8 @@ ShellRoot {
 
                     SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
 
+                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style" }
+
                     // wallpaper path
                     Item {
                         width: 780
@@ -4142,6 +4462,7 @@ ShellRoot {
             case "notifTimeout": return (cfg.notifTimeout / 1000).toFixed(0) + " s";
             case "notifStyle": return cfg.notifStyle;
             case "notifAnim": return cfg.notifAnim;
+            case "wallpaperStyle": return cfg.wallpaperStyle;
             }
             return "";
         }
@@ -4218,6 +4539,9 @@ ShellRoot {
             case "notifAnim":
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
+            case "wallpaperStyle":
+                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "windows"], dir);
+                break;
             }
             root.saveSettings();
         }
@@ -4287,6 +4611,7 @@ ShellRoot {
             case "notifTimeout": cfg.notifTimeout = 5000; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
+            case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
