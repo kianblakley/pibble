@@ -562,7 +562,8 @@ ShellRoot {
     component KeyCap: Item {
         id: keycap
         property string label: ""
-        readonly property string glyph: label === "Return" ? root.ti.cornerDownLeft : ""
+        // Return always gets a glyph; every other key renders as plain text.
+        property string glyph: label === "Return" ? root.ti.cornerDownLeft : ""
         implicitWidth: Math.max(28, capText.implicitWidth + 16)
         implicitHeight: 26
 
@@ -579,16 +580,26 @@ ShellRoot {
             color: Qt.alpha(root.accent, 0.14)
             border.width: 1
             border.color: Qt.alpha(root.accent, 0.4)
-
-            Text {
-                id: capText
-                anchors.centerIn: parent
-                text: keycap.glyph || keycap.label
-                color: root.fg
-                font.family: keycap.glyph ? root.tablerFont : root.mono
-                font.pixelSize: root.fs(12)
-            }
         }
+        Text {
+            id: capText
+            anchors.centerIn: parent
+            text: keycap.glyph || keycap.label
+            color: root.fg
+            font.family: keycap.glyph ? root.tablerFont : root.mono
+            font.pixelSize: root.fs(12)
+        }
+    }
+
+    // "+" joiner between the caps of a multi-key chord (e.g. Shift+Tab);
+    // height matches KeyCap.implicitHeight so it centers against the caps
+    // in the Row they share, which doesn't reposition child y itself.
+    component KeyPlus: Text {
+        text: "+"
+        height: 26
+        verticalAlignment: Text.AlignVCenter
+        color: root.muted
+        font { family: root.mono; pixelSize: root.fs(12) }
     }
 
     // visible grid-of-tiles size picker (Grids settings tab): hovering
@@ -888,21 +899,95 @@ ShellRoot {
             property var items: []
         }
     }
+    // raw fields only — enough to rebuild a faithful notify-send call.
+    // Anything display-derived (glyph, resolved icon/image URLs, own/app
+    // labels) is deliberately left out: replaying re-sends the original
+    // notification and lets the live pipeline derive all of that itself,
+    // the same way it would for a first arrival. icon/image get the same
+    // slot-swap classification deriveNotifView does (some senders put a
+    // file path in appIcon, or route everything through image as an
+    // "image://icon/NAME" pseudo-URL) but keep raw values — a bare icon
+    // name or file path — since these feed notify-send's -i/-h flags
+    // directly on replay, not a QML Image source.
     function cacheNotification(n): void {
+        let icon = String(n.appIcon ?? "");
+        let img = String(n.image ?? "");
+        if (icon.startsWith("file://") || icon.startsWith("/")) {
+            if (!img)
+                img = icon;
+            icon = "";
+        }
+        if (img.startsWith("image://icon/")) {
+            const rest = img.slice("image://icon/".length);
+            if (rest.startsWith("/"))
+                img = rest;
+            else {
+                if (!icon)
+                    icon = rest;
+                img = "";
+            }
+        } else if (img.startsWith("file://")) {
+            img = img.slice("file://".length);
+        }
         const entry = {
-            app: String(n.appName ?? "") || String(n.desktopEntry ?? "") || "notification",
-            icon: String(n.appIcon ?? ""),
-            summary: String(n.summary ?? ""),
-            body: String(n.body ?? "")
+            appName: String(n.appName ?? ""),
+            appIcon: icon,
+            image: img,
+            summary: n.summary ?? "",
+            body: n.body ?? "",
+            urgency: NotificationUrgency.toString(n.urgency)
         };
         notifCache.items = [entry].concat(notifCache.items).slice(0, 5);
         notifCacheStore.writeAdapter();
     }
+    // Replays by re-sending real notify-send calls with the original
+    // notification's own appName/icon/image/urgency, rather than a separate
+    // "replay burst" rendering path: re-sent notifications land in
+    // NotificationServer.onNotification -> flyWin.accept() exactly like any
+    // live one, so they animate, stagger, and interleave with real incoming
+    // notifications identically — a genuine replay, not a second UI that can
+    // drift from the first.
+    property var replayQueue: []
+    Timer {
+        id: replayFireTimer
+        interval: 220
+        onTriggered: {
+            const it = root.replayQueue.shift();
+            if (it) {
+                root.fireReplay(it);
+                if (root.replayQueue.length > 0)
+                    restart();
+            }
+        }
+    }
+    function fireReplay(it): void {
+        const args = ["notify-send"];
+        if (it.urgency)
+            args.push("-u", String(it.urgency).toLowerCase());
+        // it.app is a one-release fallback for cache entries written by the
+        // previous (display-derived) cache format, so an on-disk cache from
+        // before this change doesn't replay unattributed the first time
+        const appName = it.appName || it.app || "";
+        if (appName)
+            args.push("-a", appName);
+        if (it.appIcon)
+            args.push("-i", it.appIcon);
+        if (it.image)
+            args.push("-h", "string:image-path:" + it.image.replace(/^file:\/\//, ""));
+        args.push(it.summary ?? "", it.body ?? "");
+        Quickshell.execDetached(args);
+    }
     function replayNotifications(): void {
         const n = Math.max(1, Math.min(5, cfg.replayCount));
-        const items = notifCache.items.slice(0, n);
-        if (items.length && flyNotifLoader.item)
-            flyNotifLoader.item.showReplay(items);
+        // oldest-of-the-batch first, so the burst lands in the order the
+        // notifications originally arrived (cache is stored newest-first)
+        const items = notifCache.items.slice(0, n).reverse();
+        if (!items.length)
+            return;
+        const wasIdle = replayQueue.length === 0;
+        replayQueue = replayQueue.concat(items);
+        if (wasIdle)
+            replayFireTimer.restart();
     }
 
     // ---------- theme ----------
@@ -965,6 +1050,64 @@ ShellRoot {
             : icon.includes("copy") || sl.includes("copied") ? root.ti.copy : root.ti.bell;
     }
 
+    // notification object → display fields, shared by the live flyout card
+    // (flyWin.snapshot) and the replay cache (cacheNotification below) so a
+    // replayed notification renders with exactly the icon/image/glyph the
+    // live card showed, instead of a second derivation that could drift.
+    function deriveNotifView(n): var {
+        let icon = root.iconUrl(String(n.appIcon ?? ""));
+        let img = String(n.image ?? "");
+        // some apps (e.g. niri screenshots) pass a file path in the icon
+        // field: that is notification media, not an app icon
+        if (icon.startsWith("file://")) {
+            if (!img)
+                img = icon;
+            icon = "";
+        }
+        // notify-send-style senders arrive with everything in the image
+        // slot (appIcon empty), routed through the icon provider: a
+        // file path there is notification media (decode it directly so
+        // the aspect probe sees real dimensions), an icon name is the
+        // app icon, not media
+        if (img.startsWith("image://icon/")) {
+            const rest = img.slice("image://icon/".length);
+            if (rest.startsWith("/"))
+                img = "file://" + rest;
+            else {
+                if (!icon)
+                    icon = img;
+                img = "";
+            }
+        }
+        // some senders (e.g. Discord) omit the app name and icon but set
+        // the desktop-entry hint — recover both from the entry
+        const de = String(n.desktopEntry ?? "");
+        let appName = String(n.appName ?? "");
+        if (de && (!appName || !icon)) {
+            const ent = Array.from(DesktopEntries.applications.values)
+                .find(e => e.id.toLowerCase() === de.toLowerCase());
+            if (ent) {
+                if (!appName)
+                    appName = ent.name;
+                if (!icon && ent.icon)
+                    icon = root.iconUrl(ent.icon);
+            }
+            if (!appName)
+                appName = de;
+        }
+        return {
+            own: n.appName === "pibble",
+            glyph: root.notifGlyph(icon, String(n.summary ?? "")),
+            app: appName,
+            key: (String(n.appName ?? "")) || de,
+            summary: n.summary ?? "",
+            body: n.body ?? "",
+            image: img,
+            icon: icon,
+            timeout: n.expireTimeout
+        };
+    }
+
     // pibble's own UI glyphs (weather/battery/checks/etc, as opposed to
     // other apps' resolved icons) all come from the vendored Tabler Icons
     // webfont, addressed by codepoint rather than name
@@ -997,7 +1140,7 @@ ShellRoot {
     function notifyError(summary: string, body: string) {
         if (!flyoutOn("alerts"))
             return;
-        Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "dialog-error", summary, body]);
+        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text
@@ -1008,7 +1151,7 @@ ShellRoot {
     function copyToClipboard(text: string): void {
         Quickshell.clipboardText = text;
         if (flyoutOn("alerts"))
-            Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "edit-copy", "Copied to clipboard", text]);
+            Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text]);
     }
 
     // bundles version/build info, this run's recent log, and the latest
@@ -1200,7 +1343,7 @@ ShellRoot {
             onStreamFinished: {
                 Quickshell.clipboardText = text;
                 if (root.flyoutOn("alerts"))
-                    Quickshell.execDetached(["notify-send", "-a", "launcher", "-i", "edit-copy", "Copied to clipboard", text.slice(0, 4000)]);
+                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text.slice(0, 4000)]);
             }
         }
     }
@@ -1386,7 +1529,7 @@ ShellRoot {
                             if ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a launcher -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews — install it for sharper, faster previews."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews — install it for sharper, faster previews."
                                 fi
                             else
                                 [ "$needthumb" = "1" ] && magick "$f" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$ext"
@@ -1425,7 +1568,7 @@ ShellRoot {
         else if (!clipWatcherRunning)
             notifyError("Clipboard watcher not running",
                 "Nothing is piping clipboard changes into cliphist — clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
-                root.clipWatcherFixCommand + "\nTap to copy.");
+                root.clipWatcherFixCommand);
     }
 
     Process {
@@ -1497,7 +1640,7 @@ ShellRoot {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a launcher -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails — install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails — install one to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
@@ -1631,7 +1774,7 @@ ShellRoot {
             if (!lowBatteryAlerted) {
                 lowBatteryAlerted = true;
                 if (flyoutOn("alerts"))
-                    Quickshell.execDetached(["notify-send", "-a", "launcher", "-u", "critical",
+                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-u", "critical",
                         "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining — plug in soon."]);
             }
         } else if (pct > 8) {
@@ -1671,7 +1814,7 @@ ShellRoot {
             warmingWalls = false;
             wallWarmTick = 0;
             expandedClip = null;
-            capturingBind = "";
+            cancelCapture();
             input.text = "";
             pane = homePane();
             paneBeforeSettings = homePane();
@@ -1831,7 +1974,7 @@ ShellRoot {
 
         function setPane(p: string) {
             input.text = "";
-            capturingBind = "";
+            cancelCapture();
             expandedClip = null;
             pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
             if (pane === "clips")
@@ -2159,12 +2302,12 @@ ShellRoot {
                         if command -v magick >/dev/null 2>&1; then
                             magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
-                            notify-send -a launcher -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR — install it to enable blur."
+                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR — install it to enable blur."
                         fi
                     fi
                 fi
                 export WALL BLUR
-                eval "$4" || { [ "$6" = "1" ] && notify-send -a launcher -i dialog-error "Wallpaper command failed" "$4"; }
+                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$4"; }
             `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand,
                 cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"]);
             exit();
@@ -2229,7 +2372,7 @@ ShellRoot {
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 if ! command -v wl-copy >/dev/null 2>&1; then
-                    [ "$5" = "1" ] && notify-send -a launcher -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard — install it to copy from this page."
+                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard — install it to copy from this page."
                     exit 0
                 fi
                 tmp=$(mktemp)
@@ -2247,9 +2390,9 @@ ShellRoot {
                 # entry is already cached by the thumbnail scan)
                 if [ "$5" = "1" ]; then
                     if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
-                        notify-send -a launcher -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
+                        notify-send -a pibble -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
                     else
-                        notify-send -a launcher -i edit-copy "Copied to clipboard" "$body"
+                        notify-send -a pibble -i edit-copy "Copied to clipboard" "$body"
                     fi
                 fi
                 sleep 0.3
@@ -2330,36 +2473,77 @@ ShellRoot {
 
         // ---------- keybinds ----------
         readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
+        // capture (Keybindings tab, click-to-record): capturingBind names the
+        // action being recorded; captureHeldKeys tracks which physical keys
+        // are still down so the bind only commits once every key of the
+        // chord has been released (not on the initial keydown), matching a
+        // real "record a shortcut" UX. captureLive always reflects the most
+        // recent key event: a bare modifier (Ctrl alone) shows and can still
+        // be replaced or extended by whatever's pressed next — pressing a
+        // different key switches to that key, holding a modifier and then
+        // pressing a real key extends it into "Ctrl+S". Release-time decides
+        // whether the final value is actually a complete, saveable chord (a
+        // bare modifier alone never is — see bareModifierLabels below).
         property string capturingBind: ""
+        property string captureLive: ""
+        property var captureHeldKeys: []
+        readonly property var bareModifierLabels: ["Ctrl", "Alt", "Shift", "Super"]
+        function cancelCapture() {
+            capturingBind = "";
+            captureLive = "";
+            captureHeldKeys = [];
+        }
+        function modifierLabel(key: int): string {
+            switch (key) {
+            case Qt.Key_Control: return "Ctrl";
+            case Qt.Key_Alt: return "Alt";
+            case Qt.Key_Shift: return "Shift";
+            case Qt.Key_Meta: return "Super";
+            default: return "";
+            }
+        }
         function keyName(event): string {
             const special = new Map([
                 [Qt.Key_Tab, "Tab"], [Qt.Key_Backtab, "Tab"],
                 [Qt.Key_Return, "Return"], [Qt.Key_Enter, "Return"],
                 [Qt.Key_Escape, "Escape"], [Qt.Key_Space, "Space"],
                 [Qt.Key_Backspace, "Backspace"], [Qt.Key_Delete, "Delete"],
+                [Qt.Key_Insert, "Insert"],
                 [Qt.Key_Home, "Home"], [Qt.Key_End, "End"],
-                [Qt.Key_PageUp, "PageUp"], [Qt.Key_PageDown, "PageDown"]
+                [Qt.Key_PageUp, "PageUp"], [Qt.Key_PageDown, "PageDown"],
+                [Qt.Key_Up, "Up"], [Qt.Key_Down, "Down"], [Qt.Key_Left, "Left"], [Qt.Key_Right, "Right"],
+                [Qt.Key_CapsLock, "CapsLock"], [Qt.Key_NumLock, "NumLock"], [Qt.Key_ScrollLock, "ScrollLock"],
+                [Qt.Key_Pause, "Pause"], [Qt.Key_Print, "Print"], [Qt.Key_Menu, "Menu"]
             ]);
-            const sp = special.get(event.key);
-            let name = sp;
+            let name = special.get(event.key);
+            // whether name came from the raw, layout/shift-independent key
+            // code (true for everything below) rather than event.text —
+            // only the text fallback already bakes Shift into the character
+            let fromText = false;
+            if (!name && event.key >= Qt.Key_F1 && event.key <= Qt.Key_F35)
+                name = "F" + (event.key - Qt.Key_F1 + 1);
             // letters/digits from the key code, so Ctrl+letter works (its
-            // event.text is a control character)
+            // event.text is a control character) and Shift+letter isn't
+            // silently identical to the bare letter
             if (!name && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
                 name = String.fromCharCode(event.key);
             if (!name && event.key >= Qt.Key_0 && event.key <= Qt.Key_9)
                 name = String.fromCharCode(event.key);
-            if (!name && event.text && event.text.trim() && event.text.charCodeAt(0) >= 32)
+            if (!name && event.text && event.text.trim() && event.text.charCodeAt(0) >= 32) {
                 name = event.text.toUpperCase();
+                fromText = true;
+            }
             if (!name)
                 return "";
-            let s = "";
+            // at most one modifier prefix, so every bind is at most two keys
+            let mod = "";
             if (event.modifiers & Qt.ControlModifier)
-                s += "Ctrl+";
-            if (event.modifiers & Qt.AltModifier)
-                s += "Alt+";
-            if ((event.modifiers & Qt.ShiftModifier) && sp)
-                s += "Shift+";
-            return s + name;
+                mod = "Ctrl+";
+            else if (event.modifiers & Qt.AltModifier)
+                mod = "Alt+";
+            else if ((event.modifiers & Qt.ShiftModifier) && !fromText)
+                mod = "Shift+";
+            return mod + name;
         }
         function setBind(action: string, key: string) {
             const kb = Object.assign({}, cfg.keybinds);
@@ -2522,6 +2706,8 @@ ShellRoot {
                         win.disarmReboot();
                     else if (win.expandedClip)
                         win.collapseClip();
+                    else if (win.capturingBind)
+                        win.cancelCapture();
                     else
                         input.forceActiveFocus();
                 }
@@ -2928,14 +3114,39 @@ ShellRoot {
                     }
                 }
 
-                Text {
-                    visible: win.matches.length === 0
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 40
-                    text: root.allApps.length === 0 ? "no apps found" : "no matches"
-                    color: root.muted
-                    font { family: root.mono; pixelSize: root.fs(14) }
+            }
+
+            // Empty state: fades in only once the last exiting tile has
+            // fully sprung out (win.ad(400), matching drawer's springOut)
+            // instead of popping in on top of tiles still animating away;
+            // snaps back to hidden the instant results reappear so it's
+            // ready to fade in again next time. Centered on the pane like
+            // the wallpaper/clip empty states below, not inside `drawer`
+            // (whose box stays the full grid size regardless of match count).
+            Text {
+                id: appsNoMatches
+                visible: win.pane === "apps" && opacity > 0
+                anchors.centerIn: parent
+                opacity: 0
+                text: root.allApps.length === 0 ? "no apps found" : "no matches"
+                color: root.muted
+                font { family: root.mono; pixelSize: root.fs(14) }
+
+                Connections {
+                    target: win
+                    function onMatchesChanged() {
+                        if (win.matches.length === 0)
+                            appsNoMatchesFade.restart();
+                        else {
+                            appsNoMatchesFade.stop();
+                            appsNoMatches.opacity = 0;
+                        }
+                    }
+                }
+                SequentialAnimation {
+                    id: appsNoMatchesFade
+                    PauseAnimation { duration: win.ad(400) }
+                    NumberAnimation { target: appsNoMatches; property: "opacity"; to: 1; duration: win.ad(220); easing.type: Easing.OutCubic }
                 }
             }
 
@@ -3344,14 +3555,36 @@ ShellRoot {
             }
 
             // Wallpaper empty state: shared between the tiles grid and the
-            // windows carousel, since only one of them is ever visible.
+            // windows carousel, since only one of them is ever visible. Fades
+            // in only once the last exiting tile has fully sprung out
+            // (win.ad(400), matching wallSpringOut/wcSpringOut) instead of
+            // popping in on top of tiles still animating away.
             Text {
-                visible: win.pane === "walls" && win.wallMatches.length === 0
+                id: wallsNoMatches
+                visible: win.pane === "walls" && opacity > 0
                 anchors.centerIn: parent
                 transform: panePull
+                opacity: 0
                 text: root.wallpapers.length === 0 ? "no wallpapers found" : "no matches"
                 color: root.muted
                 font { family: root.mono; pixelSize: root.fs(14) }
+
+                Connections {
+                    target: win
+                    function onWallMatchesChanged() {
+                        if (win.wallMatches.length === 0)
+                            wallsNoMatchesFade.restart();
+                        else {
+                            wallsNoMatchesFade.stop();
+                            wallsNoMatches.opacity = 0;
+                        }
+                    }
+                }
+                SequentialAnimation {
+                    id: wallsNoMatchesFade
+                    PauseAnimation { duration: win.ad(400) }
+                    NumberAnimation { target: wallsNoMatches; property: "opacity"; to: 1; duration: win.ad(220); easing.type: Easing.OutCubic }
+                }
             }
 
             // Clipboard history: masonry grid of variable-height tiles
@@ -3376,25 +3609,6 @@ ShellRoot {
                     NumberAnimation { target: clipDrawer; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
                     NumberAnimation { target: clipDrawer; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                     NumberAnimation { target: clipDrawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                }
-
-                Text {
-                    visible: root.clips.length === 0
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 40
-                    text: "clipboard history is empty"
-                    color: root.muted
-                    font { family: root.mono; pixelSize: root.fs(14) }
-                }
-                Text {
-                    visible: root.clips.length > 0 && win.clipMatches.length === 0
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 40
-                    text: "no matches"
-                    color: root.muted
-                    font { family: root.mono; pixelSize: root.fs(14) }
                 }
 
                 Row {
@@ -3593,6 +3807,16 @@ ShellRoot {
                                             NumberAnimation { target: clipTile; property: "y"; to: 10; duration: win.ad(240); easing.type: Easing.InQuad }
                                             NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: win.ad(240); easing.type: Easing.InQuad }
                                         }
+                                        // clear shownClip once the tile is actually gone, not just
+                                        // invisible: tileH (and so this cell's visible/height) is
+                                        // derived from shownClip, so leaving it set would keep this
+                                        // cell's slot permanently reserved in the masonry column —
+                                        // stale layout space a later "no matches" state reads as
+                                        // tiles still being there. Guarded by filled: a re-match
+                                        // arriving mid-exit already called .stop() on us via the
+                                        // isNew branch above and has its own shownClip in place, so
+                                        // stopping here from that must not clobber it.
+                                        onStopped: if (!clipCell.filled) clipCell.shownClip = null;
                                     }
                                 }
                             }
@@ -3769,6 +3993,56 @@ ShellRoot {
                             }
                         }
                     }
+                }
+            }
+
+            // Clipboard empty states: siblings of clipDrawer (not nested
+            // inside it) so anchors.centerIn: parent centers on the pane
+            // instead of clipDrawer's box, which stays sized to the full
+            // grid regardless of clip/match count.
+            Text {
+                visible: win.pane === "clips" && root.clips.length === 0
+                anchors.centerIn: parent
+                transform: panePull
+                text: "clipboard history is empty"
+                color: root.muted
+                font { family: root.mono; pixelSize: root.fs(14) }
+            }
+            // Fades in only once the last exiting tile has fully sprung out
+            // (win.ad(240), matching clipSpringOut) instead of popping in on
+            // top of tiles still animating away. wantShow is a plain
+            // reactive binding (always correct for the *current* query) —
+            // debouncedShow just delays acting on it by one clipSpringOut's
+            // worth of time, via a Timer that restarts/cancels on every
+            // change instead of an imperative restart()/stop() pair racing
+            // against whichever keystroke's onClipMatchesChanged fires last.
+            Text {
+                id: clipsNoMatches
+                readonly property bool wantShow: root.clips.length > 0 && win.clipMatches.length === 0
+                property bool debouncedShow: false
+                onWantShowChanged: {
+                    if (wantShow)
+                        noMatchesDelay.restart();
+                    else {
+                        noMatchesDelay.stop();
+                        debouncedShow = false;
+                    }
+                }
+                visible: win.pane === "clips" && opacity > 0
+                anchors.centerIn: parent
+                transform: panePull
+                opacity: debouncedShow ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: win.ad(220); easing.type: Easing.OutCubic }
+                }
+                text: "no matches"
+                color: root.muted
+                font { family: root.mono; pixelSize: root.fs(14) }
+
+                Timer {
+                    id: noMatchesDelay
+                    interval: win.ad(240)
+                    onTriggered: clipsNoMatches.debouncedShow = true
                 }
             }
 
@@ -4548,7 +4822,30 @@ ShellRoot {
                     }
                     spacing: 14
 
+                    // shared width for every chord box, fixed to the longest
+                    // possible two-key chord (one modifier + the longest
+                    // recognised key name) rather than derived from whatever
+                    // binds happen to be set — so the box is wide enough for
+                    // anything keyName() can produce and never resizes when
+                    // a row starts/stops capturing or a bind changes length.
+                    readonly property real uniformBoxWidth: Math.max(captureMetrics.implicitWidth, maxChordMetrics.implicitWidth)
+                    Text {
+                        id: captureMetrics
+                        visible: false
+                        text: "press a key"
+                        font { family: root.mono; pixelSize: root.fs(13) }
+                    }
+                    Row {
+                        id: maxChordMetrics
+                        visible: false
+                        spacing: 4
+                        KeyCap { label: "Shift" }
+                        KeyPlus {}
+                        KeyCap { label: "ScrollLock" }
+                    }
+
                     Repeater {
+                        id: bindRepeater
                         model: [
                             { action: "cycle", label: "Cycle pages" },
                             { action: "reverseCycle", label: "Cycle pages (reverse)" },
@@ -4578,34 +4875,47 @@ ShellRoot {
                                 readonly property bool capturing: win.capturingBind === bindRow.modelData.action
                                 readonly property string bindStr: cfg.keybinds[bindRow.modelData.action] ?? win.bindDefaults[bindRow.modelData.action] ?? ""
                                 readonly property var keyTokens: bindStr.split("+")
+                                // while capturing, render whatever's currently held (via
+                                // win.captureLive) in the same KeyCap style as the settled
+                                // chip, instead of dropping to plain text — only the
+                                // "nothing held yet" moment has no keys to render, so that's
+                                // the one case still showing a plain hint
+                                readonly property var displayTokens: capturing ? (win.captureLive ? win.captureLive.split("+") : []) : keyTokens
                                 anchors.right: parent.right
                                 anchors.rightMargin: 34
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.max(110, (capturing ? captureText.implicitWidth : capRow.implicitWidth) + 26)
-                                height: 30
+                                width: Math.max(110, keybindCol.uniformBoxWidth + 32)
+                                height: 34
                                 radius: 8
                                 color: Qt.alpha(root.accent, capturing ? 0.3 : 0.11)
                                 border.width: 1
                                 border.color: capturing ? root.accent : Qt.alpha(root.accent, 0.33)
 
                                 Text {
-                                    id: captureText
                                     anchors.centerIn: parent
-                                    visible: bindBox.capturing
-                                    text: "press a key…"
+                                    visible: bindBox.displayTokens.length === 0
+                                    text: "press a key"
                                     color: root.fg
                                     font { family: root.mono; pixelSize: root.fs(13) }
                                 }
                                 Row {
                                     id: capRow
                                     anchors.centerIn: parent
-                                    visible: !bindBox.capturing
+                                    visible: bindBox.displayTokens.length > 0
                                     spacing: 4
                                     Repeater {
-                                        model: bindBox.keyTokens
-                                        KeyCap {
+                                        model: bindBox.displayTokens
+                                        Row {
+                                            id: pairRow
                                             required property string modelData
-                                            label: modelData
+                                            required property int index
+                                            spacing: 4
+                                            KeyCap {
+                                                label: pairRow.modelData
+                                            }
+                                            KeyPlus {
+                                                visible: pairRow.index < bindBox.displayTokens.length - 1
+                                            }
                                         }
                                     }
                                 }
@@ -4621,6 +4931,22 @@ ShellRoot {
                     }
                 }
                 } // tabViewport
+
+                // topmost within the settings pane: clicking a tab link, an
+                // SBtn/SReset, a different chord box, or empty padding while
+                // a bind is being recorded should cancel that recording —
+                // but the click must still reach whatever it landed on (the
+                // tab switch, the button press, etc), so this observes the
+                // press and lets it fall through instead of consuming it.
+                MouseArea {
+                    anchors.fill: parent
+                    propagateComposedEvents: true
+                    onPressed: mouse => {
+                        if (win.capturingBind)
+                            win.cancelCapture();
+                        mouse.accepted = false;
+                    }
+                }
             }
 
             // Swipe-to-power/reboot pull indicator: extra dim over the whole
@@ -4701,6 +5027,9 @@ ShellRoot {
                     onPaint: {
                         const ctx = getContext("2d");
                         ctx.reset();
+                        // a plain ring that strokes itself closed clockwise
+                        // from the top as the drag completes — identical to
+                        // powerRing
                         ctx.lineWidth = 3.6;
                         ctx.lineCap = "round";
                         ctx.strokeStyle = root.accent;
@@ -4987,14 +5316,25 @@ ShellRoot {
             }
 
             Keys.onPressed: event => {
-                // keybind capture (settings)
+                // keybind capture (settings): record which keys are down and
+                // the latest chord name they spell, but don't save yet — the
+                // bind only commits once every held key is released, so a
+                // chord like Ctrl+S can be pressed as a whole instead of
+                // firing the instant Ctrl (or S) lands.
                 if (win.capturingBind) {
-                    const ks = win.keyName(event);
-                    if (ks) {
-                        win.setBind(win.capturingBind, ks);
-                        win.capturingBind = "";
-                    }
                     event.accepted = true;
+                    if (event.isAutoRepeat)
+                        return;
+                    if (!win.captureHeldKeys.includes(event.key))
+                        win.captureHeldKeys = win.captureHeldKeys.concat([event.key]);
+                    // always take the newest key event: pressing a different
+                    // key switches to it outright (A then Ctrl shows "Ctrl",
+                    // not "A"), and a bare modifier can still be extended by
+                    // whatever's pressed next into a real chord ("Ctrl" then
+                    // "S" becomes "Ctrl+S"). A stray unrecognized key leaves
+                    // the display as-is rather than blanking it.
+                    const ks = win.keyName(event);
+                    win.captureLive = ks || win.modifierLabel(event.key) || win.captureLive;
                     return;
                 }
                 const ks = win.keyName(event);
@@ -5065,6 +5405,26 @@ ShellRoot {
                 } else if (event.key === Qt.Key_Up) {
                     win.navigate(0, -1);
                     event.accepted = true;
+                }
+            }
+
+            Keys.onReleased: event => {
+                // keybind capture: commit the last chord seen while keys
+                // were down, but only once every key of it has come back up
+                // — releasing the modifier first (or the main key first)
+                // both land here, so either release order works.
+                if (win.capturingBind) {
+                    event.accepted = true;
+                    if (event.isAutoRepeat)
+                        return;
+                    win.captureHeldKeys = win.captureHeldKeys.filter(k => k !== event.key);
+                    if (win.captureHeldKeys.length === 0) {
+                        // a bare modifier alone (nothing ever extended it
+                        // into a real chord) isn't saveable
+                        if (win.captureLive && !win.bareModifierLabels.includes(win.captureLive))
+                            win.setBind(win.capturingBind, win.captureLive);
+                        win.cancelCapture();
+                    }
                 }
             }
         }
@@ -5610,25 +5970,7 @@ ShellRoot {
                 ColorAnimation { duration: 220 }
             }
 
-            // ---------- replay burst (pibble replay) ----------
-            // Unlike a live arrival (queued, one card at a time), a replay
-            // fires every requested card together, stacked under one
-            // another — the point is showing what was missed at a glance,
-            // not re-running the arrival choreography.
-            property var replayItems: []
-            property bool replayShown: false
-            function showReplay(items) {
-                replayItems = items;
-                replayShown = true;
-                replayTimer.restart();
-            }
-            Timer {
-                id: replayTimer
-                interval: cfg.notifTimeout
-                onTriggered: flyWin.replayShown = false
-            }
-
-            visible: phase !== "hidden" || replayShown
+            visible: phase !== "hidden"
             anchors.top: true
             anchors.right: true
             // fixed size: everything animates inside (see the OSD architecture
@@ -5691,57 +6033,7 @@ ShellRoot {
             }
             function snapshot(n) {
                 current = n;
-                let icon = root.iconUrl(String(n.appIcon ?? ""));
-                let img = String(n.image ?? "");
-                // some apps (e.g. niri screenshots) pass a file path in the icon
-                // field: that is notification media, not an app icon
-                if (icon.startsWith("file://")) {
-                    if (!img)
-                        img = icon;
-                    icon = "";
-                }
-                // notify-send-style senders arrive with everything in the image
-                // slot (appIcon empty), routed through the icon provider: a
-                // file path there is notification media (decode it directly so
-                // the aspect probe sees real dimensions), an icon name is the
-                // app icon, not media
-                if (img.startsWith("image://icon/")) {
-                    const rest = img.slice("image://icon/".length);
-                    if (rest.startsWith("/"))
-                        img = "file://" + rest;
-                    else {
-                        if (!icon)
-                            icon = img;
-                        img = "";
-                    }
-                }
-                // some senders (e.g. Discord) omit the app name and icon but set
-                // the desktop-entry hint — recover both from the entry
-                const de = String(n.desktopEntry ?? "");
-                let appName = String(n.appName ?? "");
-                if (de && (!appName || !icon)) {
-                    const ent = Array.from(DesktopEntries.applications.values)
-                        .find(e => e.id.toLowerCase() === de.toLowerCase());
-                    if (ent) {
-                        if (!appName)
-                            appName = ent.name;
-                        if (!icon && ent.icon)
-                            icon = root.iconUrl(ent.icon);
-                    }
-                    if (!appName)
-                        appName = de;
-                }
-                view = {
-                    own: n.appName === "launcher",
-                    glyph: root.notifGlyph(icon, String(n.summary ?? "")),
-                    app: appName,
-                    key: appKey(n),
-                    summary: n.summary ?? "",
-                    body: n.body ?? "",
-                    image: img,
-                    icon: icon,
-                    timeout: n.expireTimeout
-                };
+                view = root.deriveNotifView(n);
                 imgProbe.source = view.image;
                 // "default" theme tints from the app icon (else the media
                 // image); pinned themes use their accent everywhere
@@ -6188,88 +6480,6 @@ ShellRoot {
                 NumberAnimation { target: fcard; property: "imgWipe"; from: 0; to: 1; duration: flyWin.noAnim ? 0 : 500; easing.type: Easing.OutQuint }
             }
 
-            // ── replay burst ──
-            Column {
-                id: replayColumn
-                visible: flyWin.replayShown
-                opacity: flyWin.replayShown ? 1 : 0
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: 16
-                spacing: 10
-                Behavior on opacity {
-                    NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-                }
-
-                Repeater {
-                    model: flyWin.replayItems
-
-                    Rectangle {
-                        id: replayCard
-                        required property var modelData
-                        width: 360
-                        height: replayBody.visible ? 78 : 54
-                        radius: 14
-                        color: Qt.alpha(root.notifTh.fg, 0.06)
-                        border.width: 1
-                        border.color: Qt.alpha(flyWin.nColor, 0.35)
-
-                        Rectangle {
-                            width: 36
-                            height: 36
-                            radius: 10
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.margins: 9
-                            color: Qt.alpha(flyWin.nColor, 0.18)
-                            Text {
-                                anchors.centerIn: parent
-                                text: root.notifGlyph(replayCard.modelData.icon, replayCard.modelData.summary)
-                                color: flyWin.nColor
-                                font { family: root.tablerFont; pixelSize: 16 }
-                            }
-                        }
-                        Text {
-                            id: replayApp
-                            anchors.left: parent.left
-                            anchors.leftMargin: 54
-                            anchors.right: parent.right
-                            anchors.rightMargin: 12
-                            anchors.top: parent.top
-                            anchors.topMargin: 10
-                            text: replayCard.modelData.app + "  ·  " + replayCard.modelData.summary
-                            elide: Text.ElideRight
-                            color: root.notifTh.fg
-                            font { family: root.mono; pixelSize: root.flyFs(12); bold: true }
-                        }
-                        Text {
-                            id: replayBody
-                            visible: replayCard.modelData.body !== ""
-                            anchors.left: parent.left
-                            anchors.leftMargin: 54
-                            anchors.right: parent.right
-                            anchors.rightMargin: 12
-                            anchors.top: replayApp.bottom
-                            anchors.topMargin: 4
-                            maximumLineCount: 2
-                            wrapMode: Text.Wrap
-                            elide: Text.ElideRight
-                            text: replayCard.modelData.body
-                            color: root.notifTh.muted
-                            font { family: root.mono; pixelSize: root.flyFs(11) }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                flyWin.replayItems = flyWin.replayItems.filter(x => x !== replayCard.modelData);
-                                if (flyWin.replayItems.length === 0)
-                                    flyWin.replayShown = false;
-                            }
-                        }
-                    }
-                }
-            }
-
             // ── card ──
             Rectangle {
                 id: fcard
@@ -6587,6 +6797,39 @@ ShellRoot {
                                     }
                                 }
                             }
+
+                            // the watcher-not-running alert's only actionable
+                            // content is the setup commands in its body — a
+                            // real button, not tap-to-copy-and-vanish, so
+                            // expanding it behaves like any other
+                            // notification and copying is a deliberate,
+                            // separate step (fires the usual "Copied to
+                            // clipboard" toast, replacing this one, same as
+                            // any other same-app follow-up notification)
+                            Rectangle {
+                                id: watcherCopyBtn
+                                visible: fcard.expanded && flyWin.view.own && flyWin.view.summary === "Clipboard watcher not running"
+                                width: watcherCopyText.implicitWidth + 24
+                                height: 28
+                                radius: 8
+                                color: Qt.alpha(root.notifTh.accent, watcherCopyHover.hovered ? 0.28 : 0.16)
+                                border.width: 1
+                                border.color: Qt.alpha(root.notifTh.accent, 0.5)
+                                Behavior on color { ColorAnimation { duration: 120 } }
+
+                                Text {
+                                    id: watcherCopyText
+                                    anchors.centerIn: parent
+                                    text: "Copy setup commands"
+                                    color: root.notifTh.fg
+                                    font { family: root.flyMono; pixelSize: root.flyFs(12) }
+                                }
+                                HoverHandler { id: watcherCopyHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: root.copyToClipboard(root.clipWatcherFixCommand)
+                                }
+                            }
                         }
                     }
                 }
@@ -6678,17 +6921,14 @@ ShellRoot {
                     }
                 }
                 TapHandler {
-                    // a tap (not a drag) expands the clipped body
+                    // a tap (not a drag) expands the clipped body — same as
+                    // any other long notification, including the "watcher
+                    // not running" alert (its copy button, in the expanded
+                    // body, is a nested MouseArea so it grabs the press
+                    // before this handler sees it as a plain expand/collapse)
                     onTapped: {
-                        if (fcard.expandable || fcard.expanded) {
-                            const wasExpanded = fcard.expanded;
-                            fcard.expanded = !wasExpanded;
-                            // expanding the "watcher not running" alert we
-                            // sent ourselves doubles as "copy the fix" — the
-                            // commands are the only actionable content in it
-                            if (!wasExpanded && flyWin.view.own && flyWin.view.summary === "Clipboard watcher not running")
-                                root.copyToClipboard(root.clipWatcherFixCommand);
-                        }
+                        if (fcard.expandable || fcard.expanded)
+                            fcard.expanded = !fcard.expanded;
                     }
                 }
             }
