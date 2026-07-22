@@ -70,7 +70,7 @@ cd pibble
 ./pibble toggle
 ```
 
-Run `./pibble help` (or `./pibble` with no arguments) for the full command list — `start` / `stop` / `restart` the daemon, `toggle` the launcher, and `replay` to re-fire the last few notifications.
+Run `./pibble help` (or `./pibble` with no arguments) for the full command list — `start` / `stop` / `restart` the daemon, `toggle` the launcher, and `replay` to re-fire recent notifications one at a time, stepping further back in history on each repeated press.
 
 ## Core Keybindings
 

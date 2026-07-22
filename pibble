@@ -5,8 +5,8 @@
 #   pibble restart   stop, then start
 #   pibble toggle    show/hide the launcher window (for the keybind),
 #                    starting the daemon first if it isn't running
-#   pibble replay    re-fire the last few notifications as a stacked burst
-#                    (see "Replay count" in flyout settings)
+#   pibble replay    re-fire one recent notification; repeated presses step
+#                    back through history (see "Replay count" in flyout settings)
 #   pibble help      show this message (also what a bare `pibble` does)
 repo="$(dirname "$(readlink -f "$0")")"
 
@@ -58,7 +58,7 @@ Commands:
   stop      stop the daemon
   restart   stop, then start the daemon
   toggle    show/hide the launcher window, starting the daemon first if needed
-  replay    re-fire the last few notifications as a stacked burst
+  replay    re-fire one recent notification; repeated presses step back
   help      show this message (also what a bare `pibble` does)
 USAGE
 }

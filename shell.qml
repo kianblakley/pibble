@@ -866,7 +866,8 @@ ShellRoot {
             // disables all notification entry/exit animation
             property string notifAnim: "pop"
             // how many of the most recent cached notifications `pibble
-            // replay` re-fires (see notifCache below); 1-5
+            // replay` can step back through on repeated presses (see
+            // notifCache below); 1-5
             property int replayCount: 1
             // clock-page weather readout (wttr.in); empty location auto-detects by IP
             property bool weatherEnabled: true
@@ -883,9 +884,9 @@ ShellRoot {
     // ---------- notification cache (pibble replay) ----------
     // The last 5 notifications pibble has shown, most recent first, kept on
     // disk so `pibble replay` (a plain CLI invocation, no QML state of its
-    // own) can ask the running daemon to re-fire the last cfg.replayCount of
-    // them via IPC. Capped at 5 unconditionally — cfg.replayCount only
-    // trims how many of the cached 5 actually get replayed.
+    // own) can ask the running daemon to re-fire one of them via IPC.
+    // Capped at 5 unconditionally — cfg.replayCount only trims how many of
+    // the cached 5 are reachable by stepping back through repeated presses.
     FileView {
         id: notifCacheStore
         path: Quickshell.statePath("notif-cache.json")
@@ -940,26 +941,19 @@ ShellRoot {
         notifCache.items = [entry].concat(notifCache.items).slice(0, 5);
         notifCacheStore.writeAdapter();
     }
-    // Replays by re-sending real notify-send calls with the original
-    // notification's own appName/icon/image/urgency, rather than a separate
-    // "replay burst" rendering path: re-sent notifications land in
+    // Replays by re-sending a real notify-send call with the original
+    // notification's own icon/image/urgency, rather than a separate "replay"
+    // rendering path: the re-sent notification lands in
     // NotificationServer.onNotification -> flyWin.accept() exactly like any
-    // live one, so they animate, stagger, and interleave with real incoming
-    // notifications identically — a genuine replay, not a second UI that can
-    // drift from the first.
-    property var replayQueue: []
-    Timer {
-        id: replayFireTimer
-        interval: 220
-        onTriggered: {
-            const it = root.replayQueue.shift();
-            if (it) {
-                root.fireReplay(it);
-                if (root.replayQueue.length > 0)
-                    restart();
-            }
-        }
-    }
+    // live one, so it animates and dismisses identically — a genuine
+    // replay, not a second UI that can drift from the first. The sender
+    // identity is always the literal "REPLAY" (not the original app), so
+    // repeated presses always land in flyWin's own same-app "replace
+    // in-place" path — see accept()'s appKey comparisons — regardless of
+    // which app each replayed notification originally came from, and so a
+    // live notification from the real sender never collides with it. The
+    // original sender rides along in the desktop-entry hint purely so
+    // deriveNotifView can show "<original> - REPLAY" on the card.
     function fireReplay(it): void {
         const args = ["notify-send"];
         if (it.urgency)
@@ -968,8 +962,9 @@ ShellRoot {
         // previous (display-derived) cache format, so an on-disk cache from
         // before this change doesn't replay unattributed the first time
         const appName = it.appName || it.app || "";
+        args.push("-a", "REPLAY");
         if (appName)
-            args.push("-a", appName);
+            args.push("-h", "string:desktop-entry:" + appName);
         if (it.appIcon)
             args.push("-i", it.appIcon);
         if (it.image)
@@ -977,17 +972,25 @@ ShellRoot {
         args.push(it.summary ?? "", it.body ?? "");
         Quickshell.execDetached(args);
     }
+    // cursor into notifCache.items (0 = most recent) that each `pibble
+    // replay` press steps forward by one, so consecutive presses walk back
+    // through history one notification at a time instead of bursting the
+    // whole cache at once; wraps back to the most recent once it reaches
+    // the deepest reachable notification. A press arriving more than
+    // replaySessionTimeout after the previous one is treated as a new
+    // session and also starts back over at the most recent notification
+    property int replayIndex: -1
+    property double replayLastFireMs: 0
+    readonly property int replaySessionTimeout: 5000
     function replayNotifications(): void {
-        const n = Math.max(1, Math.min(5, cfg.replayCount));
-        // oldest-of-the-batch first, so the burst lands in the order the
-        // notifications originally arrived (cache is stored newest-first)
-        const items = notifCache.items.slice(0, n).reverse();
-        if (!items.length)
+        if (!notifCache.items.length)
             return;
-        const wasIdle = replayQueue.length === 0;
-        replayQueue = replayQueue.concat(items);
-        if (wasIdle)
-            replayFireTimer.restart();
+        const depth = Math.max(1, Math.min(5, cfg.replayCount, notifCache.items.length));
+        const now = Date.now();
+        replayIndex = (replayIndex < 0 || now - replayLastFireMs > replaySessionTimeout)
+            ? 0 : (replayIndex + 1) % depth;
+        replayLastFireMs = now;
+        fireReplay(notifCache.items[replayIndex]);
     }
 
     // ---------- theme ----------
@@ -1083,7 +1086,13 @@ ShellRoot {
         // the desktop-entry hint — recover both from the entry
         const de = String(n.desktopEntry ?? "");
         let appName = String(n.appName ?? "");
-        if (de && (!appName || !icon)) {
+        // pibble replay (see fireReplay) always sends "REPLAY" as its own
+        // identity so repeated replays replace each other regardless of
+        // origin; the real sender rides along in the desktop-entry hint
+        // purely for display here
+        if (appName === "REPLAY")
+            appName = de ? de + " - REPLAY" : "REPLAY";
+        else if (de && (!appName || !icon)) {
             const ent = Array.from(DesktopEntries.applications.values)
                 .find(e => e.id.toLowerCase() === de.toLowerCase());
             if (ent) {
@@ -1412,9 +1421,9 @@ ShellRoot {
             if (win.shown)
                 win.exit();
         }
-        // `pibble replay`: re-fires the last cfg.replayCount cached
-        // notifications as a stacked burst, independent of whether the
-        // launcher window itself is open
+        // `pibble replay`: steps back one more cached notification (up to
+        // cfg.replayCount deep) and re-fires just that one, independent of
+        // whether the launcher window itself is open
         function replay(): void {
             root.replayNotifications();
         }
@@ -4381,7 +4390,7 @@ ShellRoot {
                     SettingRow { key: "notifStyle"; label: "Notification style" }
                     SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` re-fires" }
+                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
                 }
 
                 Column {
@@ -5924,7 +5933,11 @@ ShellRoot {
             imageSupported: true
             onNotification: n => {
                 n.tracked = true;
-                root.cacheNotification(n);
+                // notifications pibble replay fires itself must not become
+                // replayable history, or replaying repeatedly would keep
+                // pushing the same notification back to the front
+                if (n.appName !== "REPLAY")
+                    root.cacheNotification(n);
                 flyNotifLoader.item?.accept(n);
             }
         }
