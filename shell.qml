@@ -1282,7 +1282,7 @@ ShellRoot {
             command -v matugen >/dev/null || { echo NOMATUGEN; exit 0; }
             img="$1"
             [ -n "$img" ] || exit 0
-            matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`, "_", cfg.currentWallpaper]
+            matugen image "$img" --json hex --dry-run --prefer saturation 2>/dev/null`, "_", root.matugenSource]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOMATUGEN") {
@@ -1464,7 +1464,7 @@ ShellRoot {
     // generates (wallpaper thumbnails/blur, clip thumbnails) — separate from
     // the source directories so deleting a wallpaper or a clip scrolling
     // past clipsMax can be detected and swept on the next scan.
-    readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/app-launcher"
+    readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/pibble"
     readonly property string wallCacheDir: cacheRoot + "/wallpapers"
 
     // Each entry: path|thumb|blurred. thumb/blurred point into wallCacheDir,
@@ -1473,6 +1473,14 @@ ShellRoot {
     // the source is still honored as a user-supplied override.
     property var wallpapers: []
     property string lastMissingDir: ""
+    // matugen chokes on/slow-decodes an animated source; sample the cached
+    // static thumbnail instead when the current wallpaper is a .gif (see
+    // matugenProc). Falls back to the raw path before the background scan
+    // has generated a thumbnail for it yet.
+    readonly property string matugenSource: {
+        const w = root.wallpapers.find(x => x.path === cfg.currentWallpaper);
+        return (w && w.gif && w.thumb) ? w.thumb : cfg.currentWallpaper;
+    }
     function rescanWallpapers() {
         wallScan.running = false;
         wallScan.running = true;
@@ -1484,14 +1492,19 @@ ShellRoot {
             cd "$1" || { echo NODIR; exit 0; }
             cachedir="$2"
             shopt -s nullglob nocaseglob
-            for f in *.png *.jpg *.jpeg *.webp; do
+            for f in *.png *.jpg *.jpeg *.webp *.gif; do
                 case "$f" in *blurred.*) continue ;; esac
                 stem="\${f%.*}" ext="\${f##*.}"
+                # generated thumb/blur are always true-color (png), even for a
+                # .gif source: writing a single decoded frame back out as .gif
+                # would quantize it to a 256-color palette, banding badly once
+                # blurred; the source itself is still played back untouched
+                oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                 key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
                 thumb="$PWD/$f" blur=""
                 # only trust caches newer than the source image
-                [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$ext"
-                [ "$cachedir/blurred/$key.$ext" -nt "$f" ] && blur="$cachedir/blurred/$key.$ext"
+                [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$oext"
+                [ "$cachedir/blurred/$key.$oext" -nt "$f" ] && blur="$cachedir/blurred/$key.$oext"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
                 printf '%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur"
             done | sort`, "_", root.wallDir, root.wallCacheDir]
@@ -1508,7 +1521,7 @@ ShellRoot {
                 root.lastMissingDir = "";
                 const walls = text.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
-                    return { path: p[0], thumb: p[1], blur: p[2] || "" };
+                    return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]) };
                 });
                 root.wallpapers = walls;
                 // Generate missing thumbnails (a full 5K image standing in as
@@ -1527,12 +1540,14 @@ ShellRoot {
                     for f in "$@"; do
                         b=$(basename "$f")
                         stem="\${b%.*}" ext="\${b##*.}"
+                        # see the matching oext note in the scan pass above
+                        oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                         key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
                         live="$live $key"
                         needthumb=0 needblur=0
-                        [ "$cachedir/thumbnails/$key.$ext" -nt "$f" ] || needthumb=1
+                        [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] || needthumb=1
                         if [ "$gb" = "1" ]; then
-                            [ "$cachedir/blurred/$key.$ext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
+                            [ "$cachedir/blurred/$key.$oext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
                         if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
                             if ! command -v magick >/dev/null 2>&1; then
@@ -1541,8 +1556,12 @@ ShellRoot {
                                     notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews — install it for sharper, faster previews."
                                 fi
                             else
-                                [ "$needthumb" = "1" ] && magick "$f" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$ext"
-                                [ "$needblur" = "1" ] && magick "$f" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$ext"
+                                # "$f[0]": first frame only, so an animated
+                                # .gif source still yields a static
+                                # thumbnail/blur (only the selected/centered
+                                # tile/window plays the source file itself)
+                                [ "$needthumb" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$oext"
+                                [ "$needblur" = "1" ] && magick "$f[0]" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$oext"
                             fi
                         fi
                     done
@@ -1566,7 +1585,7 @@ ShellRoot {
     readonly property string clipThumbDir: cacheRoot + "/clips"
     // scratch file for the notification tint's icon-grab round trip (see
     // the flyout notification Canvas below)
-    readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/app-launcher-tint.png"
+    readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/pibble-tint.png"
     // re-checked (and re-notified) every time the clips pane is navigated
     // to, not just once per problem — the user wants a reminder each visit
     function checkClipAlert() {
@@ -2144,8 +2163,14 @@ ShellRoot {
         property int wallCarouselStep: 0
         property real wallCarouselAnim: wallCarouselStep
         Behavior on wallCarouselAnim {
-            NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
+            NumberAnimation { id: wallCarouselAnimAnim; duration: 420; easing.type: Easing.OutCubic }
         }
+        // isCenter (Math.abs(rank) < 0.5) goes true well before the slide's
+        // eased approach actually reaches rank 0 — gating gif playback on
+        // isCenter alone starts the (unpanned, fixed-crop) AnimatedImage
+        // mid-slide, while the still frame beside it is still panning,
+        // which reads as a jump. Wait for the slide to fully stop first.
+        readonly property bool wallCarouselSettled: !wallCarouselAnimAnim.running
         function moveCarousel(dir: int) {
             const count = wallMatches.length;
             if (!count)
@@ -2306,10 +2331,14 @@ ShellRoot {
                 BLUR="$2"
                 if [ "$5" = "1" ] && [ -z "$BLUR" ]; then
                     mkdir -p "$3/blurred"
-                    BLUR="$3/blurred/$(basename "$1")"
+                    b=$(basename "$1"); stem="\${b%.*}" ext="\${b##*.}"
+                    # gif source blurs to png, not gif: a single decoded frame
+                    # re-quantized to a 256-color gif palette bands badly
+                    case "\${ext,,}" in gif) ext="png" ;; esac
+                    BLUR="$3/blurred/$stem.$ext"
                     if [ ! -e "$BLUR" ]; then
                         if command -v magick >/dev/null 2>&1; then
-                            magick "$WALL" -resize 1024x -blur 0x10 "$BLUR"
+                            magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
                             notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR — install it to enable blur."
                         fi
@@ -2317,7 +2346,7 @@ ShellRoot {
                 fi
                 export WALL BLUR
                 eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$4"; }
-            `, "_", wall.path, wall.blur, root.wallDir, cfg.wallCommand,
+            `, "_", wall.path, wall.blur, root.wallCacheDir, cfg.wallCommand,
                 cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"]);
             exit();
         }
@@ -3257,21 +3286,48 @@ ShellRoot {
                                     height: 135
                                     radius: 14
                                     color: Qt.alpha(root.accent, 0.08)
-                                    border.width: 1
-                                    border.color: wallCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
+
+                                    // Only the selected tile plays its .gif (from
+                                    // the source file, not the static thumbnail);
+                                    // every other tile stays a still frame so
+                                    // scrolling the grid doesn't decode a movie
+                                    // per cell.
+                                    readonly property bool animating: wallCell.isSelected && !!wallCell.shownWall?.gif
 
                                     Image {
                                         anchors.fill: parent
+                                        visible: !thumb.animating
                                         asynchronous: true
                                         fillMode: Image.PreserveAspectCrop
                                         sourceSize: Qt.size(480, 270)
                                         source: wallCell.shownWall ? "file://" + wallCell.shownWall.thumb : ""
+                                    }
+                                    AnimatedImage {
+                                        anchors.fill: parent
+                                        visible: thumb.animating
+                                        playing: thumb.animating
+                                        asynchronous: true
+                                        fillMode: Image.PreserveAspectCrop
+                                        source: thumb.animating ? "file://" + wallCell.shownWall.path : ""
                                     }
                                     MouseArea {
                                         anchors.fill: parent
                                         enabled: wallCell.filled
                                         onClicked: win.applyWallpaper(wallCell.wall)
                                     }
+                                }
+                                // Stroke above the image, not a border on thumb
+                                // (ClippingRectangle): the clip mask and an
+                                // underlying border rasterize a pixel apart, so
+                                // the image eats the bottom (and right) stroke —
+                                // same image-over-border effect as the carousel's
+                                // wcThumb stroke below.
+                                Rectangle {
+                                    anchors.fill: thumb
+                                    radius: 14
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: wallCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
                                 }
                                 Text {
                                     anchors.top: thumb.bottom
@@ -3486,10 +3542,37 @@ ShellRoot {
                                     height: parent.height
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: (parent.width - width) / 2 - wcCell.rank * wallCarousel.parallaxPx
+                                    // hidden once the centered gif takes over below,
+                                    // so its still frame doesn't show through at
+                                    // slightly different crop/pan geometry
+                                    visible: !wcThumb.animating
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
                                     sourceSize: Qt.size(0, wallCarousel.barHeight)
                                     source: wcCell.wall ? "file://" + wcCell.wall.path : ""
+                                }
+                                // Only the centered window plays its .gif from the
+                                // source file; side windows keep the still Image
+                                // above (which already shows frame 0 of a gif) so
+                                // scrolling the carousel doesn't decode a movie
+                                // per window.
+                                readonly property bool animating: wcCell.isCenter && win.wallCarouselSettled && !!wcCell.wall?.gif
+                                AnimatedImage {
+                                    // Same (wider-than-bar) target width as the still
+                                    // Image above, not just barWidth: PreserveAspectCrop
+                                    // picks its scale from max(targetW/iw, targetH/ih),
+                                    // so a narrower target box here would crop to a
+                                    // different (larger) scale than the still frame it
+                                    // replaces, producing a visible shrink/jump the
+                                    // instant a centered gif starts playing.
+                                    width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
+                                    height: parent.height
+                                    anchors.centerIn: parent
+                                    visible: wcThumb.animating
+                                    playing: wcThumb.animating
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                    source: wcThumb.animating ? "file://" + wcCell.wall.path : ""
                                 }
                             }
                             // Stroke above the image, not a border on wcThumb:
@@ -3500,7 +3583,8 @@ ShellRoot {
                             // border rasterize a pixel apart — the image eats
                             // the right/bottom stroke and roughens the
                             // corners (same image-over-border effect the
-                            // selection frame's z comment describes).
+                            // tiles grid's wallDrawer stroke above works
+                            // around).
                             Rectangle {
                                 anchors.fill: parent
                                 radius: 12
@@ -3755,6 +3839,16 @@ ShellRoot {
                                         color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
                                         border.width: 1
                                         border.color: clipCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.25)
+
+                                        Rectangle {
+                                            visible: clipCell.isSelected
+                                            anchors.fill: parent
+                                            anchors.margins: -5
+                                            radius: 17
+                                            color: "transparent"
+                                            border.width: 3
+                                            border.color: Qt.alpha(root.accent, 0.33)
+                                        }
 
                                         ClippingRectangle {
                                             visible: clipCell.shownClip !== null && clipCell.shownClip.image === true
