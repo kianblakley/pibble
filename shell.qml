@@ -794,6 +794,19 @@ ShellRoot {
         // back through the watcher above), so the Dynamic-theme kickoff is
         // guarded to only ever fire once, on the true initial load
         onLoaded: {
+            // JsonAdapter's load (both the initial parse and any reload()
+            // from a hand-edit) writes object/array-typed properties in a
+            // way that doesn't reliably emit their changed signal — plain
+            // `cfg.pageOrder = [...]` assignments from QML do (movePage
+            // reacts instantly), but the load path leaves bindings that
+            // depend on these (paneOrder, activePanes) stuck on whatever
+            // they last evaluated to, typically the pre-load default. Force
+            // a re-notify by reassigning a fresh shallow copy of each.
+            cfg.pageOrder = cfg.pageOrder.slice();
+            cfg.pages = Object.assign({}, cfg.pages);
+            cfg.keybinds = Object.assign({}, cfg.keybinds);
+            cfg.flyouts = Object.assign({}, cfg.flyouts);
+            cfg.clockShow = Object.assign({}, cfg.clockShow);
             root.healSettings();
             if (!matugenProc.startupKicked) {
                 matugenProc.startupKicked = true;
@@ -1844,7 +1857,18 @@ ShellRoot {
             expandedClip = null;
             cancelCapture();
             input.text = "";
-            pane = homePane();
+            // panes replay their entrance animation off onPaneChanged (see
+            // drawerIn/wallDrawerIn/etc below), which only fires on an
+            // actual value change — reopening onto the same pane the
+            // launcher was last closed on is otherwise a no-op assignment,
+            // so the pane's opacity stays wherever the 0.004 reset below
+            // leaves it, with nothing left to animate it back in. Round-trip
+            // through a dead value so the assignment always fires a real
+            // transition.
+            const home = homePane();
+            if (pane === home)
+                pane = "";
+            pane = home;
             paneBeforeSettings = homePane();
             settingsTab = "general";
             selected = 0;
