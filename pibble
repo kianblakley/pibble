@@ -62,9 +62,27 @@ stop_daemon() {
     [ -n "$pids" ] && kill $pids
 }
 
+# built-in pages plus whatever custom pages are currently uploaded, read
+# straight out of settings.json (same file/format export_icon_theme reads)
+# so `pibble help` always reflects what's actually toggleable right now
+list_pages() {
+    local shell_id settings ids
+    shell_id=$(printf '%s' "$repo/shell.qml" | md5sum | cut -d' ' -f1)
+    settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
+    ids="clock, apps, walls, clips"
+    if [ -f "$settings" ]; then
+        # ids are namespaced "folder:name"/"upload:name" (see customPagesDir
+        # in shell.qml); the prefix is internal, so strip it here — the CLI
+        # accepts (and this prints) just the bare name, via win.resolvePageArg
+        custom=$(sed -n '/"uploadedPages"/,/^    \]/ s/.*"id": *"\([^"]*\)".*/\1/p' "$settings" | sed 's/^[^:]*://' | paste -sd, -)
+        [ -n "$custom" ] && ids="$ids, ${custom//,/, }"
+    fi
+    printf '%s' "$ids"
+}
+
 usage() {
-    cat <<'USAGE'
-pibble — desktop shell daemon control
+    cat <<USAGE
+pibble - desktop shell daemon control
 
 Usage: pibble <command>
 
@@ -76,8 +94,9 @@ Commands:
             show/hide the launcher window, starting the daemon first if
             needed; with a page id, opens/switches straight to that page
             (or closes if it's already the one showing)
+            available pages: $(list_pages)
   replay    re-fire one recent notification; repeated presses step back
-  help      show this message (also what a bare `pibble` does)
+  help      show this message (also what a bare \`pibble\` does)
 USAGE
 }
 
@@ -124,7 +143,7 @@ toggle)
 replay)
     reap_duplicates
     ipc replay && exit 0
-    echo "pibble: daemon not running — run 'pibble start' first" >&2
+    echo "pibble: daemon not running - run 'pibble start' first" >&2
     exit 1
     ;;
 help | "")
