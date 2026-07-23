@@ -555,6 +555,79 @@ ShellRoot {
         }
     }
 
+    // ---------- custom page contract ----------
+    // One of these is created per enabled custom page (see the "Custom
+    // pages" render block below) and handed to the loaded file's root item
+    // as `pibble`, if it declares that property — every member here is
+    // optional to use. Properties are live bindings (theme/anim-style
+    // changes propagate the same as they do to any built-in pane); the
+    // functions are the only sanctioned way in, since cfg/root/win
+    // themselves are never exposed — a page can't reach into settings it
+    // doesn't own or call internal launcher functions.
+    //
+    // The other direction — a page contributing to pibble, rather than the
+    // other way round — goes through two more properties on the same root
+    // item, read by win.customSettingsTabs (see there for details) rather
+    // than written by PageContext: a non-empty `settingsLabel` plus a
+    // `settingsTab` Component get the page its own tab in Settings,
+    // alongside General/Pages/Keybindings/Flyouts.
+    component PageContext: QtObject {
+        id: pageCtx
+        required property string pageId
+        readonly property color accent: root.accent
+        readonly property color fg: root.fg
+        readonly property color muted: root.muted
+        readonly property color surface: root.surface
+        readonly property string mono: root.mono
+        readonly property string tablerFont: root.tablerFont
+        readonly property var ti: root.ti
+        readonly property real fontScale: cfg.fontScale
+        function fs(px: int): int {
+            return root.fs(px);
+        }
+        readonly property string animStyle: win.animStyle
+        function ad(ms: int): int {
+            return win.ad(ms);
+        }
+        // true from the moment the launcher starts revealing this page
+        // until it's navigated away from — mirrors what every built-in pane
+        // gates its own entrance animations on (see win.pane)
+        readonly property bool active: win.pane === pageId
+        readonly property bool shown: win.shown
+        // closes the whole launcher, e.g. once a page's own action completes
+        function close(): void {
+            win.exit();
+        }
+        function openSettings(): void {
+            win.toggleSettings();
+        }
+        // fire-and-forget desktop notification, gated by the same "alerts"
+        // flyout toggle every internal notify-send call respects
+        function notify(summary: string, body: string): void {
+            if (!root.flyoutOn("alerts"))
+                return;
+            Quickshell.execDetached(["notify-send", "-a", "pibble", summary, body ?? ""]);
+        }
+        function copyToClipboard(text: string): void {
+            root.copyToClipboard(text);
+        }
+        // per-page persistence: a page only ever sees its own namespace
+        // (cfg.customPageData[pageId]), keyed by whatever string the page
+        // chooses — arbitrary JSON-serializable values, same as any cfg.*
+        // setting. Survives reinstalling/renaming other pages; only wiped if
+        // the page itself is trashed (see trashPage()).
+        function getSetting(key: string, fallback) {
+            const store = (cfg.customPageData ?? {})[pageId];
+            return store && key in store ? store[key] : fallback;
+        }
+        function setSetting(key: string, value): void {
+            const all = Object.assign({}, cfg.customPageData ?? {});
+            all[pageId] = Object.assign({}, all[pageId] ?? {}, { [key]: value });
+            cfg.customPageData = all;
+            root.saveSettings();
+        }
+    }
+
     // one physical-looking key in a keybinding chord (keybindings tab): a
     // flat "cap" over a slightly darker "base" peeking out underneath reads
     // as a keycap without needing a dedicated icon font — tabler-icons only
@@ -798,9 +871,9 @@ ShellRoot {
             // JsonAdapter's load (both the initial parse and any reload()
             // from a hand-edit) writes object/array-typed properties in a
             // way that doesn't reliably emit their changed signal — plain
-            // `cfg.pageOrder = [...]` assignments from QML do (movePage
+            // `cfg.pageOrder = [...]` assignments from QML do (moveFullPage
             // reacts instantly), but the load path leaves bindings that
-            // depend on these (paneOrder, activePanes) stuck on whatever
+            // depend on these (fullPageOrder, activePanes) stuck on whatever
             // they last evaluated to, typically the pre-load default. Force
             // a re-notify by reassigning a fresh shallow copy of each.
             cfg.pageOrder = cfg.pageOrder.slice();
@@ -832,10 +905,14 @@ ShellRoot {
             // cycle order of the pages (drag the chips in settings to change)
             property var pageOrder: ["clock", "apps", "walls", "clips"]
             // pages added via the Pages settings row's upload picker; each
-            // is { id, label, path, on } and starts unchecked. Not real
-            // panes (there's no plugin loader), just tracked/ordered
-            // alongside the built-in four — see win.fullPageOrder
+            // is { id, label, path, on } and starts unchecked. Loaded and
+            // cycled alongside the built-in four once ticked on — see
+            // win.fullPageOrder and the "Custom pages" Loader block
             property var uploadedPages: []
+            // per-page persistent storage for custom pages, namespaced by
+            // page id (see PageContext.getSetting/setSetting) — never read
+            // or written to directly by pibble itself otherwise
+            property var customPageData: ({})
             property string animStyle: "wave"
             // shared across the launcher and both flyouts
             property real fontScale: 1.0
@@ -1607,9 +1684,27 @@ ShellRoot {
 
     // ---------- uploaded pages (Pages settings row) ----------
     // pages added via the settings row's upload picker live here, gitignored
-    // since there's no real plugin loader yet (see win.pageIds) — this is
-    // also where dropping a page.qml in by hand shows it up in the list
-    readonly property string customPagesDir: Quickshell.shellDir + "/custom"
+    // since they're user content, not shell code (see win.pageIds and the
+    // "Custom pages" Loader block for how they actually render) — this is
+    // also where dropping a page.qml in by hand shows it up in the list.
+    //
+    // Two shapes are scanned (below): a top-level *.qml file is a
+    // self-contained single-file page; a top-level directory is a
+    // multi-file page, loaded from <dir>/main.qml — a page can be split
+    // across as many sibling files as it wants as long as they all live in
+    // its own directory. Reach them from main.qml with `import "." as
+    // Local` and `Local.Foo {}` — quickshell's own qmldir synthesis (see
+    // quickshell.qmlscanner in its logs) shadows the plain-Qt implicit
+    // directory import an ordinary QML app would get for free, so an
+    // unqualified `Foo {}` or bare `import "."` silently fails to resolve
+    // ("Foo is not a type") even though the file sits right there; the
+    // qualified form was verified working. A directory with no main.qml is
+    // surfaced as a disabled, undeletable-by-toggle row instead of being
+    // silently ignored or half-loaded — see the "broken" handling below.
+    //
+    // example.qml.sample — the shipped, tracked example — is deliberately
+    // not *.qml, so it never shows up as a real page until renamed.
+    readonly property string customPagesDir: Quickshell.shellDir + "/custom-pages"
     function rescanUploadedPages() {
         pagesScan.running = false;
         pagesScan.running = true;
@@ -1620,26 +1715,55 @@ ShellRoot {
         command: ["bash", "-c", `
             dir="$1"
             [ -d "$dir" ] || exit 0
-            for f in "$dir"/*; do
-                [ -f "$f" ] && printf '%s\\n' "$(basename "$f")"
+            for f in "$dir"/*.qml; do
+                [ -f "$f" ] && printf 'F\\t%s\\n' "$(basename "$f")"
+            done
+            for d in "$dir"/*/; do
+                [ -d "$d" ] || continue
+                name="$(basename "$d")"
+                # *.sample directories are inert templates (see
+                # example-folder.sample), same idea as example.qml.sample
+                # for single files — skip entirely, not even as "broken"
+                case "$name" in *.sample) continue ;; esac
+                if [ -f "$d/main.qml" ]; then
+                    printf 'D\\t%s\\n' "$name"
+                else
+                    printf 'X\\t%s\\n' "$name"
+                fi
             done`, "_", root.customPagesDir]
         stdout: StdioCollector {
             onStreamFinished: {
                 // reconciles cfg.uploadedPages against what's actually on
-                // disk: files removed outside the app (or trashed via the
-                // row's own delete control) drop out, files added outside
+                // disk: entries removed outside the app (or trashed via the
+                // row's own delete control) drop out, ones added outside
                 // the app (or dropped in by hand) show up unchecked — the
                 // same merge either way, so external edits and in-app
-                // uploads/trashes are indistinguishable once this runs
-                const files = text.trim() ? text.trim().split("\n") : [];
+                // uploads/trashes are indistinguishable once this runs.
+                // Each disk line is "F<tab>name" (file page), "D<tab>name"
+                // (folder page with a main.qml), or "X<tab>name" (folder
+                // missing one — tracked so it gets a row and a one-time
+                // notification, but never a loadable/toggleable page).
+                const lines = text.trim() ? text.trim().split("\n") : [];
+                const found = [];
+                for (const line of lines) {
+                    const tab = line.indexOf("\t");
+                    if (tab < 0)
+                        continue;
+                    found.push({ kind: line.slice(0, tab), name: line.slice(tab + 1) });
+                }
+                const key = (kind, name) => (kind === "D" ? "D" : "F") + ":" + name;
+                const foundKeys = found.map(e => key(e.kind, e.name));
                 const existing = cfg.uploadedPages ?? [];
-                const stillPresent = existing.filter(u => files.includes(u.filename));
-                const known = stillPresent.map(u => u.filename);
-                const added = files.filter(f => !known.includes(f)).map(f => ({
-                    id: "upload:" + f,
-                    label: f,
-                    filename: f,
-                    path: root.customPagesDir + "/" + f,
+                const existingKey = u => key(u.dir ? "D" : "F", u.filename);
+                const stillPresent = existing.filter(u => foundKeys.includes(existingKey(u)));
+                const knownKeys = stillPresent.map(existingKey);
+                const added = found.filter(e => !knownKeys.includes(key(e.kind, e.name))).map(e => ({
+                    id: (e.kind === "F" ? "upload:" : "folder:") + e.name,
+                    label: e.name,
+                    filename: e.name,
+                    dir: e.kind !== "F",
+                    broken: e.kind === "X",
+                    path: root.customPagesDir + "/" + e.name,
                     on: false
                 }));
                 const merged = stillPresent.concat(added);
@@ -1661,6 +1785,26 @@ ShellRoot {
                         cfg.pageOrder = win.fullPageOrder;
                     }
                     root.saveSettings();
+                    // new entries start unchecked (see `added` above) with
+                    // no other indication they arrived — whether just
+                    // uploaded through the row's own picker or dropped into
+                    // custom-pages by hand — so nudge the user to go flip
+                    // them on instead of leaving them to discover an
+                    // inert-looking row on their own. Broken folders get
+                    // their own message (there's nothing to "enable"), and
+                    // only fire once each — same as a real page, this
+                    // fires off `added`, not off however many broken rows
+                    // still exist on every later rescan.
+                    const goodAdded = added.filter(u => !u.broken);
+                    const brokenAdded = added.filter(u => u.broken);
+                    if (goodAdded.length && root.flyoutOn("alerts")) {
+                        const body = goodAdded.length === 1
+                            ? goodAdded[0].label + " — enable it in Settings > Pages"
+                            : goodAdded.length + " new custom pages — enable them in Settings > Pages";
+                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "New custom page found", body]);
+                    }
+                    for (const u of brokenAdded)
+                        root.notifyError("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point — see Settings > Pages.");
                 }
             }
         }
@@ -1970,6 +2114,11 @@ ShellRoot {
             wallCarousel.opacity = 0.004;
             clipDrawer.opacity = 0.004;
             settingsPane.opacity = 0.004;
+            for (let i = 0; i < customPagesRepeater.count; i++) {
+                const h = customPagesRepeater.itemAt(i);
+                if (h)
+                    h.opacity = 0.004;
+            }
         }
 
         anchors {
@@ -2046,26 +2195,11 @@ ShellRoot {
         // Tab cycles the enabled panes; the settings pane sits outside the
         // cycle (opened via the corner button or Ctrl+S).
         property string pane: "clock"
-        // cycle order comes from settings (drag the page chips to reorder);
-        // healed so all four pages are always present exactly once
-        readonly property var paneOrder: {
-            const def = ["clock", "apps", "walls", "clips"];
-            const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : []).filter(p => def.includes(p));
-            for (const d of def)
-                if (!o.includes(d))
-                    o.push(d);
-            return o;
-        }
-        function movePage(p: string, to: int) {
-            const o = paneOrder.filter(x => x !== p);
-            o.splice(Math.max(0, Math.min(o.length, to)), 0, p);
-            cfg.pageOrder = o;
-        }
-        // every id the Pages settings row can show: the four real panes,
-        // any uploaded (decorative — no plugin loader exists) entries, and
-        // "__add__" (the add-a-page row — a real, reorderable member of
-        // this list so it drags like everything else, but not a real page:
-        // win/pagesBlock's pageOn/pageToggle/etc. special-case it).
+        // every id the Pages settings row can show: the four built-in
+        // panes, any uploaded custom pages, and "__add__" (the add-a-page
+        // row — a real, reorderable member of this list so it drags like
+        // everything else, but not a real page: win/pagesBlock's
+        // pageOn/pageToggle/etc. special-case it).
         // Deliberately reads only cfg.uploadedPages, never
         // cfg.pageOrder, so its value (and object identity) stays put
         // across a pure reorder — that's what the settings row's Repeater
@@ -2079,23 +2213,24 @@ ShellRoot {
         // the time.
         readonly property var pageIds: {
             const def = ["clock", "apps", "walls", "clips"];
-            return def.concat((cfg.uploadedPages ?? []).map(u => u.id), ["__add__"]);
+            return def.concat((cfg.uploadedPages ?? []).map(u => u.id), ["__add__", "__add_folder__"]);
         }
         // display order for the Pages settings row, layered on top of
-        // pageIds above. Shares cfg.pageOrder with paneOrder above, which
-        // just filters this same array down to the four real ids, so
-        // dragging an uploaded row in the settings list can't disturb the
-        // real pane cycle order. Newly discovered ids default to the
-        // bottom (a freshly uploaded page) except "__add__", which defaults
-        // to the top — until the user drags it, at which point its position
-        // is captured in cfg.pageOrder like any other row and this no
-        // longer applies.
+        // pageIds above; also what activePanes below filters down to the
+        // enabled subset for Tab's cycle order, so dragging a row here
+        // reorders the cycle too. Newly discovered ids default to the
+        // bottom (a freshly uploaded page) except "__add__"/"__add_folder__",
+        // which default to the top (in that order) — until the user drags
+        // one, at which point its position is captured in cfg.pageOrder
+        // like any other row and this no longer applies.
         readonly property var fullPageOrder: {
             const valid = pageIds;
             const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : []).filter(p => valid.includes(p));
             for (const v of valid)
-                if (!o.includes(v) && v !== "__add__")
+                if (!o.includes(v) && v !== "__add__" && v !== "__add_folder__")
                     o.push(v);
+            if (!o.includes("__add_folder__"))
+                o.unshift("__add_folder__");
             if (!o.includes("__add__"))
                 o.unshift("__add__");
             return o;
@@ -2106,17 +2241,53 @@ ShellRoot {
             cfg.pageOrder = o;
         }
         function toggleUploadedPage(id: string) {
-            const list = (cfg.uploadedPages ?? []).map(u => u.id === id ? Object.assign({}, u, { on: !u.on }) : u);
-            cfg.uploadedPages = list;
+            const uploaded = cfg.uploadedPages ?? [];
+            const u = uploaded.find(x => x.id === id);
+            // a broken page (folder missing main.qml — see pagesScan) has
+            // nothing to load; its row exists so it can be seen and
+            // trashed, not toggled on
+            if (!u || u.broken)
+                return;
+            // keep at least one page enabled overall (built-in or custom),
+            // same invariant togglePage enforces for the built-in four
+            if (u.on && activePanes.length <= 1)
+                return;
+            cfg.uploadedPages = uploaded.map(x => x.id === id ? Object.assign({}, x, { on: !x.on }) : x);
             root.saveSettings();
         }
+        // cycle order: the four built-ins (gated by cfg.pages) plus any
+        // enabled custom page, in fullPageOrder's relative order — a custom
+        // page's position among the Pages settings rows is exactly where it
+        // sits in Tab's cycle too.
         readonly property var activePanes: {
             const pages = cfg.pages ?? {};
-            const list = paneOrder.filter(p => pages[p] !== false);
+            const uploaded = cfg.uploadedPages ?? [];
+            const list = fullPageOrder.filter(id => {
+                if (id === "__add__" || id === "__add_folder__")
+                    return false;
+                const u = uploaded.find(x => x.id === id);
+                return u ? u.on : pages[id] !== false;
+            });
             return list.length ? list : ["clock"];
         }
         function homePane(): string {
             return activePanes[0];
+        }
+        // custom pages that additionally contribute a Settings tab — a
+        // loaded page's root item opts in by declaring both
+        // `settingsLabel` (non-empty) and `settingsTab` (a Component); see
+        // PageContext. Reads customPageHost.pageItem (not the Repeater
+        // directly) so this recomputes whenever a page loads/unloads, not
+        // just when the set of uploaded pages itself changes.
+        readonly property var customSettingsTabs: {
+            const tabs = [];
+            for (let i = 0; i < customPagesRepeater.count; i++) {
+                const h = customPagesRepeater.itemAt(i);
+                const it = h ? h.pageItem : null;
+                if (it && "settingsLabel" in it && it.settingsLabel && "settingsTab" in it && it.settingsTab)
+                    tabs.push({ pageId: h.modelData.id, label: it.settingsLabel, component: it.settingsTab });
+            }
+            return tabs;
         }
         readonly property bool drawerOpen: pane === "apps"
 
@@ -2249,7 +2420,7 @@ ShellRoot {
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
-                const tabs = ["general", "pages", "keybindings", "flyouts"];
+                const tabs = ["general", "pages", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
                 settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
                 return;
             }
@@ -2770,11 +2941,12 @@ ShellRoot {
             input.forceActiveFocus();
         }
 
-        // set right before exit() when the close is a hand-off to the pages
-        // upload dialog rather than a real dismiss; fadeOut's final
-        // ScriptAction opens the dialog only once the exit animation has
-        // fully played, instead of racing it
-        property bool dialogPending: false
+        // set right before exit() when the close is a hand-off to one of
+        // the pages upload dialogs rather than a real dismiss — "file" or
+        // "folder", matching which row was tapped; fadeOut's final
+        // ScriptAction opens the right one only once the exit animation
+        // has fully played, instead of racing it
+        property string dialogPending: ""
 
         ParallelAnimation {
             id: fadeIn
@@ -2843,9 +3015,12 @@ ShellRoot {
             }
             ScriptAction {
                 script: {
-                    if (win.dialogPending) {
-                        win.dialogPending = false;
+                    if (win.dialogPending === "file") {
+                        win.dialogPending = "";
                         pagesUploadDialog.open();
+                    } else if (win.dialogPending === "folder") {
+                        win.dialogPending = "";
+                        pagesUploadFolderDialog.open();
                     }
                 }
             }
@@ -4332,10 +4507,101 @@ ShellRoot {
                 }
             }
 
+            // Custom pages: one host per enabled upload (see
+            // root.customPagesDir), each Loader-ing the user's own .qml file
+            // as its content. Bound to cfg.uploadedPages directly (not
+            // win.fullPageOrder) for the same delegate-stability reason
+            // pagesBlock's Repeater is — membership only changes on
+            // upload/trash/disk sync, never on a pure reorder. Kept alive
+            // (active whenever the page itself is switched on) rather than
+            // lazy-loaded to the current pane, so a page's own state
+            // (timers, scroll position, whatever it wants to hold onto)
+            // survives Tab-cycling away and back, same as the volume OSD.
+            Repeater {
+                id: customPagesRepeater
+                model: cfg.uploadedPages ?? []
+
+                Item {
+                    id: customPageHost
+                    required property var modelData
+                    anchors.centerIn: parent
+                    width: pageLoader.item && pageLoader.item.width > 0 ? pageLoader.item.width : 420
+                    height: pageLoader.item && pageLoader.item.height > 0 ? pageLoader.item.height : 320
+                    transform: panePull
+                    opacity: 0.004
+                    visible: modelData.on && win.pane === modelData.id
+
+                    // fresh context per page, not shared — see PageContext
+                    readonly property var ctx: PageContext {
+                        pageId: customPageHost.modelData.id
+                    }
+                    // exposed so win.customSettingsTabs (a plain computed
+                    // property, not something Loader-internal) can react to
+                    // this page loading/unloading without reaching into the
+                    // Repeater's delegates itself
+                    readonly property var pageItem: pageLoader.item
+
+                    function syncActive() {
+                        if (pageLoader.item && "active" in pageLoader.item)
+                            pageLoader.item.active = win.pane === modelData.id;
+                    }
+
+                    Connections {
+                        target: win
+                        function onPaneChanged() {
+                            if (win.pane === customPageHost.modelData.id)
+                                customPageIn.restart();
+                            customPageHost.syncActive();
+                        }
+                    }
+
+                    ParallelAnimation {
+                        id: customPageIn
+                        NumberAnimation { target: customPageHost; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: customPageHost; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                        NumberAnimation { target: customPageHost; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    }
+
+                    Loader {
+                        id: pageLoader
+                        anchors.centerIn: parent
+                        // modelData.on can only be true for a real (non-
+                        // broken) entry — see win.toggleUploadedPage — but
+                        // this is also a settings.json value, hand-editable
+                        // like any other, so the broken check is repeated
+                        // here rather than trusted from there
+                        active: customPageHost.modelData.on && !customPageHost.modelData.broken
+                        // a directory page's entry point is always
+                        // <dir>/main.qml (see pagesScan and the
+                        // customPagesDir comment for how it reaches its own
+                        // sibling files — nothing else needed here, this
+                        // Loader doesn't care whether it's one file or many)
+                        source: active ? Qt.resolvedUrl(customPageHost.modelData.path + (customPageHost.modelData.dir ? "/main.qml" : "")) : ""
+                        onLoaded: {
+                            if ("pibble" in item)
+                                item.pibble = customPageHost.ctx;
+                            customPageHost.syncActive();
+                        }
+                        // a page that fails to parse/instantiate just never
+                        // shows (the real QML error lands in the terminal/
+                        // journal like any other, per CLAUDE.md's "no
+                        // compiler" note) — this only tells the user which
+                        // one so they know where to look
+                        onStatusChanged: {
+                            if (status === Loader.Error)
+                                root.notifyError("Custom page failed to load", customPageHost.modelData.label);
+                        }
+                    }
+                }
+            }
+
             // Settings pane
             Item {
                 id: settingsPane
-                readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"]
+                // built-ins first, then one slot per custom page that opts
+                // into a settings tab (see win.customSettingsTabs) — in
+                // whatever order those pages themselves loaded in
+                readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(win.customSettingsTabs.map(t => t.pageId))
                 readonly property int tabIdx: Math.max(0, tabOrder.indexOf(win.settingsTab))
                 anchors.centerIn: parent
                 width: 860
@@ -4381,7 +4647,7 @@ ShellRoot {
                                 { id: "pages", label: "Pages" },
                                 { id: "keybindings", label: "Keybindings" },
                                 { id: "flyouts", label: "Flyouts" }
-                            ]
+                            ].concat(win.customSettingsTabs.map(t => ({ id: t.pageId, label: t.label })))
 
                             Item {
                                 id: settingsTabItem
@@ -4427,7 +4693,19 @@ ShellRoot {
                     anchors.topMargin: 18
                     // constant height (tallest page): switching tabs never
                     // moves the pane, shorter pages stay top-aligned
-                    height: Math.max(genCol.height, settingsCol.height, keybindCol.height, flyCol.height)
+                    height: Math.max(genCol.height, settingsCol.height, keybindCol.height, flyCol.height, customTabsMaxHeight)
+                    // tallest of any custom tab's content column, recomputed
+                    // whenever one loads/resizes — 0 (a no-op in the Math.max
+                    // above) when there are none
+                    readonly property real customTabsMaxHeight: {
+                        let m = 0;
+                        for (let i = 0; i < customTabsRepeater.count; i++) {
+                            const c = customTabsRepeater.itemAt(i);
+                            if (c)
+                                m = Math.max(m, c.height);
+                        }
+                        return m;
+                    }
 
                 // general tab: settings shared by the launcher and both flyouts
                 Column {
@@ -4742,16 +5020,24 @@ ShellRoot {
                         function pageLabel(id) {
                             if (id === "__add__")
                                 return "Add a page…";
+                            if (id === "__add_folder__")
+                                return "Add a folder…";
                             if (defLabels[id])
                                 return defLabels[id];
                             const u = (cfg.uploadedPages ?? []).find(p => p.id === id);
-                            return u ? u.label : id;
+                            if (!u)
+                                return id;
+                            return u.broken ? u.label + " — missing main.qml" : u.label;
                         }
                         function pageOn(id) {
                             if (defLabels[id])
                                 return (cfg.pages ?? {})[id] !== false;
                             const u = (cfg.uploadedPages ?? []).find(p => p.id === id);
                             return !!(u && u.on);
+                        }
+                        function pageBroken(id) {
+                            const u = (cfg.uploadedPages ?? []).find(p => p.id === id);
+                            return !!(u && u.broken);
                         }
                         function pageToggle(id) {
                             if (defLabels[id])
@@ -4795,23 +5081,33 @@ ShellRoot {
                         }
 
                         // copies the file picked via the "add a page" row into
-                        // pibble/custom (gitignored, since there's no real
-                        // plugin loader yet) and rescans — the row shows up
-                        // unchecked once the scan picks the new file up, the
-                        // same path an outside drag-and-drop into that
-                        // folder would take
+                        // pibble/custom-pages (gitignored, since it's user
+                        // content, not shell code) and rescans — the row
+                        // shows up unchecked once the scan picks the new
+                        // file up, the same path an outside drag-and-drop
+                        // into that folder would take. Kept under its own
+                        // name (not stamped with a timestamp) unless that
+                        // name's already taken, in which case it gets the
+                        // usual "name (2).qml" treatment instead of picking
+                        // a new name every time.
                         FileDialog {
                             id: pagesUploadDialog
                             title: "Select a page.qml"
-                            nameFilters: ["QML files (*.qml)", "All files (*)"]
+                            nameFilters: ["QML files (*.qml)"]
                             onAccepted: {
                                 const src = String(selectedFile).replace("file://", "");
                                 const base = src.slice(src.lastIndexOf("/") + 1);
-                                const destDir = root.customPagesDir;
                                 pagesUploadCopy.command = ["bash", "-c", `
-                                    dir="$1"; src="$2"; dest="$3"
+                                    dir="$1"; src="$2"; base="$3"
                                     mkdir -p "$dir"
-                                    cp -- "$src" "$dest"`, "_", destDir, src, destDir + "/" + Date.now() + "-" + base];
+                                    stem="\${base%.*}" ext="\${base##*.}"
+                                    dest="$dir/$base"
+                                    n=2
+                                    while [ -e "$dest" ]; do
+                                        dest="$dir/$stem ($n).$ext"
+                                        n=$((n + 1))
+                                    done
+                                    cp -- "$src" "$dest"`, "_", root.customPagesDir, src, base];
                                 pagesUploadCopy.running = true;
                                 win.reopenAfterDialog();
                             }
@@ -4821,6 +5117,43 @@ ShellRoot {
                         }
                         Process {
                             id: pagesUploadCopy
+                            onExited: exitCode => {
+                                if (exitCode === 0)
+                                    root.rescanUploadedPages();
+                            }
+                        }
+                        // folder counterpart of pagesUploadDialog above, for
+                        // multi-file pages (see customPagesDir) — same
+                        // collision-avoiding rename, just on the directory
+                        // name instead of a filename's stem
+                        FolderDialog {
+                            id: pagesUploadFolderDialog
+                            title: "Select a page folder (needs a main.qml inside)"
+                            onAccepted: {
+                                // strip a trailing slash (if any) before
+                                // splitting, or base would come out as
+                                // "mywidget/" instead of "mywidget"
+                                const src = String(selectedFolder).replace("file://", "").replace(/\/$/, "");
+                                const base = src.slice(src.lastIndexOf("/") + 1);
+                                pagesUploadFolderCopy.command = ["bash", "-c", `
+                                    dir="$1"; src="$2"; base="$3"
+                                    mkdir -p "$dir"
+                                    dest="$dir/$base"
+                                    n=2
+                                    while [ -e "$dest" ]; do
+                                        dest="$dir/$base ($n)"
+                                        n=$((n + 1))
+                                    done
+                                    cp -r -- "$src" "$dest"`, "_", root.customPagesDir, src, base];
+                                pagesUploadFolderCopy.running = true;
+                                win.reopenAfterDialog();
+                            }
+                            onRejected: {
+                                win.reopenAfterDialog();
+                            }
+                        }
+                        Process {
+                            id: pagesUploadFolderCopy
                             onExited: exitCode => {
                                 if (exitCode === 0)
                                     root.rescanUploadedPages();
@@ -4839,6 +5172,11 @@ ShellRoot {
                                     return;
                                 if (pagesBlock.revealedId === removedId)
                                     pagesBlock.revealedId = "";
+                                if (removedId && (cfg.customPageData ?? {})[removedId] !== undefined) {
+                                    const all = Object.assign({}, cfg.customPageData);
+                                    delete all[removedId];
+                                    cfg.customPageData = all;
+                                }
                                 root.rescanUploadedPages();
                                 if (root.flyoutOn("alerts"))
                                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "Page moved to trash", trashedLabel]);
@@ -4908,7 +5246,9 @@ ShellRoot {
                                             required property string modelData
                                             readonly property int ord: win.fullPageOrder.indexOf(modelData)
                                             readonly property bool isReal: !!pagesBlock.defLabels[modelData]
-                                            readonly property bool isAdd: modelData === "__add__"
+                                            readonly property bool isAddFile: modelData === "__add__"
+                                            readonly property bool isAddFolder: modelData === "__add_folder__"
+                                            readonly property bool isAdd: isAddFile || isAddFolder
                                             readonly property bool isUploaded: !isReal && !isAdd
                                             width: 780
                                             height: pagesBlock.rowH - 4
@@ -5136,6 +5476,7 @@ ShellRoot {
 
                                                     Rectangle {
                                                         id: pageBox
+                                                        readonly property bool broken: pagesBlock.pageBroken(pageRow.modelData)
                                                         visible: !pageRow.isAdd
                                                         anchors.verticalCenter: parent.verticalCenter
                                                         width: 18
@@ -5143,20 +5484,21 @@ ShellRoot {
                                                         radius: 4
                                                         color: pagesBlock.pageOn(pageRow.modelData) ? Qt.alpha(root.accent, 0.85) : "transparent"
                                                         border.width: 1
-                                                        border.color: pagesBlock.pageOn(pageRow.modelData) ? root.accent : Qt.alpha(root.muted, 0.6)
+                                                        border.color: broken ? Qt.alpha(root.muted, 0.6) : (pagesBlock.pageOn(pageRow.modelData) ? root.accent : Qt.alpha(root.muted, 0.6))
 
                                                         Text {
                                                             anchors.centerIn: parent
-                                                            visible: pagesBlock.pageOn(pageRow.modelData)
-                                                            text: root.ti.check
-                                                            color: "#141210"
+                                                            visible: pagesBlock.pageOn(pageRow.modelData) || pageBox.broken
+                                                            text: pageBox.broken ? root.ti.alertTriangle : root.ti.check
+                                                            color: pageBox.broken ? Qt.alpha(root.muted, 0.9) : "#141210"
                                                             font { family: root.tablerFont; pixelSize: 13 }
                                                         }
-                                                        // disabled while revealed so a tap
-                                                        // there closes the swipe instead of
-                                                        // toggling the page underneath it
+                                                        // disabled while revealed (a tap there
+                                                        // closes the swipe instead) or when the
+                                                        // page is broken — there's nothing to
+                                                        // toggle on, only to trash
                                                         TapHandler {
-                                                            enabled: pageRow.revealX < 1
+                                                            enabled: pageRow.revealX < 1 && !pageBox.broken
                                                             onTapped: pagesBlock.pageToggle(pageRow.modelData)
                                                         }
                                                     }
@@ -5186,9 +5528,16 @@ ShellRoot {
                                                 }
 
                                                 TapHandler {
-                                                    enabled: pageRow.isAdd
+                                                    enabled: pageRow.isAddFile
                                                     onTapped: {
-                                                        win.dialogPending = true;
+                                                        win.dialogPending = "file";
+                                                        win.exit();
+                                                    }
+                                                }
+                                                TapHandler {
+                                                    enabled: pageRow.isAddFolder
+                                                    onTapped: {
+                                                        win.dialogPending = "folder";
                                                         win.exit();
                                                     }
                                                 }
@@ -5371,7 +5720,7 @@ ShellRoot {
                             id: pagesSub
                             anchors.top: pagesListWrap.bottom
                             anchors.topMargin: 2
-                            text: "drag to reorder · swipe right to delete · files placed in pibble/custom appear here"
+                            text: "drag to reorder · swipe right to delete · .qml files (or folders with a main.qml) placed in pibble/custom-pages appear here"
                         }
                     }
 
@@ -5778,6 +6127,34 @@ ShellRoot {
                         }
                     }
                 }
+
+                // one slide per custom page that contributes a settings
+                // tab (see win.customSettingsTabs) — same filmstrip as the
+                // four built-in columns above, just at whatever index
+                // settingsPane.tabOrder placed this page's id at
+                Repeater {
+                    id: customTabsRepeater
+                    model: win.customSettingsTabs
+
+                    Column {
+                        id: customTabCol
+                        required property var modelData
+                        readonly property int slideIdx: settingsPane.tabOrder.indexOf(modelData.pageId)
+                        x: 20 + (slideIdx - settingsPane.tabIdx) * 840
+                        Behavior on x {
+                            NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                        }
+                        spacing: 14
+
+                        // the page's own Component — declared inside its
+                        // file, so it resolves `pibble`/getSetting/etc via
+                        // that file's own scope, same as any other child of
+                        // its root item would
+                        Loader {
+                            sourceComponent: customTabCol.modelData.component
+                        }
+                    }
+                }
                 } // tabViewport
 
                 // topmost within the settings pane: clicking a tab link, an
@@ -6081,9 +6458,8 @@ ShellRoot {
 
         function togglePage(p: string) {
             const pages = Object.assign({ clock: true, apps: true, walls: true, clips: true }, cfg.pages);
-            const enabled = paneOrder.filter(x => pages[x] !== false);
-            // keep at least one page enabled
-            if (pages[p] !== false && enabled.length <= 1)
+            // keep at least one page enabled overall (built-in or custom)
+            if (pages[p] !== false && activePanes.length <= 1)
                 return;
             pages[p] = pages[p] === false;
             cfg.pages = pages;
@@ -6096,8 +6472,8 @@ ShellRoot {
             switch (key) {
             case "pages":
                 // uploaded pages aren't touched — only their order resets,
-                // which drops them to the end and "__add__" back to the
-                // top (see win.fullPageOrder)
+                // which drops them to the end and the two add-rows back to
+                // the top (see win.fullPageOrder)
                 cfg.pages = ({ clock: true, apps: true, walls: true, clips: true });
                 cfg.pageOrder = ["clock", "apps", "walls", "clips"];
                 break;
