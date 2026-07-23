@@ -24,7 +24,7 @@ ShellRoot {
         width: 28
         height: 28
         radius: 8
-        color: Qt.alpha(root.accent, btnArea.containsMouse ? 0.25 : 0.11)
+        color: Qt.alpha(root.accent, btnArea.containsMouse ? 0.22 : 0.11)
         border.width: 1
         border.color: Qt.alpha(root.accent, 0.33)
         anchors.verticalCenter: parent.verticalCenter
@@ -571,46 +571,66 @@ ShellRoot {
     // than written by PageContext: a non-empty `settingsLabel` plus a
     // `settingsTab` Component get the page its own tab in Settings,
     // alongside General/Pages/Keybindings/Flyouts.
+    // A page gets exactly this and nothing else: enough to theme itself
+    // consistently and persist its own data. Some things that used to
+    // live here (close/openSettings/notify/copyToClipboard, the
+    // animation-parameter set, a `ti` icon-glyph map) are gone because
+    // they were reachable another way already (the keybind closes the
+    // launcher; notify-send/Quickshell.clipboardText are plain
+    // Quickshell, no wrapper needed) or asked a page to reproduce
+    // pibble's own visual rhythm exactly, which isn't something most
+    // pages need and is cheap for the ones that do want it to just build
+    // themselves off `active`. tileFill/tileFillActive/tileBorder below
+    // are the opposite case: kept (and precomputed, not left as bare
+    // alpha numbers) because there's no way for a page to discover or
+    // reproduce these specific values other than reading this file.
     component PageContext: QtObject {
         id: pageCtx
+        // `required` (must be supplied at construction, see the "Custom
+        // pages" render block below) but not `readonly` — QML doesn't
+        // allow both on the same property. Stays mutable after
+        // construction as a result; nothing a page does should ever
+        // reassign it, since getSetting/setSetting's namespacing depends
+        // on it never changing after the host sets it.
         required property string pageId
         readonly property color accent: root.accent
         readonly property color fg: root.fg
         readonly property color muted: root.muted
         readonly property color surface: root.surface
+        // the shell's text font — not to be confused with tablerFont
+        // below, which is a distinct, fixed icon font, not a "theme"
         readonly property string mono: root.mono
+        // tabler-icons is a full ~4000-glyph font (see fonts/tabler-icons.ttf),
+        // not a small set pibble subsets down — this is just the font
+        // name, not a curated glyph map (there used to be one, `ti`; cut
+        // because it only ever covered the ~14 codepoints pibble's own UI
+        // happens to use, which underrepresented the font and was fully
+        // reproducible anyway — a page that wants a tabler-icons glyph
+        // looks up its own codepoint from tabler-icons' published
+        // reference and uses it directly with this font name)
         readonly property string tablerFont: root.tablerFont
-        readonly property var ti: root.ti
         readonly property real fontScale: cfg.fontScale
-        function fs(px: int): int {
-            return root.fs(px);
-        }
-        readonly property string animStyle: win.animStyle
-        function ad(ms: int): int {
-            return win.ad(ms);
-        }
-        // true from the moment the launcher starts revealing this page
-        // until it's navigated away from — mirrors what every built-in pane
-        // gates its own entrance animations on (see win.pane)
+        // the fill/border colors the built-in Apps/Walls/Clips grids and
+        // Settings buttons round their tiles with — precomputed, not a
+        // bare alpha number, since the number alone is only ever used one
+        // way (Qt.alpha(accent, thatNumber)) and precomputing means a
+        // future change to the actual formula (not just the number) would
+        // still reach every page using these, not just ones re-derived by
+        // hand. The built-ins' own radius ranges 8-19px scaled to tile
+        // size, not one constant, so there's no equivalent tileRadius —
+        // pick whatever radius suits your own tile.
+        readonly property color tileFill: Qt.alpha(root.accent, 0.11)
+        readonly property color tileFillActive: Qt.alpha(root.accent, 0.22)
+        readonly property color tileBorder: Qt.alpha(root.accent, 0.33)
+        // true from the moment this page becomes the one on screen until
+        // it's navigated away from (Tab, Escape, picking another page) —
+        // mirrors what every built-in pane gates its own entrance
+        // animations on (see win.pane). Also written directly onto the
+        // page's own root item (if it declares `active`), since a
+        // binding alone can't run code — see that property's own comment
+        // in the "Custom pages" render block below.
         readonly property bool active: win.pane === pageId
         readonly property bool shown: win.shown
-        // closes the whole launcher, e.g. once a page's own action completes
-        function close(): void {
-            win.exit();
-        }
-        function openSettings(): void {
-            win.toggleSettings();
-        }
-        // fire-and-forget desktop notification, gated by the same "alerts"
-        // flyout toggle every internal notify-send call respects
-        function notify(summary: string, body: string): void {
-            if (!root.flyoutOn("alerts"))
-                return;
-            Quickshell.execDetached(["notify-send", "-a", "pibble", summary, body ?? ""]);
-        }
-        function copyToClipboard(text: string): void {
-            root.copyToClipboard(text);
-        }
         // per-page persistence: a page only ever sees its own namespace
         // (cfg.customPageData[pageId]), keyed by whatever string the page
         // chooses — arbitrary JSON-serializable values, same as any cfg.*
@@ -1702,8 +1722,10 @@ ShellRoot {
     // surfaced as a disabled, undeletable-by-toggle row instead of being
     // silently ignored or half-loaded — see the "broken" handling below.
     //
-    // example.qml.sample — the shipped, tracked example — is deliberately
-    // not *.qml, so it never shows up as a real page until renamed.
+    // example.qml/example-advanced/ — the shipped, tracked examples — are
+    // real *.qml/directory pages, so they show up (unchecked) on a fresh
+    // clone same as anything else dropped in here; *.example is the
+    // convention for a template that shouldn't (see the scan below).
     readonly property string customPagesDir: Quickshell.shellDir + "/custom-pages"
     function rescanUploadedPages() {
         pagesScan.running = false;
@@ -1721,10 +1743,10 @@ ShellRoot {
             for d in "$dir"/*/; do
                 [ -d "$d" ] || continue
                 name="$(basename "$d")"
-                # *.sample directories are inert templates (see
-                # example-folder.sample), same idea as example.qml.sample
-                # for single files — skip entirely, not even as "broken"
-                case "$name" in *.sample) continue ;; esac
+                # *.example directories are inert templates — skip
+                # entirely, not even as "broken" (same idea for single
+                # files, in the *.qml loop above)
+                case "$name" in *.example) continue ;; esac
                 if [ -f "$d/main.qml" ]; then
                     printf 'D\\t%s\\n' "$name"
                 else
@@ -1773,13 +1795,13 @@ ShellRoot {
                     // newly-discovered ones at the end by default; newly
                     // *added* ones (not ones that were merely re-discovered
                     // after an external edit) get spliced out of there and
-                    // reinserted directly under "__add__" instead — wherever
-                    // the user has it — since that's the row they just
-                    // added the page from
+                    // reinserted directly under the two pinned add-rows
+                    // instead — custom pages default to the front of the
+                    // list, ahead of the built-in four, not the back
                     const addedIds = added.map(u => u.id);
                     if (addedIds.length) {
                         const order = win.fullPageOrder.filter(id => !addedIds.includes(id));
-                        order.splice(order.indexOf("__add__") + 1, 0, ...addedIds);
+                        order.splice(2, 0, ...addedIds);
                         cfg.pageOrder = order;
                     } else {
                         cfg.pageOrder = win.fullPageOrder;
@@ -2213,26 +2235,38 @@ ShellRoot {
         // the time.
         readonly property var pageIds: {
             const def = ["clock", "apps", "walls", "clips"];
-            return def.concat((cfg.uploadedPages ?? []).map(u => u.id), ["__add__", "__add_folder__"]);
+            // custom pages before the built-in four: this is what the
+            // "missing id" top-up in fullPageOrder below falls back to
+            // whenever it has to place one without a captured position
+            // (see there), so the default order — before anything's ever
+            // been dragged — has custom pages at the front
+            return (cfg.uploadedPages ?? []).map(u => u.id).concat(def, ["__add__", "__add_folder__"]);
         }
         // display order for the Pages settings row, layered on top of
         // pageIds above; also what activePanes below filters down to the
         // enabled subset for Tab's cycle order, so dragging a row here
-        // reorders the cycle too. Newly discovered ids default to the
-        // bottom (a freshly uploaded page) except "__add__"/"__add_folder__",
-        // which default to the top (in that order) — until the user drags
-        // one, at which point its position is captured in cfg.pageOrder
-        // like any other row and this no longer applies.
+        // reorders the cycle too. The "missing id" top-up loop below is a
+        // fallback for ids this doesn't already have an opinion on (should
+        // rarely trigger — pagesScan normally captures a new page's
+        // position itself, splicing it in right after the two add-rows,
+        // i.e. ahead of the built-in four); if it does fire, it appends in
+        // pageIds order, which is custom pages first, so still front-
+        // leaning rather than landing at the very bottom.
+        // "__add__"/"__add_folder__" are pinned to the top, in that
+        // order, unconditionally — stripped out of whatever cfg.pageOrder
+        // says and put back at the front every time, not just defaulted
+        // there once, since neither is draggable (see the pageRow
+        // DragHandler's `enabled: !pageRow.isAdd`) and nothing else
+        // should end up above them either.
         readonly property var fullPageOrder: {
             const valid = pageIds;
-            const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : []).filter(p => valid.includes(p));
+            const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : [])
+                .filter(p => valid.includes(p) && p !== "__add__" && p !== "__add_folder__");
             for (const v of valid)
                 if (!o.includes(v) && v !== "__add__" && v !== "__add_folder__")
                     o.push(v);
-            if (!o.includes("__add_folder__"))
-                o.unshift("__add_folder__");
-            if (!o.includes("__add__"))
-                o.unshift("__add__");
+            o.unshift("__add_folder__");
+            o.unshift("__add__");
             return o;
         }
         function moveFullPage(p: string, to: int) {
@@ -3439,7 +3473,7 @@ ShellRoot {
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: 18
-                                        color: Qt.alpha(root.accent, cell.isSelected ? 0.2 : 0.11)
+                                        color: Qt.alpha(root.accent, cell.isSelected ? 0.22 : 0.11)
                                         border.width: 1
                                         border.color: cell.isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
 
@@ -3643,7 +3677,7 @@ ShellRoot {
                                     width: 240
                                     height: 135
                                     radius: 14
-                                    color: Qt.alpha(root.accent, 0.08)
+                                    color: Qt.alpha(root.accent, wallCell.isSelected ? 0.22 : 0.11)
 
                                     // Only the selected tile plays its .gif (from
                                     // the source file, not the static thumbnail);
@@ -4194,9 +4228,9 @@ ShellRoot {
                                         height: clipCell.tileH
                                         radius: 12
                                         opacity: 0
-                                        color: Qt.alpha(root.accent, clipCell.isSelected ? 0.2 : 0.08)
+                                        color: Qt.alpha(root.accent, clipCell.isSelected ? 0.22 : 0.11)
                                         border.width: 1
-                                        border.color: clipCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.25)
+                                        border.color: clipCell.isSelected ? root.accent : Qt.alpha(root.accent, 0.33)
 
                                         Rectangle {
                                             visible: clipCell.isSelected
@@ -4602,7 +4636,24 @@ ShellRoot {
                 // into a settings tab (see win.customSettingsTabs) — in
                 // whatever order those pages themselves loaded in
                 readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(win.customSettingsTabs.map(t => t.pageId))
-                readonly property int tabIdx: Math.max(0, tabOrder.indexOf(win.settingsTab))
+                // customPagesRepeater's model is cfg.uploadedPages itself,
+                // reassigned wholesale (a fresh array) on every toggle/
+                // upload/trash/rescan — since it's a plain JS-array model,
+                // that recreates every delegate, not just the one that
+                // changed. For the split of a frame that a custom tab's
+                // host is mid-recreate, win.customSettingsTabs (which reads
+                // pageItem off those delegates) loses that tab, so
+                // rawTabIdx briefly goes -1. Snapping tabIdx to 0 in that
+                // window used to yank every filmstrip pane (see the
+                // `Behavior on x` below and the built-in tabs' copies) over
+                // to tab 0 and spring it back once the tab reappears — the
+                // "settings flies across the screen" glitch. Holding the
+                // last good index instead means the recreate is invisible:
+                // nothing here moves until there's a real index to move to.
+                readonly property int rawTabIdx: tabOrder.indexOf(win.settingsTab)
+                property int tabIdx: 0
+                onRawTabIdxChanged: if (rawTabIdx >= 0)
+                    tabIdx = rawTabIdx
                 anchors.centerIn: parent
                 width: 860
                 height: 26 + settingsHeader.height + 18 + tabViewport.height + 26
@@ -5019,7 +5070,7 @@ ShellRoot {
                         readonly property var defLabels: ({ clock: "Clock", apps: "Apps", walls: "Walls", clips: "Clips" })
                         function pageLabel(id) {
                             if (id === "__add__")
-                                return "Add a page…";
+                                return "Add a file…";
                             if (id === "__add_folder__")
                                 return "Add a folder…";
                             if (defLabels[id])
@@ -5342,6 +5393,10 @@ ShellRoot {
                                             // mostly-horizontal drag resolve to the right
                                             // one without the two fighting over the grab
                                             DragHandler {
+                                                // the two add-rows are pinned to the
+                                                // top (see win.fullPageOrder) and
+                                                // can't be reordered
+                                                enabled: !pageRow.isAdd
                                                 target: null
                                                 xAxis.enabled: false
                                                 onActiveChanged: {
