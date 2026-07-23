@@ -566,24 +566,27 @@ ShellRoot {
     // doesn't own or call internal launcher functions.
     //
     // The other direction — a page contributing to pibble, rather than the
-    // other way round — goes through two more properties on the same root
+    // other way round — goes through one more property on the same root
     // item, read by win.customSettingsTabs (see there for details) rather
-    // than written by PageContext: a non-empty `settingsLabel` plus a
-    // `settingsTab` Component get the page its own tab in Settings,
-    // alongside General/Pages/Keybindings/Flyouts.
+    // than written by PageContext: a `settingsTab` Component gets the page
+    // its own tab in Settings, alongside General/Pages/Keybindings/
+    // Flyouts, labeled after the page's own folder name (capitalized) —
+    // not something the page declares itself.
     // A page gets exactly this and nothing else: enough to theme itself
     // consistently and persist its own data. Some things that used to
     // live here (close/openSettings/notify/copyToClipboard, the
-    // animation-parameter set, a `ti` icon-glyph map) are gone because
-    // they were reachable another way already (the keybind closes the
-    // launcher; notify-send/Quickshell.clipboardText are plain
-    // Quickshell, no wrapper needed) or asked a page to reproduce
-    // pibble's own visual rhythm exactly, which isn't something most
-    // pages need and is cheap for the ones that do want it to just build
-    // themselves off `active`. tileFill/tileFillActive/tileBorder below
-    // are the opposite case: kept (and precomputed, not left as bare
-    // alpha numbers) because there's no way for a page to discover or
-    // reproduce these specific values other than reading this file.
+    // animation-parameter set, a `ti` icon-glyph map, tablerFont itself,
+    // surface) are gone because they were reachable another way already
+    // (the keybind closes the launcher; notify-send/Quickshell.clipboardText
+    // are plain Quickshell, no wrapper needed), asked a page to reproduce
+    // pibble's own visual rhythm exactly (which isn't something most pages
+    // need and is cheap for the ones that do want it to just build
+    // themselves off `active`), or (tablerFont, surface) didn't correspond
+    // to any real per-page use once the built-in icon glyph map was cut.
+    // fill/fillActive/border below are the opposite case: kept (and
+    // precomputed, not left as bare alpha numbers) because there's no way
+    // for a page to discover or reproduce these specific values other than
+    // reading this file.
     component PageContext: QtObject {
         id: pageCtx
         // `required` (must be supplied at construction, see the "Custom
@@ -596,19 +599,8 @@ ShellRoot {
         readonly property color accent: root.accent
         readonly property color fg: root.fg
         readonly property color muted: root.muted
-        readonly property color surface: root.surface
-        // the shell's text font — not to be confused with tablerFont
-        // below, which is a distinct, fixed icon font, not a "theme"
-        readonly property string mono: root.mono
-        // tabler-icons is a full ~4000-glyph font (see fonts/tabler-icons.ttf),
-        // not a small set pibble subsets down — this is just the font
-        // name, not a curated glyph map (there used to be one, `ti`; cut
-        // because it only ever covered the ~14 codepoints pibble's own UI
-        // happens to use, which underrepresented the font and was fully
-        // reproducible anyway — a page that wants a tabler-icons glyph
-        // looks up its own codepoint from tabler-icons' published
-        // reference and uses it directly with this font name)
-        readonly property string tablerFont: root.tablerFont
+        // the shell's text font
+        readonly property string font: root.mono
         readonly property real fontScale: cfg.fontScale
         // the fill/border colors the built-in Apps/Walls/Clips grids and
         // Settings buttons round their tiles with — precomputed, not a
@@ -617,11 +609,11 @@ ShellRoot {
         // future change to the actual formula (not just the number) would
         // still reach every page using these, not just ones re-derived by
         // hand. The built-ins' own radius ranges 8-19px scaled to tile
-        // size, not one constant, so there's no equivalent tileRadius —
+        // size, not one constant, so there's no equivalent radius property —
         // pick whatever radius suits your own tile.
-        readonly property color tileFill: Qt.alpha(root.accent, 0.11)
-        readonly property color tileFillActive: Qt.alpha(root.accent, 0.22)
-        readonly property color tileBorder: Qt.alpha(root.accent, 0.33)
+        readonly property color fill: Qt.alpha(root.accent, 0.11)
+        readonly property color fillActive: Qt.alpha(root.accent, 0.22)
+        readonly property color border: Qt.alpha(root.accent, 0.33)
         // true from the moment this page becomes the one on screen until
         // it's navigated away from (Tab, Escape, picking another page) —
         // mirrors what every built-in pane gates its own entrance
@@ -631,6 +623,66 @@ ShellRoot {
         // in the "Custom pages" render block below.
         readonly property bool active: win.pane === pageId
         readonly property bool shown: win.shown
+        // One call gives an item the built-in grids' own tile-entrance
+        // rhythm (see cfg.animStyle, "Transitions" in Settings > Grids):
+        // pop in from a smaller/lower/transparent starting state, staggered
+        // by `slot` among `cols` columns if the style calls for a stagger.
+        // Everything (the animation objects, restarting it whenever this
+        // page becomes active again) is owned here — a page never touches
+        // a SequentialAnimation or hears about win.animFromScale/animDur/
+        // etc directly, so it can't get any of that wrong. `slot`/`cols`
+        // default to 0/1 (no stagger) for a page with just one tile; pass
+        // them for a real grid the same way the built-ins index their own
+        // (row-major, 0-based).
+        function tileIn(item, slot, cols) {
+            if (!item)
+                return;
+            const s = slot ?? 0;
+            const c = cols ?? 1;
+            let rec = tileRegistry.find(r => r.item === item);
+            if (!rec) {
+                // a Translate in transform, not item.y itself, so this
+                // never fights whatever actually positions the item
+                // (anchors, a Row/Column, explicit bindings, ...)
+                const offset = tileOffsetFactory.createObject(item, {});
+                item.transform = (item.transform ?? []).concat([offset]);
+                const spring = tileSpringFactory.createObject(item, { pibbleItem: item, pibbleOffset: offset, pibbleSlot: s, pibbleCols: c });
+                rec = { item, spring };
+                tileRegistry.push(rec);
+            } else {
+                rec.spring.pibbleSlot = s;
+                rec.spring.pibbleCols = c;
+            }
+            rec.spring.restart();
+        }
+        // tileIn() bookkeeping below — not part of the documented pibble
+        // contract (see DOCS.md), just what tileIn() itself needs to
+        // remember which items to re-spring when this page becomes active
+        // again (see onActiveChanged).
+        property var tileRegistry: []
+        onActiveChanged: if (active)
+            tileRegistry.forEach(r => r.spring.restart())
+        readonly property Component tileOffsetFactory: Component {
+            Translate {}
+        }
+        readonly property Component tileSpringFactory: Component {
+            SequentialAnimation {
+                id: spring
+                property var pibbleItem: null
+                property var pibbleOffset: null
+                property int pibbleSlot: 0
+                property int pibbleCols: 1
+                PropertyAction { target: spring.pibbleItem; property: "opacity"; value: 0 }
+                PropertyAction { target: spring.pibbleItem; property: "scale"; value: win.animFromScale }
+                PropertyAction { target: spring.pibbleOffset; property: "y"; value: win.animFromY }
+                PauseAnimation { duration: win.animDelay(spring.pibbleSlot, spring.pibbleCols) }
+                ParallelAnimation {
+                    NumberAnimation { target: spring.pibbleItem; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: spring.pibbleItem; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                    NumberAnimation { target: spring.pibbleOffset; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                }
+            }
+        }
         // per-page persistence: a page only ever sees its own namespace
         // (cfg.customPageData[pageId]), keyed by whatever string the page
         // chooses — arbitrary JSON-serializable values, same as any cfg.*
@@ -1529,13 +1581,14 @@ ShellRoot {
         // something else: switches to it and stays open — a different
         // page's keybind reads as "take me there", not "close everything".
         function toggle(page: string): void {
+            const p = win.resolvePageArg(page);
             if (win.shown && !win.exiting) {
-                if (page && win.pane !== page)
-                    win.setPane(page);
+                if (p && win.pane !== p)
+                    win.setPane(p);
                 else
                     win.exit();
             } else {
-                win.open(page);
+                win.open(p);
             }
         }
         // "show" would collide with the `qs ipc show` CLI subcommand
@@ -1679,7 +1732,7 @@ ShellRoot {
                             if ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews — install it for sharper, faster previews."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
@@ -1706,26 +1759,25 @@ ShellRoot {
     // pages added via the settings row's upload picker live here, gitignored
     // since they're user content, not shell code (see win.pageIds and the
     // "Custom pages" Loader block for how they actually render) — this is
-    // also where dropping a page.qml in by hand shows it up in the list.
+    // also where dropping a page folder in by hand shows it up in the list.
     //
-    // Two shapes are scanned (below): a top-level *.qml file is a
-    // self-contained single-file page; a top-level directory is a
-    // multi-file page, loaded from <dir>/main.qml — a page can be split
-    // across as many sibling files as it wants as long as they all live in
-    // its own directory. Reach them from main.qml with `import "." as
-    // Local` and `Local.Foo {}` — quickshell's own qmldir synthesis (see
-    // quickshell.qmlscanner in its logs) shadows the plain-Qt implicit
-    // directory import an ordinary QML app would get for free, so an
-    // unqualified `Foo {}` or bare `import "."` silently fails to resolve
-    // ("Foo is not a type") even though the file sits right there; the
-    // qualified form was verified working. A directory with no main.qml is
-    // surfaced as a disabled, undeletable-by-toggle row instead of being
-    // silently ignored or half-loaded — see the "broken" handling below.
+    // Every page is a top-level directory loaded from <dir>/main.qml — a
+    // page can be split across as many sibling files as it wants as long
+    // as they all live in its own directory. Reach them from main.qml with
+    // `import "." as Local` and `Local.Foo {}` — quickshell's own qmldir
+    // synthesis (see quickshell.qmlscanner in its logs) shadows the
+    // plain-Qt implicit directory import an ordinary QML app would get for
+    // free, so an unqualified `Foo {}` or bare `import "."` silently fails
+    // to resolve ("Foo is not a type") even though the file sits right
+    // there; the qualified form was verified working. A directory with no
+    // main.qml is surfaced as a disabled, undeletable-by-toggle row
+    // instead of being silently ignored or half-loaded — see the "broken"
+    // handling below.
     //
-    // example.qml/example-advanced/ — the shipped, tracked examples — are
-    // real *.qml/directory pages, so they show up (unchecked) on a fresh
-    // clone same as anything else dropped in here; *.example is the
-    // convention for a template that shouldn't (see the scan below).
+    // counter.example/ — the shipped, tracked example — is a real
+    // directory page under a *.example name, which is the convention for
+    // a template that shouldn't show up as a real, toggleable row (see the
+    // scan below) — copy it out from under that suffix to actually try it.
     readonly property string customPagesDir: Quickshell.shellDir + "/custom-pages"
     function rescanUploadedPages() {
         pagesScan.running = false;
@@ -1737,15 +1789,11 @@ ShellRoot {
         command: ["bash", "-c", `
             dir="$1"
             [ -d "$dir" ] || exit 0
-            for f in "$dir"/*.qml; do
-                [ -f "$f" ] && printf 'F\\t%s\\n' "$(basename "$f")"
-            done
             for d in "$dir"/*/; do
                 [ -d "$d" ] || continue
                 name="$(basename "$d")"
                 # *.example directories are inert templates — skip
-                # entirely, not even as "broken" (same idea for single
-                # files, in the *.qml loop above)
+                # entirely, not even as "broken"
                 case "$name" in *.example) continue ;; esac
                 if [ -f "$d/main.qml" ]; then
                     printf 'D\\t%s\\n' "$name"
@@ -1761,10 +1809,10 @@ ShellRoot {
                 // the app (or dropped in by hand) show up unchecked — the
                 // same merge either way, so external edits and in-app
                 // uploads/trashes are indistinguishable once this runs.
-                // Each disk line is "F<tab>name" (file page), "D<tab>name"
-                // (folder page with a main.qml), or "X<tab>name" (folder
-                // missing one — tracked so it gets a row and a one-time
-                // notification, but never a loadable/toggleable page).
+                // Each disk line is "D<tab>name" (folder page with a
+                // main.qml) or "X<tab>name" (folder missing one — tracked
+                // so it gets a row and a one-time notification, but never a
+                // loadable/toggleable page).
                 const lines = text.trim() ? text.trim().split("\n") : [];
                 const found = [];
                 for (const line of lines) {
@@ -1773,17 +1821,14 @@ ShellRoot {
                         continue;
                     found.push({ kind: line.slice(0, tab), name: line.slice(tab + 1) });
                 }
-                const key = (kind, name) => (kind === "D" ? "D" : "F") + ":" + name;
-                const foundKeys = found.map(e => key(e.kind, e.name));
+                const foundNames = found.map(e => e.name);
                 const existing = cfg.uploadedPages ?? [];
-                const existingKey = u => key(u.dir ? "D" : "F", u.filename);
-                const stillPresent = existing.filter(u => foundKeys.includes(existingKey(u)));
-                const knownKeys = stillPresent.map(existingKey);
-                const added = found.filter(e => !knownKeys.includes(key(e.kind, e.name))).map(e => ({
-                    id: (e.kind === "F" ? "upload:" : "folder:") + e.name,
+                const stillPresent = existing.filter(u => foundNames.includes(u.filename));
+                const knownNames = stillPresent.map(u => u.filename);
+                const added = found.filter(e => !knownNames.includes(e.name)).map(e => ({
+                    id: "folder:" + e.name,
                     label: e.name,
                     filename: e.name,
-                    dir: e.kind !== "F",
                     broken: e.kind === "X",
                     path: root.customPagesDir + "/" + e.name,
                     on: false
@@ -1795,13 +1840,13 @@ ShellRoot {
                     // newly-discovered ones at the end by default; newly
                     // *added* ones (not ones that were merely re-discovered
                     // after an external edit) get spliced out of there and
-                    // reinserted directly under the two pinned add-rows
-                    // instead — custom pages default to the front of the
-                    // list, ahead of the built-in four, not the back
+                    // reinserted directly under the pinned add row instead
+                    // — custom pages default to the front of the list,
+                    // ahead of the built-in four, not the back
                     const addedIds = added.map(u => u.id);
                     if (addedIds.length) {
                         const order = win.fullPageOrder.filter(id => !addedIds.includes(id));
-                        order.splice(2, 0, ...addedIds);
+                        order.splice(1, 0, ...addedIds);
                         cfg.pageOrder = order;
                     } else {
                         cfg.pageOrder = win.fullPageOrder;
@@ -1821,12 +1866,12 @@ ShellRoot {
                     const brokenAdded = added.filter(u => u.broken);
                     if (goodAdded.length && root.flyoutOn("alerts")) {
                         const body = goodAdded.length === 1
-                            ? goodAdded[0].label + " — enable it in Settings > Pages"
-                            : goodAdded.length + " new custom pages — enable them in Settings > Pages";
+                            ? goodAdded[0].label + " - enable it in Settings > Pages"
+                            : goodAdded.length + " new custom pages - enable them in Settings > Pages";
                         Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "New custom page found", body]);
                     }
                     for (const u of brokenAdded)
-                        root.notifyError("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point — see Settings > Pages.");
+                        root.notifyError("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point - see Settings > Pages.");
                 }
             }
         }
@@ -1851,7 +1896,7 @@ ShellRoot {
             notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
         else if (!clipWatcherRunning)
             notifyError("Clipboard watcher not running",
-                "Nothing is piping clipboard changes into cliphist — clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
+                "Nothing is piping clipboard changes into cliphist - clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
                 root.clipWatcherFixCommand);
     }
 
@@ -1924,7 +1969,7 @@ ShellRoot {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails — install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
@@ -2059,7 +2104,7 @@ ShellRoot {
                 lowBatteryAlerted = true;
                 if (flyoutOn("alerts"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-u", "critical",
-                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining — plug in soon."]);
+                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
             }
         } else if (pct > 8) {
             lowBatteryAlerted = false;
@@ -2101,11 +2146,30 @@ ShellRoot {
             expandedClip = null;
             cancelCapture();
             input.text = "";
+            // panes keep the opacity their last entry animation ended at;
+            // reset them before the pane change below, or the entrance
+            // animation it triggers (see drawerIn/wallDrawerIn/customPageIn
+            // etc, restarted off onPaneChanged) gets clobbered right back
+            // to 0.004 by this same reset running after it — a race that's
+            // invisible with a real animation duration (it keeps writing
+            // opacity every frame regardless) but leaves the pane stuck
+            // dim when the tile animation style is "none" and its restart
+            // completes synchronously.
+            drawer.opacity = 0.004;
+            wallDrawer.opacity = 0.004;
+            wallCarousel.opacity = 0.004;
+            clipDrawer.opacity = 0.004;
+            settingsPane.opacity = 0.004;
+            for (let i = 0; i < customPagesRepeater.count; i++) {
+                const h = customPagesRepeater.itemAt(i);
+                if (h)
+                    h.opacity = 0.004;
+            }
             // panes replay their entrance animation off onPaneChanged (see
             // drawerIn/wallDrawerIn/etc below), which only fires on an
             // actual value change — reopening onto the same pane the
             // launcher was last closed on is otherwise a no-op assignment,
-            // so the pane's opacity stays wherever the 0.004 reset below
+            // so the pane's opacity stays wherever the 0.004 reset above
             // leaves it, with nothing left to animate it back in. Round-trip
             // through a dead value so the assignment always fires a real
             // transition.
@@ -2129,18 +2193,6 @@ ShellRoot {
             rebootArmed = false;
             rebootDragging = false;
             rebootRaw = 0;
-            // panes keep the opacity their last entry animation ended at;
-            // reset them or the warm-up pass flashes them fully visible
-            drawer.opacity = 0.004;
-            wallDrawer.opacity = 0.004;
-            wallCarousel.opacity = 0.004;
-            clipDrawer.opacity = 0.004;
-            settingsPane.opacity = 0.004;
-            for (let i = 0; i < customPagesRepeater.count; i++) {
-                const h = customPagesRepeater.itemAt(i);
-                if (h)
-                    h.opacity = 0.004;
-            }
         }
 
         anchors {
@@ -2218,9 +2270,9 @@ ShellRoot {
         // cycle (opened via the corner button or Ctrl+S).
         property string pane: "clock"
         // every id the Pages settings row can show: the four built-in
-        // panes, any uploaded custom pages, and "__add__" (the add-a-page
-        // row — a real, reorderable member of this list so it drags like
-        // everything else, but not a real page: win/pagesBlock's
+        // panes, any uploaded custom pages, and "__add_folder__" (the
+        // add-a-page row — a real, reorderable member of this list so it
+        // drags like everything else, but not a real page: win/pagesBlock's
         // pageOn/pageToggle/etc. special-case it).
         // Deliberately reads only cfg.uploadedPages, never
         // cfg.pageOrder, so its value (and object identity) stays put
@@ -2240,7 +2292,7 @@ ShellRoot {
             // whenever it has to place one without a captured position
             // (see there), so the default order — before anything's ever
             // been dragged — has custom pages at the front
-            return (cfg.uploadedPages ?? []).map(u => u.id).concat(def, ["__add__", "__add_folder__"]);
+            return (cfg.uploadedPages ?? []).map(u => u.id).concat(def, ["__add_folder__"]);
         }
         // display order for the Pages settings row, layered on top of
         // pageIds above; also what activePanes below filters down to the
@@ -2248,25 +2300,23 @@ ShellRoot {
         // reorders the cycle too. The "missing id" top-up loop below is a
         // fallback for ids this doesn't already have an opinion on (should
         // rarely trigger — pagesScan normally captures a new page's
-        // position itself, splicing it in right after the two add-rows,
-        // i.e. ahead of the built-in four); if it does fire, it appends in
+        // position itself, splicing it in right after the add row, i.e.
+        // ahead of the built-in four); if it does fire, it appends in
         // pageIds order, which is custom pages first, so still front-
         // leaning rather than landing at the very bottom.
-        // "__add__"/"__add_folder__" are pinned to the top, in that
-        // order, unconditionally — stripped out of whatever cfg.pageOrder
-        // says and put back at the front every time, not just defaulted
-        // there once, since neither is draggable (see the pageRow
-        // DragHandler's `enabled: !pageRow.isAdd`) and nothing else
-        // should end up above them either.
+        // "__add_folder__" is pinned to the top unconditionally —
+        // stripped out of whatever cfg.pageOrder says and put back at the
+        // front every time, not just defaulted there once, since it isn't
+        // draggable (see the pageRow DragHandler's `enabled:
+        // !pageRow.isAdd`) and nothing else should end up above it either.
         readonly property var fullPageOrder: {
             const valid = pageIds;
             const o = (Array.isArray(cfg.pageOrder) ? cfg.pageOrder : [])
-                .filter(p => valid.includes(p) && p !== "__add__" && p !== "__add_folder__");
+                .filter(p => valid.includes(p) && p !== "__add_folder__");
             for (const v of valid)
-                if (!o.includes(v) && v !== "__add__" && v !== "__add_folder__")
+                if (!o.includes(v) && v !== "__add_folder__")
                     o.push(v);
             o.unshift("__add_folder__");
-            o.unshift("__add__");
             return o;
         }
         function moveFullPage(p: string, to: int) {
@@ -2297,7 +2347,7 @@ ShellRoot {
             const pages = cfg.pages ?? {};
             const uploaded = cfg.uploadedPages ?? [];
             const list = fullPageOrder.filter(id => {
-                if (id === "__add__" || id === "__add_folder__")
+                if (id === "__add_folder__")
                     return false;
                 const u = uploaded.find(x => x.id === id);
                 return u ? u.on : pages[id] !== false;
@@ -2307,10 +2357,23 @@ ShellRoot {
         function homePane(): string {
             return activePanes[0];
         }
+        // `pibble toggle <page>` accepts a custom page's bare filename (what
+        // `pibble help` lists, e.g. "counter") as well as its real, prefixed
+        // id ("folder:counter") — the prefix is internal namespacing (see
+        // customPagesDir/pagesScan) that a CLI user shouldn't have to know
+        // or type. Falls through unresolved for built-in ids and "settings",
+        // which already match activePanes directly.
+        function resolvePageArg(p: string): string {
+            if (!p || activePanes.includes(p) || p === "settings")
+                return p;
+            const u = (cfg.uploadedPages ?? []).find(x => x.id.split(":").slice(1).join(":") === p);
+            return u ? u.id : p;
+        }
         // custom pages that additionally contribute a Settings tab — a
-        // loaded page's root item opts in by declaring both
-        // `settingsLabel` (non-empty) and `settingsTab` (a Component); see
-        // PageContext. Reads customPageHost.pageItem (not the Repeater
+        // loaded page's root item opts in by declaring `settingsTab` (a
+        // Component); see PageContext. The tab's label is derived from the
+        // page's own folder name (capitalized), not something the page
+        // declares itself. Reads customPageHost.pageItem (not the Repeater
         // directly) so this recomputes whenever a page loads/unloads, not
         // just when the set of uploaded pages itself changes.
         readonly property var customSettingsTabs: {
@@ -2318,8 +2381,10 @@ ShellRoot {
             for (let i = 0; i < customPagesRepeater.count; i++) {
                 const h = customPagesRepeater.itemAt(i);
                 const it = h ? h.pageItem : null;
-                if (it && "settingsLabel" in it && it.settingsLabel && "settingsTab" in it && it.settingsTab)
-                    tabs.push({ pageId: h.modelData.id, label: it.settingsLabel, component: it.settingsTab });
+                if (it && "settingsTab" in it && it.settingsTab) {
+                    const name = h.modelData.label;
+                    tabs.push({ pageId: h.modelData.id, label: name.charAt(0).toUpperCase() + name.slice(1), component: it.settingsTab });
+                }
             }
             return tabs;
         }
@@ -2700,7 +2765,7 @@ ShellRoot {
                         if command -v magick >/dev/null 2>&1; then
                             magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
-                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR — install it to enable blur."
+                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
                         fi
                     fi
                 fi
@@ -2770,7 +2835,7 @@ ShellRoot {
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 if ! command -v wl-copy >/dev/null 2>&1; then
-                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard — install it to copy from this page."
+                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
                     exit 0
                 fi
                 tmp=$(mktemp)
@@ -3049,10 +3114,7 @@ ShellRoot {
             }
             ScriptAction {
                 script: {
-                    if (win.dialogPending === "file") {
-                        win.dialogPending = "";
-                        pagesUploadDialog.open();
-                    } else if (win.dialogPending === "folder") {
+                    if (win.dialogPending === "folder") {
                         win.dialogPending = "";
                         pagesUploadFolderDialog.open();
                     }
@@ -4605,12 +4667,12 @@ ShellRoot {
                         // like any other, so the broken check is repeated
                         // here rather than trusted from there
                         active: customPageHost.modelData.on && !customPageHost.modelData.broken
-                        // a directory page's entry point is always
-                        // <dir>/main.qml (see pagesScan and the
-                        // customPagesDir comment for how it reaches its own
-                        // sibling files — nothing else needed here, this
-                        // Loader doesn't care whether it's one file or many)
-                        source: active ? Qt.resolvedUrl(customPageHost.modelData.path + (customPageHost.modelData.dir ? "/main.qml" : "")) : ""
+                        // every page's entry point is <dir>/main.qml (see
+                        // pagesScan and the customPagesDir comment for how
+                        // it reaches its own sibling files — nothing else
+                        // needed here, this Loader doesn't care how many
+                        // files the page is split across)
+                        source: active ? Qt.resolvedUrl(customPageHost.modelData.path + "/main.qml") : ""
                         onLoaded: {
                             if ("pibble" in item)
                                 item.pibble = customPageHost.ctx;
@@ -5069,16 +5131,15 @@ ShellRoot {
                         }
                         readonly property var defLabels: ({ clock: "Clock", apps: "Apps", walls: "Walls", clips: "Clips" })
                         function pageLabel(id) {
-                            if (id === "__add__")
-                                return "Add a file…";
                             if (id === "__add_folder__")
-                                return "Add a folder…";
+                                return "Add a page…";
                             if (defLabels[id])
                                 return defLabels[id];
                             const u = (cfg.uploadedPages ?? []).find(p => p.id === id);
                             if (!u)
                                 return id;
-                            return u.broken ? u.label + " — missing main.qml" : u.label;
+                            const label = u.label.charAt(0).toUpperCase() + u.label.slice(1);
+                            return u.broken ? label + " - missing main.qml" : label;
                         }
                         function pageOn(id) {
                             if (defLabels[id])
@@ -5131,52 +5192,16 @@ ShellRoot {
                             }
                         }
 
-                        // copies the file picked via the "add a page" row into
-                        // pibble/custom-pages (gitignored, since it's user
-                        // content, not shell code) and rescans — the row
-                        // shows up unchecked once the scan picks the new
-                        // file up, the same path an outside drag-and-drop
-                        // into that folder would take. Kept under its own
-                        // name (not stamped with a timestamp) unless that
-                        // name's already taken, in which case it gets the
-                        // usual "name (2).qml" treatment instead of picking
-                        // a new name every time.
-                        FileDialog {
-                            id: pagesUploadDialog
-                            title: "Select a page.qml"
-                            nameFilters: ["QML files (*.qml)"]
-                            onAccepted: {
-                                const src = String(selectedFile).replace("file://", "");
-                                const base = src.slice(src.lastIndexOf("/") + 1);
-                                pagesUploadCopy.command = ["bash", "-c", `
-                                    dir="$1"; src="$2"; base="$3"
-                                    mkdir -p "$dir"
-                                    stem="\${base%.*}" ext="\${base##*.}"
-                                    dest="$dir/$base"
-                                    n=2
-                                    while [ -e "$dest" ]; do
-                                        dest="$dir/$stem ($n).$ext"
-                                        n=$((n + 1))
-                                    done
-                                    cp -- "$src" "$dest"`, "_", root.customPagesDir, src, base];
-                                pagesUploadCopy.running = true;
-                                win.reopenAfterDialog();
-                            }
-                            onRejected: {
-                                win.reopenAfterDialog();
-                            }
-                        }
-                        Process {
-                            id: pagesUploadCopy
-                            onExited: exitCode => {
-                                if (exitCode === 0)
-                                    root.rescanUploadedPages();
-                            }
-                        }
-                        // folder counterpart of pagesUploadDialog above, for
-                        // multi-file pages (see customPagesDir) — same
-                        // collision-avoiding rename, just on the directory
-                        // name instead of a filename's stem
+                        // copies the folder picked via the "add a page" row
+                        // into pibble/custom-pages (gitignored, since it's
+                        // user content, not shell code) and rescans — the
+                        // row shows up unchecked once the scan picks the
+                        // new folder up, the same path an outside drag-
+                        // and-drop into that folder would take. Kept under
+                        // its own name (not stamped with a timestamp)
+                        // unless that name's already taken, in which case
+                        // it gets the usual "name (2)" treatment instead of
+                        // picking a new name every time.
                         FolderDialog {
                             id: pagesUploadFolderDialog
                             title: "Select a page folder (needs a main.qml inside)"
@@ -5263,9 +5288,9 @@ ShellRoot {
                             Flickable {
                                 id: pagesFlick
                                 width: parent.width - 18
-                                // "__add__" is a real member of fullPageOrder
-                                // (see win.pageIds), so its row is already
-                                // included in the count
+                                // "__add_folder__" is a real member of
+                                // fullPageOrder (see win.pageIds), so its
+                                // row is already included in the count
                                 height: pagesBlock.rowH * Math.min(win.fullPageOrder.length, 6)
                                 Behavior on height {
                                     NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
@@ -5297,9 +5322,7 @@ ShellRoot {
                                             required property string modelData
                                             readonly property int ord: win.fullPageOrder.indexOf(modelData)
                                             readonly property bool isReal: !!pagesBlock.defLabels[modelData]
-                                            readonly property bool isAddFile: modelData === "__add__"
-                                            readonly property bool isAddFolder: modelData === "__add_folder__"
-                                            readonly property bool isAdd: isAddFile || isAddFolder
+                                            readonly property bool isAdd: modelData === "__add_folder__"
                                             readonly property bool isUploaded: !isReal && !isAdd
                                             width: 780
                                             height: pagesBlock.rowH - 4
@@ -5393,7 +5416,7 @@ ShellRoot {
                                             // mostly-horizontal drag resolve to the right
                                             // one without the two fighting over the grab
                                             DragHandler {
-                                                // the two add-rows are pinned to the
+                                                // the add row is pinned to the
                                                 // top (see win.fullPageOrder) and
                                                 // can't be reordered
                                                 enabled: !pageRow.isAdd
@@ -5583,14 +5606,7 @@ ShellRoot {
                                                 }
 
                                                 TapHandler {
-                                                    enabled: pageRow.isAddFile
-                                                    onTapped: {
-                                                        win.dialogPending = "file";
-                                                        win.exit();
-                                                    }
-                                                }
-                                                TapHandler {
-                                                    enabled: pageRow.isAddFolder
+                                                    enabled: pageRow.isAdd
                                                     onTapped: {
                                                         win.dialogPending = "folder";
                                                         win.exit();
@@ -5775,7 +5791,7 @@ ShellRoot {
                             id: pagesSub
                             anchors.top: pagesListWrap.bottom
                             anchors.topMargin: 2
-                            text: "drag to reorder · swipe right to delete · .qml files (or folders with a main.qml) placed in pibble/custom-pages appear here"
+                            text: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
                         }
                     }
 
@@ -5917,7 +5933,7 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "animStyle"; label: "Tile animation" }
+                    SettingRow { key: "animStyle"; label: "Transitions" }
 
                     Repeater {
                         model: [
@@ -5961,6 +5977,15 @@ ShellRoot {
                             border.width: 1
                             border.color: pathInput.activeFocus ? root.accent : Qt.alpha(root.accent, 0.33)
 
+                            Text {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                verticalAlignment: Text.AlignVCenter
+                                visible: pathInput.text.length === 0
+                                text: "~/Pictures/wallpapers"
+                                color: root.muted
+                                font { family: root.mono; pixelSize: root.fs(13) }
+                            }
                             TextInput {
                                 id: pathInput
                                 anchors.fill: parent
@@ -6023,6 +6048,16 @@ ShellRoot {
                             border.width: 1
                             border.color: cmdInput.activeFocus ? root.accent : Qt.alpha(root.accent, 0.33)
 
+                            Text {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                verticalAlignment: Text.AlignVCenter
+                                visible: cmdInput.text.length === 0
+                                text: root.defaultWallCommand
+                                color: root.muted
+                                elide: Text.ElideRight
+                                font { family: root.mono; pixelSize: root.fs(12) }
+                            }
                             TextInput {
                                 id: cmdInput
                                 anchors.fill: parent
@@ -6084,7 +6119,7 @@ ShellRoot {
                     Text {
                         id: captureMetrics
                         visible: false
-                        text: "press a key"
+                        text: "press a key…"
                         font { family: root.mono; pixelSize: root.fs(13) }
                     }
                     Row {
@@ -6146,7 +6181,7 @@ ShellRoot {
                                 Text {
                                     anchors.centerIn: parent
                                     visible: bindBox.displayTokens.length === 0
-                                    text: "press a key"
+                                    text: "press a key…"
                                     color: root.fg
                                     font { family: root.mono; pixelSize: root.fs(13) }
                                 }
@@ -6527,8 +6562,8 @@ ShellRoot {
             switch (key) {
             case "pages":
                 // uploaded pages aren't touched — only their order resets,
-                // which drops them to the end and the two add-rows back to
-                // the top (see win.fullPageOrder)
+                // which drops them to the end and the add row back to the
+                // top (see win.fullPageOrder)
                 cfg.pages = ({ clock: true, apps: true, walls: true, clips: true });
                 cfg.pageOrder = ["clock", "apps", "walls", "clips"];
                 break;
