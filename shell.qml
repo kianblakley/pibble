@@ -1104,7 +1104,10 @@ ShellRoot {
             image: img,
             summary: n.summary ?? "",
             body: n.body ?? "",
-            urgency: NotificationUrgency.toString(n.urgency)
+            urgency: NotificationUrgency.toString(n.urgency),
+            // when the *original* notification arrived, so a later replay can
+            // show "<original> - 5m ago" instead of a static "REPLAY" tag
+            timestamp: Date.now()
         };
         notifCache.items = [entry].concat(notifCache.items).slice(0, 5);
         notifCacheStore.writeAdapter();
@@ -1121,7 +1124,11 @@ ShellRoot {
     // which app each replayed notification originally came from, and so a
     // live notification from the real sender never collides with it. The
     // original sender rides along in the desktop-entry hint purely so
-    // deriveNotifView can show "<original> - REPLAY" on the card.
+    // deriveNotifView can show "<original> - <n> ago" on the card; the
+    // original arrival time rides along the same way in a pibble-private
+    // hint (no standard notify-send hint carries this) so that "ago" reads
+    // relative to when the notification actually happened, not to when it
+    // was replayed.
     function fireReplay(it): void {
         const args = ["notify-send"];
         if (it.urgency)
@@ -1133,6 +1140,8 @@ ShellRoot {
         args.push("-a", "REPLAY");
         if (appName)
             args.push("-h", "string:desktop-entry:" + appName);
+        if (it.timestamp)
+            args.push("-h", "string:x-pibble-orig-ts:" + it.timestamp);
         if (it.appIcon)
             args.push("-i", it.appIcon);
         if (it.image)
@@ -1213,6 +1222,22 @@ ShellRoot {
             return "file://" + name;
         return Quickshell.iconPath(name, true);
     }
+    // compact relative-time label for `pibble replay` cards ("5m ago"); not
+    // used anywhere live notifications need a timestamp, so it's plain
+    // one-shot text, not a ticking Timer-backed binding
+    function timeAgo(ms: double): string {
+        const diff = Math.max(0, Date.now() - ms);
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1)
+            return "just now";
+        if (mins < 60)
+            return mins + "m ago";
+        const hours = Math.floor(mins / 60);
+        if (hours < 24)
+            return hours + "h ago";
+        return Math.floor(hours / 24) + "d ago";
+    }
+
     // notification glyph classifier, shared by the stack card and the flyout
     // bubble (the icon name may arrive resolved as a path, so match loosely)
     function notifGlyph(icon: string, summary: string): string {
@@ -1257,9 +1282,14 @@ ShellRoot {
         // pibble replay (see fireReplay) always sends "REPLAY" as its own
         // identity so repeated replays replace each other regardless of
         // origin; the real sender rides along in the desktop-entry hint
-        // purely for display here
-        if (appName === "REPLAY")
-            appName = de ? de + " - REPLAY" : "REPLAY";
+        // purely for display here, and the original arrival time (also a
+        // hint, since notify-send has no standard one for it) becomes a
+        // relative "5m ago" in place of a static "REPLAY" tag
+        if (appName === "REPLAY") {
+            const origTs = Number(n.hints?.["x-pibble-orig-ts"] ?? 0);
+            const ago = origTs ? root.timeAgo(origTs) : "";
+            appName = de ? (ago ? de + " - " + ago : de) : (ago || "REPLAY");
+        }
         else if (de && (!appName || !icon)) {
             const ent = Array.from(DesktopEntries.applications.values)
                 .find(e => e.id.toLowerCase() === de.toLowerCase());
@@ -3899,6 +3929,12 @@ ShellRoot {
                         readonly property int wallIndex: count > 0 ? ((absStep % count) + count) % count : -1
                         readonly property var wall: wallIndex >= 0 ? win.wallMatches[wallIndex] : null
                         readonly property bool isCenter: wallIndex >= 0 && wallIndex === win.wallSelected && Math.abs(rank) < 0.5
+                        // drives the ring/stroke/fill selection highlight
+                        // below; continuous in |rank| (not isCenter's hard
+                        // cutoff) so it cross-fades with the slide instead
+                        // of snapping — see wallCell's isSelected boolean
+                        // toggle above for how the static tiles grid does it
+                        readonly property real selFade: Math.max(0, 1 - Math.abs(rank) * 2)
                         // left-to-right visual slot, for the same wave/slide
                         // stagger the tile grids use (see win.animDelay)
                         readonly property int visSlot: Math.max(0, Math.min(wallCarousel.halfVisible * 2,
@@ -3968,11 +4004,34 @@ ShellRoot {
                             anchors.fill: parent
                             opacity: 0
 
+                            // selected-tile ring from the tiles grid (see
+                            // wallCell above), reused here: sits behind
+                            // wcThumb and is larger by the same margin, so
+                            // it never overlaps the thumbnail itself, just
+                            // frames it. Opacity tracks |rank| continuously
+                            // (not wcCell.isCenter's hard cutoff) so it
+                            // cross-fades smoothly between the outgoing and
+                            // incoming centered card as the carousel slides,
+                            // instead of popping on/off mid-transition.
+                            // Anchored to parent (wcWrap), not wcThumb — same
+                            // reason the inner stroke below is: anchoring to
+                            // the ClippingRectangle sibling instead of the
+                            // plain, non-clipping parent visibly jittered the
+                            // ring every frame while wcCell's scale animated.
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: -5
+                                radius: 17
+                                color: "transparent"
+                                border.width: 3
+                                border.color: Qt.alpha(root.accent, 0.33)
+                                opacity: wcCell.selFade
+                            }
                             ClippingRectangle {
                                 id: wcThumb
                                 anchors.fill: parent
                                 radius: 12
-                                color: Qt.alpha(root.accent, 0.08)
+                                color: Qt.alpha(root.accent, 0.08 + 0.08 * wcCell.selFade)
 
                                 Image {
                                     // wider than the bar and panned opposite the
@@ -4044,7 +4103,9 @@ ShellRoot {
                                 radius: 12
                                 color: "transparent"
                                 border.width: 1
-                                border.color: Qt.alpha(root.accent, 0.33)
+                                // same muted-to-full-accent brighten tiles
+                                // mode gives the selected cell's stroke
+                                border.color: Qt.alpha(root.accent, 0.33 + 0.67 * wcCell.selFade)
                             }
                             MouseArea {
                                 anchors.fill: parent
