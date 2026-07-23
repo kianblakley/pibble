@@ -3,8 +3,12 @@
 #   pibble start     start the persistent daemon (for spawn-at-startup)
 #   pibble stop      stop the daemon
 #   pibble restart   stop, then start
-#   pibble toggle    show/hide the launcher window (for the keybind),
-#                    starting the daemon first if it isn't running
+#   pibble toggle [page]
+#                    show/hide the launcher window (for the keybind),
+#                    starting the daemon first if it isn't running; with a
+#                    page id, opens straight to that page (or switches to
+#                    it if another page is open, or closes if it's already
+#                    the one showing)
 #   pibble replay    re-fire one recent notification; repeated presses step
 #                    back through history (see "Replay count" in flyout settings)
 #   pibble help      show this message (also what a bare `pibble` does)
@@ -26,10 +30,21 @@ export_icon_theme() {
     [ -n "$theme" ] && export QS_ICON_THEME="$theme"
 }
 
+# Native dialogs (e.g. the settings file picker) only route through
+# xdg-desktop-portal — showing the user's actual configured picker instead
+# of Qt's generic built-in QML fallback — if told to via this platform
+# theme; if the plugin isn't installed Qt just keeps the QML fallback, so
+# this is safe to set unconditionally.
+export_native_dialogs() {
+    export QT_QPA_PLATFORMTHEME=xdgdesktopportal
+}
+
 # ipc calls fail on ambiguity if duplicate daemons exist; always talk to the
 # newest and reap any older duplicates.
 ipc() {
-    qs -p "$repo" ipc -n call launcher "$1" 2>/dev/null
+    local fn="$1"
+    shift
+    qs -p "$repo" ipc -n call launcher "$fn" "$@" 2>/dev/null
 }
 running_pids() {
     pgrep -f "^qs -p $repo\$"
@@ -57,7 +72,10 @@ Commands:
   start     start the persistent daemon (for spawn-at-startup)
   stop      stop the daemon
   restart   stop, then start the daemon
-  toggle    show/hide the launcher window, starting the daemon first if needed
+  toggle [page]
+            show/hide the launcher window, starting the daemon first if
+            needed; with a page id, opens/switches straight to that page
+            (or closes if it's already the one showing)
   replay    re-fire one recent notification; repeated presses step back
   help      show this message (also what a bare `pibble` does)
 USAGE
@@ -68,6 +86,7 @@ start)
     # never start a second daemon
     running_pids >/dev/null && exit 0
     export_icon_theme
+    export_native_dialogs
     exec qs -p "$repo"
     ;;
 stop)
@@ -81,17 +100,24 @@ restart)
         sleep 0.1
     done
     export_icon_theme
+    export_native_dialogs
     setsid -f qs -p "$repo" >/dev/null 2>&1
     ;;
 toggle)
+    # $2, if given, is a page id (pibble toggle clips): opens straight onto
+    # that page, switches to it if the launcher is already open elsewhere,
+    # or closes if it's already the one showing. Always passed through
+    # (even empty) since the IPC function takes it as a required argument.
     reap_duplicates
-    ipc toggle && exit 0
-    # daemon not running: start it, then open the launcher
+    ipc toggle "$2" && exit 0
+    # daemon not running: start it, then retry through the same toggle call
+    # so a page argument still lands on the freshly-opened launcher
     export_icon_theme
+    export_native_dialogs
     setsid -f qs -p "$repo" >/dev/null 2>&1
     for _ in $(seq 1 50); do
         sleep 0.1
-        ipc open && exit 0
+        ipc toggle "$2" && exit 0
     done
     exit 1
     ;;
