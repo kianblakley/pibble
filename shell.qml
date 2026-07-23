@@ -363,7 +363,7 @@ ShellRoot {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "#"
                             color: Qt.alpha(root.muted, 0.6)
-                            font { family: root.mono; pixelSize: root.fs(14) }
+                            font { family: root.mono; pixelSize: root.fs(12) }
                         }
                         TextInput {
                             id: hexInput
@@ -371,7 +371,7 @@ ShellRoot {
                             width: 220
                             text: ccr.slotHex.replace("#", "").toUpperCase()
                             color: root.fg
-                            font { family: root.mono; pixelSize: root.fs(14) }
+                            font { family: root.mono; pixelSize: root.fs(12) }
                             selectByMouse: true
                             maximumLength: 6
                             // the binding above (declarative `text:`) only
@@ -417,22 +417,22 @@ ShellRoot {
                         readonly property bool active: ccr.slot === modelData.key
                         readonly property string hex: modelData.key === "fg" ? cfg.customFg : modelData.key === "muted" ? cfg.customMuted : cfg.customAccent
                         width: 170
-                        height: 48
+                        height: 46
                         radius: 10
                         color: Qt.alpha(root.accent, active ? 0.16 : 0.06)
                         border.width: active ? 2 : 1
                         border.color: active ? root.accent : Qt.alpha(root.accent, 0.25)
 
                         Row {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 14
                             spacing: 8
 
                             Rectangle {
-                                width: 26
-                                height: 26
-                                radius: 7
+                                width: 18
+                                height: 18
+                                radius: 4
                                 anchors.verticalCenter: parent.verticalCenter
                                 color: slotChip.hex
                                 border.width: 1
@@ -444,12 +444,12 @@ ShellRoot {
                                 Text {
                                     text: slotChip.modelData.label
                                     color: slotChip.active ? root.fg : root.muted
-                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                    font { family: root.mono; pixelSize: root.fs(12) }
                                 }
                                 Text {
                                     text: slotChip.hex.toUpperCase()
                                     color: Qt.alpha(root.muted, 0.8)
-                                    font { family: root.mono; pixelSize: root.fs(14) }
+                                    font { family: root.mono; pixelSize: root.fs(12) }
                                 }
                             }
                         }
@@ -545,13 +545,68 @@ ShellRoot {
             anchors.centerIn: parent
             text: root.ti.refresh
             color: resetArea.containsMouse ? root.fg : root.muted
-            font { family: root.tablerFont; pixelSize: root.fs(13) }
+            font { family: root.iconFont; pixelSize: root.fs(13) }
         }
         MouseArea {
             id: resetArea
             anchors.fill: parent
             hoverEnabled: true
             onClicked: win.resetSetting(sreset.key)
+        }
+    }
+
+    // row of checkbox chips (label + tick box) toggling boolean flags in a
+    // cfg.* object, e.g. the Flyouts/Pibble alerts rows in the flyouts tab
+    component ChipRow: Row {
+        id: chipRow
+        property var items // [{id, label}]
+        property var isOn // function(id): bool
+        property var toggle // function(id): void
+        spacing: 40
+
+        Repeater {
+            model: chipRow.items
+
+            Item {
+                id: chip
+                required property var modelData
+                readonly property bool on: chipRow.isOn(modelData.id)
+                width: chipBox.width + 6 + chipText.implicitWidth
+                height: 28
+                anchors.verticalCenter: parent.verticalCenter
+
+                Rectangle {
+                    id: chipBox
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 18
+                    height: 18
+                    radius: 4
+                    color: chip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
+                    border.width: 1
+                    border.color: chip.on ? root.accent : Qt.alpha(root.muted, 0.6)
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: chip.on
+                        text: root.ti.check
+                        color: "#141210"
+                        font { family: root.iconFont; pixelSize: 13 }
+                    }
+                }
+                Text {
+                    id: chipText
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: chipBox.right
+                    anchors.leftMargin: 6
+                    text: chip.modelData.label
+                    color: chip.on ? root.fg : root.muted
+                    font { family: root.mono; pixelSize: root.fs(12) }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: chipRow.toggle(chip.modelData.id)
+                }
+            }
         }
     }
 
@@ -575,13 +630,13 @@ ShellRoot {
     // A page gets exactly this and nothing else: enough to theme itself
     // consistently and persist its own data. Some things that used to
     // live here (close/openSettings/notify/copyToClipboard, the
-    // animation-parameter set, a `ti` icon-glyph map, tablerFont itself,
+    // animation-parameter set, a `ti` icon-glyph map, iconFont itself,
     // surface) are gone because they were reachable another way already
     // (the keybind closes the launcher; notify-send/Quickshell.clipboardText
     // are plain Quickshell, no wrapper needed), asked a page to reproduce
     // pibble's own visual rhythm exactly (which isn't something most pages
     // need and is cheap for the ones that do want it to just build
-    // themselves off `active`), or (tablerFont, surface) didn't correspond
+    // themselves off `active`), or (iconFont, surface) didn't correspond
     // to any real per-page use once the built-in icon glyph map was cut.
     // fill/fillActive/border below are the opposite case: kept (and
     // precomputed, not left as bare alpha numbers) because there's no way
@@ -732,7 +787,7 @@ ShellRoot {
             anchors.centerIn: parent
             text: keycap.glyph || keycap.label
             color: root.fg
-            font.family: keycap.glyph ? root.tablerFont : root.mono
+            font.family: keycap.glyph ? root.iconFont : root.mono
             font.pixelSize: root.fs(12)
         }
     }
@@ -952,6 +1007,7 @@ ShellRoot {
             cfg.pages = Object.assign({}, cfg.pages);
             cfg.keybinds = Object.assign({}, cfg.keybinds);
             cfg.flyouts = Object.assign({}, cfg.flyouts);
+            cfg.pibbleAlerts = Object.assign({}, cfg.pibbleAlerts);
             cfg.clockShow = Object.assign({}, cfg.clockShow);
             root.healSettings();
             if (!matugenProc.startupKicked) {
@@ -1015,10 +1071,14 @@ ShellRoot {
             // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
             property bool bgBlur: true
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
-            // flyouts (volume + notification OSDs); "alerts" gates every
-            // notify-send pibble sends on its own behalf (errors, copy
-            // confirmations) independent of whether other apps' notifications show
-            property var flyouts: ({ volume: true, notifs: true, alerts: true })
+            // flyouts (volume + notification OSDs) — independent of whether
+            // other apps' notifications show
+            property var flyouts: ({ volume: true, notifs: true })
+            // gates notify-send calls pibble sends on its own behalf, split
+            // by kind: errors (missing tools, failed commands), system
+            // (copy confirmations, custom page discovery, page trashed),
+            // battery (low battery warning)
+            property var pibbleAlerts: ({ errors: true, system: true, battery: true })
             property real volWidth: 420
             property string volAnim: "pop"
             // volume OSD content style: pill (a level bar) or sine (equalizer)
@@ -1211,6 +1271,9 @@ ShellRoot {
     function flyoutOn(name: string): bool {
         return (cfg.flyouts ?? {})[name] !== false;
     }
+    function alertOn(name: string): bool {
+        return (cfg.pibbleAlerts ?? {})[name] !== false;
+    }
     // icon-name → displayable URL; senders (and .desktop Icon= entries)
     // sometimes resolve the icon themselves, so paths and urls pass through
     function iconUrl(name: string): string {
@@ -1238,12 +1301,33 @@ ShellRoot {
         return Math.floor(hours / 24) + "d ago";
     }
 
-    // notification glyph classifier, shared by the stack card and the flyout
-    // bubble (the icon name may arrive resolved as a path, so match loosely)
-    function notifGlyph(icon: string, summary: string): string {
+    // notification glyph classifier, shared by the stack card and the
+    // flyout bubble. Matches on the *raw* freedesktop icon name pibble
+    // itself passed via notify-send -i (see notifyError and the various
+    // -i-passing notify-send calls throughout), not the resolved icon
+    // path: resolution depends on the active system icon theme actually
+    // having that name, which isn't guaranteed, and a failed resolution
+    // used to silently fall through to the generic bell below with no
+    // error visible. Exact icon-name matches take priority over the
+    // generic keyword/urgency fallback so a specific glyph (trash, low
+    // battery, etc) never gets overridden by a coincidental "fail"/"not
+    // found" in the summary text.
+    function notifGlyph(iconName: string, urgency, summary: string): string {
+        switch (iconName) {
+        case "dialog-error": return root.ti.alertTriangle;
+        case "edit-copy": return root.ti.copy;
+        case "list-add": return root.ti.plus;
+        case "user-trash": return root.ti.trash;
+        case "battery-low": return root.ti.batteryLow;
+        case "preferences-desktop-wallpaper": return root.ti.wallpaper;
+        case "system-software-install": return root.ti.download;
+        }
         const sl = summary.toLowerCase();
-        return icon.includes("error") || sl.includes("fail") || sl.includes("not found") ? root.ti.alertTriangle
-            : icon.includes("copy") || sl.includes("copied") ? root.ti.copy : root.ti.bell;
+        if (urgency === NotificationUrgency.Critical || sl.includes("fail") || sl.includes("not found"))
+            return root.ti.alertTriangle;
+        if (sl.includes("copied"))
+            return root.ti.copy;
+        return root.ti.bell;
     }
 
     // notification object → display fields, shared by the live flyout card
@@ -1253,6 +1337,17 @@ ShellRoot {
     function deriveNotifView(n): var {
         let icon = root.iconUrl(String(n.appIcon ?? ""));
         let img = String(n.image ?? "");
+        // the bare freedesktop icon name (e.g. "dialog-error"), kept
+        // separate from icon/img above which carry whatever's actually
+        // displayable (a resolved path or image provider URL) — used only
+        // for notifGlyph's classification below. notify-send's -i flag
+        // does *not* populate the app_icon D-Bus argument (confirmed via
+        // dbus-monitor): libnotify routes it through the "image-path"
+        // hint instead, which arrives here as n.image, not n.appIcon — so
+        // appIcon is empty for every notify-send-style call pibble itself
+        // makes, and the real name only recovers below once the
+        // image://icon/ prefix is stripped off
+        let iconName = String(n.appIcon ?? "");
         // some apps (e.g. niri screenshots) pass a file path in the icon
         // field: that is notification media, not an app icon
         if (icon.startsWith("file://")) {
@@ -1272,6 +1367,8 @@ ShellRoot {
             else {
                 if (!icon)
                     icon = img;
+                if (!iconName)
+                    iconName = rest;
                 img = "";
             }
         }
@@ -1303,8 +1400,15 @@ ShellRoot {
                 appName = de;
         }
         return {
-            own: n.appName === "pibble",
-            glyph: root.notifGlyph(icon, String(n.summary ?? "")),
+            // n.appName is forced to "REPLAY" by fireReplay for every
+            // replayed notification (see there) regardless of who
+            // originally sent it, so a replay of pibble's own alert would
+            // otherwise stop counting as "own" here and lose both its
+            // glyph rendering and its icon tinting exemption below; the
+            // desktop-entry hint still carries the true original sender
+            // through a replay, so check that too
+            own: n.appName === "pibble" || de === "pibble",
+            glyph: root.notifGlyph(iconName, n.urgency, String(n.summary ?? "")),
             app: appName,
             key: (String(n.appName ?? "")) || de,
             summary: n.summary ?? "",
@@ -1316,38 +1420,35 @@ ShellRoot {
     }
 
     // pibble's own UI glyphs (weather/battery/checks/etc, as opposed to
-    // other apps' resolved icons) all come from the vendored Tabler Icons
-    // webfont, addressed by codepoint rather than name
-    FontLoader { id: tablerIconFont; source: Qt.resolvedUrl("fonts/tabler-icons.ttf") }
-    readonly property string tablerFont: tablerIconFont.name
+    // other apps' resolved icons) come from one vendored icon webfont,
+    // addressed by codepoint rather than name.
+    FontLoader { id: msIconFont; source: Qt.resolvedUrl("fonts/MaterialSymbolsSharp_48pt-SemiBold.ttf") }
+    readonly property string iconFont: msIconFont.name
+
+    // codepoints looked up by hand from Material Symbols' own cmap —
+    // Private Use Area codepoints carry no standard meaning outside this font.
     readonly property var ti: ({
-        sun: "",
-        cloud: "",
-        cloudRain: "",
-        cloudSnow: "",
-        cloudStorm: "",
-        snowflake: "",
-        bolt: "",
-        check: "",
-        settings: "",
-        refresh: "",
-        copy: "",
-        bell: "",
-        alertTriangle: "",
-        // "corner-down-left" — closest tabler-icons glyph to a physical
-        // Return/Enter key’s arrow; used by KeyCap in the keybindings tab
-        cornerDownLeft: ""
+        sun: "\ue430", cloud: "\ue2bd", cloudRain: "\uf176", cloudSnow: "\ue810",
+        cloudStorm: "\uebdb", snowflake: "\ued5b", bolt: "\uea0b", check: "\ue5ca",
+        settings: "\ue8b8", refresh: "\ue5d5", copy: "\ue14d", bell: "\ue7f4",
+        alertTriangle: "\ue002", cornerDownLeft: "\ue31b",
+        wallpaper: "\ue1bc", plus: "\uf710", trash: "\ue872",
+        batteryLow: "\uf251", download: "\ue171"
     })
 
     function fs(px: int): int {
         return Math.round(px * cfg.fontScale);
     }
 
-    // internal errors surface as regular notifications (we are the server)
+    // internal errors surface as regular notifications (we are the
+    // server); always the generic alert glyph (see notifGlyph) so every
+    // pibble-raised error reads the same at a glance.
+    // -t 0 (expire_timeout 0, "never expire" per spec — see showTimer) so
+    // an actionable error can't auto-dismiss before it's been read
     function notifyError(summary: string, body: string) {
-        if (!flyoutOn("alerts"))
+        if (!alertOn("errors"))
             return;
-        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
+        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", "-t", "0", summary, body]);
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text
@@ -1357,7 +1458,7 @@ ShellRoot {
     readonly property string clipWatcherFixCommand: "wl-paste --type text --watch cliphist store\nwl-paste --type image --watch cliphist store"
     function copyToClipboard(text: string): void {
         Quickshell.clipboardText = text;
-        if (flyoutOn("alerts"))
+        if (alertOn("system"))
             Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text]);
     }
 
@@ -1439,6 +1540,16 @@ ShellRoot {
         }
         if (!["tiles", "windows", "windows-flat"].includes(cfg.wallpaperStyle)) {
             cfg.wallpaperStyle = "tiles";
+            saveSettings();
+        }
+        // the single "alerts" flyout checkbox split into per-category
+        // pibbleAlerts (errors/system/battery)
+        if (cfg.flyouts && Object.prototype.hasOwnProperty.call(cfg.flyouts, "alerts")) {
+            const wasOn = cfg.flyouts.alerts !== false;
+            cfg.pibbleAlerts = { errors: wasOn, system: wasOn, battery: wasOn };
+            const fly = Object.assign({}, cfg.flyouts);
+            delete fly.alerts;
+            cfg.flyouts = fly;
             saveSettings();
         }
     }
@@ -1549,7 +1660,7 @@ ShellRoot {
         stdout: StdioCollector {
             onStreamFinished: {
                 Quickshell.clipboardText = text;
-                if (root.flyoutOn("alerts"))
+                if (root.alertOn("system"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text.slice(0, 4000)]);
             }
         }
@@ -1762,7 +1873,7 @@ ShellRoot {
                             if ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
@@ -1780,7 +1891,7 @@ ShellRoot {
                             k=$(basename "$c"); k="\${k%.*}"
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
-                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"].concat(walls.map(w => w.path)));
+                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0", root.alertOn("errors") ? "1" : "0"].concat(walls.map(w => w.path)));
             }
         }
     }
@@ -1894,11 +2005,11 @@ ShellRoot {
                     // still exist on every later rescan.
                     const goodAdded = added.filter(u => !u.broken);
                     const brokenAdded = added.filter(u => u.broken);
-                    if (goodAdded.length && root.flyoutOn("alerts")) {
+                    if (goodAdded.length && root.alertOn("system")) {
                         const body = goodAdded.length === 1
                             ? goodAdded[0].label + " - enable it in Settings > Pages"
                             : goodAdded.length + " new custom pages - enable them in Settings > Pages";
-                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "New custom page found", body]);
+                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "-t", "0", "New custom page found", body]);
                     }
                     for (const u of brokenAdded)
                         root.notifyError("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point - see Settings > Pages.");
@@ -1999,12 +2110,12 @@ ShellRoot {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
                             rm -f "$tmp"
-                        done`, "_", root.clipThumbDir, root.flyoutOn("alerts") ? "1" : "0"].concat(imgs);
+                        done`, "_", root.clipThumbDir, root.alertOn("errors") ? "1" : "0"].concat(imgs);
                     clipThumbs.running = true;
                 }
             }
@@ -2093,7 +2204,7 @@ ShellRoot {
             weatherFetch.running = true;
         }
     }
-    // maps the wttr.in condition text to a Tabler weather glyph
+    // maps the wttr.in condition text to a weather glyph
     function weatherIcon(text) {
         const t = text.toLowerCase();
         if (t.includes("thunder"))
@@ -2132,9 +2243,9 @@ ShellRoot {
         if (pct <= 5) {
             if (!lowBatteryAlerted) {
                 lowBatteryAlerted = true;
-                if (flyoutOn("alerts"))
+                if (alertOn("battery"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-u", "critical",
-                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
+                        "-i", "battery-low", "-t", "0", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
             }
         } else if (pct > 8) {
             lowBatteryAlerted = false;
@@ -2795,14 +2906,14 @@ ShellRoot {
                         if command -v magick >/dev/null 2>&1; then
                             magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
-                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
+                            notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
                         fi
                     fi
                 fi
                 export WALL BLUR
-                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$4"; }
+                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error -t 0 "Wallpaper command failed" "$4"; }
             `, "_", wall.path, wall.blur, root.wallCacheDir, cfg.wallCommand,
-                cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.flyoutOn("alerts") ? "1" : "0"]);
+                cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.alertOn("errors") ? "1" : "0"]);
             exit();
         }
 
@@ -2865,7 +2976,7 @@ ShellRoot {
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 if ! command -v wl-copy >/dev/null 2>&1; then
-                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
+                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error -t 0 "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
                     exit 0
                 fi
                 tmp=$(mktemp)
@@ -2881,7 +2992,7 @@ ShellRoot {
                 rm -f "$tmp"
                 # copied images ride along as notification media (the decoded
                 # entry is already cached by the thumbnail scan)
-                if [ "$5" = "1" ]; then
+                if [ "$6" = "1" ]; then
                     if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
                         notify-send -a pibble -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
                     else
@@ -2895,7 +3006,7 @@ ShellRoot {
                     cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
                 fi
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir,
-                clip.preview.slice(0, 60), root.flyoutOn("alerts") ? "1" : "0"];
+                clip.preview.slice(0, 60), root.alertOn("errors") ? "1" : "0", root.alertOn("system") ? "1" : "0"];
             clipCopy.running = true;
         }
         property string infoClipId: ""
@@ -3382,7 +3493,7 @@ ShellRoot {
                                     required property int index
                                     readonly property bool available: clockLine.isAvailable(modelData)
                                     readonly property bool isFirstVisible: clockLine.availableIds.length > 0 && clockLine.availableIds[0] === modelData
-                                    spacing: 5
+                                    spacing: seg.modelData === "weather" ? 8 : 5
                                     anchors.verticalCenter: parent.verticalCenter
                                     // an unavailable segment (no battery, or
                                     // weather not fetched yet) fades out in
@@ -3431,7 +3542,7 @@ ShellRoot {
                                         }
                                         text: frozenText
                                         color: seg.modelData === "battery" ? root.accent : root.muted
-                                        font { family: root.tablerFont; pixelSize: root.fs(16) }
+                                        font { family: root.iconFont; pixelSize: root.fs(16) }
                                     }
                                     Text {
                                         // same freeze trick as segIcon above: hold the
@@ -4929,7 +5040,7 @@ ShellRoot {
                                     text: root.ti.copy
                                     color: root.accent
                                     anchors.verticalCenter: parent.verticalCenter
-                                    font { family: root.tablerFont; pixelSize: root.fs(16) }
+                                    font { family: root.iconFont; pixelSize: root.fs(16) }
                                 }
                                 Text {
                                     text: "Copy"
@@ -5054,60 +5165,16 @@ ShellRoot {
                             key: "flyouts"
                             anchors.right: parent.right
                         }
-                        Row {
+                        ChipRow {
                             anchors.right: parent.right
                             anchors.rightMargin: 34 + 32
-                            spacing: 40
-                            height: parent.height
-
-                            Repeater {
-                                model: [
-                                    { id: "volume", label: "volume" },
-                                    { id: "notifs", label: "notifications" },
-                                    { id: "alerts", label: "pibble alerts" }
-                                ]
-
-                                Item {
-                                    id: flyChip
-                                    required property var modelData
-                                    readonly property bool on: root.flyoutOn(modelData.id)
-                                    width: flyBox.width + 6 + flyChipText.implicitWidth
-                                    height: 28
-                                    anchors.verticalCenter: parent.verticalCenter
-
-                                    Rectangle {
-                                        id: flyBox
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 18
-                                        height: 18
-                                        radius: 4
-                                        color: flyChip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
-                                        border.width: 1
-                                        border.color: flyChip.on ? root.accent : Qt.alpha(root.muted, 0.6)
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            visible: flyChip.on
-                                            text: root.ti.check
-                                            color: "#141210"
-                                            font { family: root.tablerFont; pixelSize: 13 }
-                                        }
-                                    }
-                                    Text {
-                                        id: flyChipText
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left: flyBox.right
-                                        anchors.leftMargin: 6
-                                        text: flyChip.modelData.label
-                                        color: flyChip.on ? root.fg : root.muted
-                                        font { family: root.mono; pixelSize: root.fs(12) }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: win.toggleFlyout(flyChip.modelData.id)
-                                    }
-                                }
-                            }
+                            anchors.verticalCenter: parent.verticalCenter
+                            items: [
+                                { id: "volume", label: "volume" },
+                                { id: "notifs", label: "notifications" }
+                            ]
+                            isOn: root.flyoutOn
+                            toggle: win.toggleFlyout
                         }
                     }
 
@@ -5116,6 +5183,36 @@ ShellRoot {
                     SettingRow { key: "volAnim"; label: "Volume animation" }
                     SettingRow { key: "volPercent"; label: "Volume percent" }
                     SettingRow { key: "volTimeout"; label: "Volume timeout" }
+
+                    // pibble's own notify-send calls (missing tools, failed
+                    // commands, copy confirmations, low battery), independent
+                    // of the "notifications" flyout above which only gates
+                    // other apps' notifications
+                    Item {
+                        width: 780
+                        height: 34
+
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Pibble alerts"
+                        }
+                        SReset {
+                            key: "pibbleAlerts"
+                            anchors.right: parent.right
+                        }
+                        ChipRow {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34 + 32
+                            anchors.verticalCenter: parent.verticalCenter
+                            items: [
+                                { id: "errors", label: "errors" },
+                                { id: "system", label: "system" },
+                                { id: "battery", label: "battery" }
+                            ]
+                            isOn: root.alertOn
+                            toggle: win.toggleAlert
+                        }
+                    }
                     SettingRow { key: "notifStyle"; label: "Notification style" }
                     SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
@@ -5315,8 +5412,8 @@ ShellRoot {
                                     cfg.customPageData = all;
                                 }
                                 root.rescanUploadedPages();
-                                if (root.flyoutOn("alerts"))
-                                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "Page moved to trash", trashedLabel]);
+                                if (root.alertOn("system"))
+                                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "-t", "0", "Page moved to trash", trashedLabel]);
                             }
                         }
                         // picks up files dropped into/removed from the test
@@ -5630,7 +5727,7 @@ ShellRoot {
                                                             visible: pagesBlock.pageOn(pageRow.modelData) || pageBox.broken
                                                             text: pageBox.broken ? root.ti.alertTriangle : root.ti.check
                                                             color: pageBox.broken ? Qt.alpha(root.muted, 0.9) : "#141210"
-                                                            font { family: root.tablerFont; pixelSize: 13 }
+                                                            font { family: root.iconFont; pixelSize: 13 }
                                                         }
                                                         // disabled while revealed (a tap there
                                                         // closes the swipe instead) or when the
@@ -5973,7 +6070,7 @@ ShellRoot {
                                             visible: clockChip.on
                                             text: root.ti.check
                                             color: "#141210"
-                                            font { family: root.tablerFont; pixelSize: 13 }
+                                            font { family: root.iconFont; pixelSize: 13 }
                                         }
                                     }
                                     Text {
@@ -6473,7 +6570,7 @@ ShellRoot {
                         anchors.centerIn: parent
                         text: root.ti.settings
                         color: root.fg
-                        font { family: root.tablerFont; pixelSize: root.fs(22) }
+                        font { family: root.iconFont; pixelSize: root.fs(22) }
                     }
                     MouseArea {
                         id: cornerBtnArea
@@ -6601,9 +6698,16 @@ ShellRoot {
         }
 
         function toggleFlyout(f: string) {
-            const fly = Object.assign({ volume: true, notifs: true, alerts: true }, cfg.flyouts);
+            const fly = Object.assign({ volume: true, notifs: true }, cfg.flyouts);
             fly[f] = fly[f] === false;
             cfg.flyouts = fly;
+            root.saveSettings();
+        }
+
+        function toggleAlert(a: string) {
+            const al = Object.assign({ errors: true, system: true, battery: true }, cfg.pibbleAlerts);
+            al[a] = al[a] === false;
+            cfg.pibbleAlerts = al;
             root.saveSettings();
         }
 
@@ -6659,7 +6763,8 @@ ShellRoot {
                 break;
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 420; break;
-            case "flyouts": cfg.flyouts = ({ volume: true, notifs: true, alerts: true }); break;
+            case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
+            case "pibbleAlerts": cfg.pibbleAlerts = ({ errors: true, system: true, battery: true }); break;
             case "volAnim": cfg.volAnim = "pop"; break;
             case "volStyle": cfg.volStyle = "sine"; break;
             case "volPercent": cfg.volShowPercent = true; break;
@@ -7417,6 +7522,12 @@ ShellRoot {
                 current = n;
                 view = root.deriveNotifView(n);
                 imgProbe.source = view.image;
+                // errors and low battery always read as red, regardless of
+                // theme/tint, so severity is visible at a glance
+                if (view.glyph === root.ti.alertTriangle || view.glyph === root.ti.batteryLow) {
+                    nColor = "#e0524f";
+                    return;
+                }
                 // "default" theme tints from the app icon (else the media
                 // image); pinned themes use their accent everywhere
                 const src = (root.notifIconTint && !view.own) ? (view.icon || view.image) : "";
@@ -7754,47 +7865,17 @@ ShellRoot {
                     source: flyWin.view.own ? "" : flyWin.view.icon
                     visible: String(source) !== ""
                 }
-                // no app icon: the launcher's own glyphs stay; other apps get
-                // the drawn bell fallback
+                // no app icon (own or not — e.g. niri's screenshot
+                // notification carries only an image, no icon): fall back
+                // to the icon font's glyph (root.ti.bell by default, see
+                // notifGlyph) instead of a fixed drawing
                 readonly property color inkC: "#f2f0ee"
                 Text {
                     anchors.centerIn: parent
-                    visible: !circleIcon.visible && flyWin.view.own
+                    visible: !circleIcon.visible
                     text: flyWin.view.glyph
                     color: fIcon.inkC
-                    font { family: root.tablerFont; pixelSize: root.flyFs(24) }
-                }
-                Canvas {
-                    visible: !circleIcon.visible && !flyWin.view.own
-                    anchors.centerIn: parent
-                    width: 24
-                    height: width
-                    renderStrategy: Canvas.Immediate
-                    renderTarget: Canvas.Image
-                    property color ink: fIcon.inkC
-                    onInkChanged: requestPaint()
-                    onVisibleChanged: if (visible) requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        ctx.clearRect(0, 0, width, height);
-                        ctx.save();
-                        // the path is authored on a 24px grid; scale to item size
-                        ctx.scale(width / 24, height / 24);
-                        ctx.fillStyle = String(ink);
-                        // bell: dome, flared skirt, clapper
-                        ctx.beginPath();
-                        ctx.arc(12, 9.2, 6, Math.PI, 0);
-                        ctx.lineTo(18, 12.4);
-                        ctx.quadraticCurveTo(19, 14.9, 20.5, 15.9);
-                        ctx.lineTo(3.5, 15.9);
-                        ctx.quadraticCurveTo(5, 14.9, 6, 12.4);
-                        ctx.closePath();
-                        ctx.fill();
-                        ctx.beginPath();
-                        ctx.arc(12, 18.9, 2, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.restore();
-                    }
+                    font { family: root.iconFont; pixelSize: root.flyFs(24) }
                 }
                 HoverHandler {
                     id: bubbleHover
