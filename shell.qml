@@ -2891,7 +2891,13 @@ ShellRoot {
         // bounded index (what applyWallpaper()/activate() read).
         property int wallCarouselStep: 0
         property real wallCarouselAnim: wallCarouselStep
+        // disabled while a finger/pointer is actively dragging the carousel
+        // (see carouselDragTo below) so the live drag can move wallCarouselAnim
+        // instantly, frame to frame, instead of chasing it through the eased
+        // Behavior meant for discrete moveCarousel() steps
+        property bool wallCarouselDragging: false
         Behavior on wallCarouselAnim {
+            enabled: !win.wallCarouselDragging
             NumberAnimation { id: wallCarouselAnimAnim; duration: 420; easing.type: Easing.OutCubic }
         }
         // isCenter (Math.abs(rank) < 0.5) goes true well before the slide's
@@ -2907,18 +2913,33 @@ ShellRoot {
             wallSelected = ((wallSelected + dir) % count + count) % count;
             wallCarouselStep += dir;
         }
-        // Swipe-to-scroll the carousel: dx is the total horizontal drag
-        // distance, vx its release velocity (px/s, signed). A slow short
-        // drag moves roughly one slot; a fast flick carries further, as if
-        // the released velocity kept translating the strip for another
-        // ~150ms — same feel as a native flick-scroll, without needing an
-        // actual Flickable underneath the strip's slot-snapped layout.
-        function carouselFlick(dx: real, vx: real) {
+        // Swipe-to-scroll the carousel, live: dx is the total horizontal drag
+        // distance so far (from the gesture's press, not since the last
+        // call), so the strip tracks the finger 1:1 while dragging, same as
+        // the power/reboot pull tracks raw drag distance while *Dragging is
+        // true above. wallCarouselStep itself is untouched until release
+        // (carouselDragEnd) commits whole slots — dragging alone never
+        // changes the selection.
+        function carouselDragTo(dx: real) {
+            wallCarouselDragging = true;
+            wallCarouselAnim = wallCarouselStep - dx / wallCarousel.slotSpacing;
+        }
+        // Release: dx/vx (total drag distance, release velocity px/s,
+        // signed) decide how many whole slots to commit — a slow short drag
+        // moves roughly one slot; a fast flick carries further, as if the
+        // released velocity kept translating the strip for another ~150ms,
+        // same feel as a native flick-scroll. Whatever slot the live drag
+        // landed on mid-step eases the rest of the way there (or back to the
+        // start, if the drag didn't carry far enough to commit) once the
+        // Behavior above is re-enabled.
+        function carouselDragEnd(dx: real, vx: real) {
             const carried = Math.abs(dx) + Math.abs(vx) * 0.15;
-            if (carried < 24)
-                return; // a stray jiggle, not a swipe
-            const steps = Math.max(1, Math.round(carried / wallCarousel.slotSpacing));
-            moveCarousel((dx < 0 ? 1 : -1) * steps);
+            if (carried >= 24) {
+                const steps = Math.max(1, Math.round(carried / wallCarousel.slotSpacing));
+                moveCarousel((dx < 0 ? 1 : -1) * steps);
+            }
+            wallCarouselDragging = false;
+            wallCarouselAnim = Qt.binding(() => win.wallCarouselStep);
         }
 
         property var clipMatches: {
@@ -3585,7 +3606,8 @@ ShellRoot {
                 // win.pageMove(). Over the windows wallpaper carousel's own
                 // bounds specifically (background gaps between its cells —
                 // the cells' own swipe handling is on wcCell), left/right
-                // instead flicks the carousel (win.carouselFlick(), a
+                // instead drags the carousel live (win.carouselDragTo()) and
+                // commits whole slots on release (win.carouselDragEnd(), a
                 // distance carried by the drag scaled by release speed)
                 // and up/down is a no-op, since the carousel has no grid
                 // pages. Tracked here (rather than with a second, plain
@@ -3648,12 +3670,16 @@ ShellRoot {
                     horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel;
                     vertTracking = !win.promptOpen && root.gestureOn() && !onCarousel && !edgePress;
                 }
+                onPositionChanged: mouse => {
+                    if (carouselTracking)
+                        win.carouselDragTo(mouse.x - pressX);
+                }
                 onReleased: mouse => {
                     const dx = mouse.x - pressX;
                     const dy = mouse.y - pressY;
                     if (carouselTracking) {
                         const elapsedMs = Math.max(1, Date.now() - pressTime);
-                        win.carouselFlick(dx, dx / elapsedMs * 1000);
+                        win.carouselDragEnd(dx, dx / elapsedMs * 1000);
                     } else if (Math.abs(dx) >= Math.abs(dy)) {
                         // dominant axis only, so a diagonal drag can't fire both
                         if (horizTracking && Math.abs(dx) > 80)
@@ -3678,32 +3704,62 @@ ShellRoot {
                     }
                 }
 
+                // Continuously up to date read of "is the pointer currently
+                // within the top/bottom edge strip" for the DragHandler's
+                // enabled below — deliberately NOT bgArea.edgePress (which
+                // only refreshes inside bgArea's onPressed, a JS signal
+                // handler). A fresh edge-swipe's press event and this
+                // DragHandler's own grab-eligibility check race against
+                // that handler on the very same press, so a value that's
+                // only current one gesture late (e.g. right after arming
+                // then dismissing a prompt from off-edge, which leaves
+                // edgePress stuck false) can silently swallow the very next
+                // edge swipe. HoverHandler never grabs, so it keeps
+                // reporting the live position through presses and drags
+                // alike, with no such lag.
+                HoverHandler {
+                    id: edgeCursor
+                    property bool nearEdge: point.position.y <= win.edgeSwipeZone
+                        || point.position.y >= bgArea.height - win.edgeSwipeZone
+                }
                 // swipe-to-power/reboot: an Android-notification-shade-style
                 // edge drag — before a prompt is armed, it only starts once
                 // the press begins inside the top or bottom
                 // win.edgeSwipeZone strip (tile MouseAreas grab their own
-                // presses regardless); enabled requires bgArea.edgePress
-                // (set by that MouseArea's onPressed, before any drag motion
-                // happens) so this DragHandler never even attempts to grab a
-                // non-edge vertical drag — it lives on the same Item as
-                // bgArea, so if it were always enabled it would win that
-                // grab race every time and bgArea's own vertTracking
-                // pageMove gesture would never see a move/release. Once a
-                // prompt IS armed, the edge requirement is dropped (any
-                // vertical drag anywhere continues to drive it — see the
-                // dragZone pin below) since bgArea's own tracking has
-                // already stood down for the same state (see promptOpen in
-                // its onPressed) and the whole screen belongs to the prompt.
+                // presses regardless); enabled requires edgeCursor.nearEdge
+                // so this DragHandler never even attempts to grab a non-edge
+                // vertical drag — it lives on the same Item as bgArea, so if
+                // it were always enabled it would win that grab race every
+                // time and bgArea's own vertTracking pageMove gesture would
+                // never see a move/release. Once a prompt IS armed, the edge
+                // requirement is dropped (any vertical drag anywhere
+                // continues to drive it — see the dragZone pin below) since
+                // bgArea's own tracking has already stood down for the same
+                // state (see promptOpen in its onPressed) and the whole
+                // screen belongs to the prompt.
                 // Same scene-coords pattern as the notification swipe: the
                 // content moving under the cursor must not feed back into
                 // the drag. Gated behind "power" (the feature itself).
                 DragHandler {
                     target: null
-                    enabled: root.gestureOn() && (bgArea.edgePress || win.powerArmed || win.rebootArmed)
+                    // armEligible freezes edgeCursor.nearEdge's reading from
+                    // the instant this grab starts (see onActiveChanged):
+                    // enabled must go on being true for the rest of an
+                    // in-progress drag regardless of where the pointer
+                    // wanders — Qt cancels an active handler outright the
+                    // moment its enabled goes false — but the whole point of
+                    // this drag is to pull the pointer well past the edge
+                    // strip, so a live edgeCursor.nearEdge read here would
+                    // cancel every real pull partway down. Only a *fresh*
+                    // (not yet active) press needs the live read, to decide
+                    // whether it's eligible to grab at all.
+                    property bool armEligible: false
+                    enabled: root.gestureOn() && (win.powerArmed || win.rebootArmed || (active ? armEligible : edgeCursor.nearEdge))
                     xAxis.enabled: false
                     yAxis.enabled: true
                     onActiveChanged: {
                         if (active) {
+                            armEligible = edgeCursor.nearEdge;
                             const y = centroid.scenePosition.y;
                             // an armed prompt pins the zone to itself
                             // regardless of where on screen this drag
@@ -4685,9 +4741,10 @@ ShellRoot {
                                 }
                             }
                             // swiping the image itself scrolls the
-                            // carousel — same win.carouselFlick() the
-                            // background's carouselTracking gesture uses,
-                            // just fed straight from the drag instead of
+                            // carousel — same win.carouselDragTo()/
+                            // carouselDragEnd() the background's
+                            // carouselTracking gesture uses, just fed
+                            // straight from the drag instead of
                             // reconstructed from press/release timestamps
                             DragHandler {
                                 target: null
@@ -4698,7 +4755,11 @@ ShellRoot {
                                     if (active)
                                         grabX = centroid.scenePosition.x;
                                     else
-                                        win.carouselFlick(centroid.scenePosition.x - grabX, centroid.velocity.x);
+                                        win.carouselDragEnd(centroid.scenePosition.x - grabX, centroid.velocity.x);
+                                }
+                                onCentroidChanged: {
+                                    if (active)
+                                        win.carouselDragTo(centroid.scenePosition.x - grabX);
                                 }
                             }
                         }
