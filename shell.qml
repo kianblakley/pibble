@@ -1698,9 +1698,38 @@ ShellRoot {
         return list;
     }
 
-    // Subsequence fuzzy match. Returns null when q doesn't match, else a
-    // score favoring prefixes, word starts, consecutive runs, and short names.
+    // Splits q on whitespace and requires every term to match somewhere in
+    // lname independently (order doesn't matter) — the same "AND of terms"
+    // approach used by fzf, Sublime's Goto Anything, and VS Code's Quick
+    // Open, so "code visual" or "studio code" both find "Visual Studio
+    // Code" even though the words appear in a different order than typed.
+    // Falls straight through to fuzzyTermScore for the common single-word
+    // case, leaving that behavior unchanged.
     function fuzzyScore(lname: string, q: string): var {
+        const terms = q.split(/\s+/).filter(t => t.length > 0);
+        if (terms.length <= 1)
+            return root.fuzzyTermScore(lname, q);
+        let total = 0;
+        for (const term of terms) {
+            const s = root.fuzzyTermScore(lname, term);
+            if (s === null)
+                return null;
+            total += s;
+        }
+        return total;
+    }
+
+    // fzf-style subsequence match for a single term: q's characters must
+    // appear in lname in order (not necessarily contiguous), scored with
+    // bonuses for prefix/word-start hits and consecutive runs, penalized for
+    // gaps and overall length — the same shape of algorithm fzf, Sublime's
+    // Goto Anything, and VS Code's Quick Open use. Chosen specifically
+    // because subsequence matching is monotonic in q: matching q+c as a
+    // subsequence requires matching q as a subsequence first, so typing an
+    // extra character can only narrow the result set, never grow it — unlike
+    // bigram/edit-distance approaches, where an unrelated shared fragment
+    // can cause a longer query to match something a shorter one didn't.
+    function fuzzyTermScore(lname: string, q: string): var {
         let score = 0;
         let next = 0;
         let prevMatch = -2;
