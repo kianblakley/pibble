@@ -929,14 +929,14 @@ ShellRoot {
                     color: tile.previewed ? Qt.alpha(root.accent, 0.35) : "transparent"
                     border.width: tile.committed ? 2 : 1
                     border.color: tile.committed ? root.accent : Qt.alpha(root.muted, 0.3)
-                    Behavior on x { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
-                    Behavior on y { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
-                    Behavior on width { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
-                    Behavior on height { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic } }
-                    Behavior on border.color { ColorAnimation { duration: 90 } }
-                    Behavior on color { ColorAnimation { duration: 120 } }
-                    Behavior on opacity { NumberAnimation { duration: win.ad(180); easing.type: Easing.OutCubic } }
-                    Behavior on scale { NumberAnimation { duration: win.ad(240); easing.type: Easing.OutBack; easing.overshoot: 1.8 } }
+                    Behavior on x { NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic } }
+                    Behavior on y { NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic } }
+                    Behavior on height { NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: win.had(90) } }
+                    Behavior on color { ColorAnimation { duration: win.had(120) } }
+                    Behavior on opacity { NumberAnimation { duration: win.had(180); easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: win.had(240); easing.type: Easing.OutBack; easing.overshoot: 1.8 } }
                 }
             }
 
@@ -1042,6 +1042,10 @@ ShellRoot {
             // or written to directly by pibble itself otherwise
             property var customPageData: ({})
             property string animStyle: "wave"
+            // independent of animStyle: gates the settings pane's entrance
+            // spring and the power-off/reboot pull-back animation, neither
+            // of which is a "grid" (see win.had())
+            property bool hiddenMenuAnimations: true
             // shared across the launcher and both flyouts
             property real fontScale: 1.0
             property string fontFamily: ""
@@ -2025,7 +2029,7 @@ ShellRoot {
                         const body = goodAdded.length === 1
                             ? goodAdded[0].label + " - enable it in Settings > Pages"
                             : goodAdded.length + " new custom pages - enable them in Settings > Pages";
-                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "-t", "0", "New custom page found", body]);
+                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "New custom page found", body]);
                     }
                     for (const u of brokenAdded)
                         root.notifyError("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point - see Settings > Pages.");
@@ -2390,8 +2394,15 @@ ShellRoot {
         }
         readonly property real originX: originFrac[0] * revW
         readonly property real originY: originFrac[1] * revH
-        // radius needed to cover the farthest screen corner from the origin
-        readonly property real maxRevealRadius: Math.max(
+        // radius needed to cover the farthest screen corner from the origin.
+        // At reveal=1 that corner sits exactly on the circle — a
+        // zero-width mathematical tangent that the mask's antialiasing/
+        // threshold softening (see maskThresholdMin/maskSpreadAtMin below)
+        // turns into a visibly rounded notch (all 4 corners for
+        // grow-center, since they're all equidistant; just the 1 farthest
+        // one otherwise). A small overshoot keeps every corner strictly
+        // inside the circle instead of grazing it.
+        readonly property real maxRevealRadius: 1.02 * Math.max(
             Math.hypot(originX, originY),
             Math.hypot(revW - originX, originY),
             Math.hypot(originX, revH - originY),
@@ -2546,6 +2557,9 @@ ShellRoot {
             return tabs;
         }
         readonly property bool drawerOpen: pane === "apps"
+        // TEMP debug toggle for comparing tile exit with/without y drift —
+        // remove once the app drawer animation decision is finalized.
+        property bool debugExitYDrift: false
 
         // ---------- clock line layout ----------
         // fixed layout, not user-reorderable: battery+weather always
@@ -2621,7 +2635,7 @@ ShellRoot {
         readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / 260))
         Behavior on powerRaw {
             enabled: !win.powerDragging
-            NumberAnimation { duration: win.ad(320); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: win.had(320); easing.type: Easing.OutCubic }
         }
         Timer {
             // a forgotten armed prompt must not lie in wait to turn the next
@@ -2654,7 +2668,7 @@ ShellRoot {
         readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / 260))
         Behavior on rebootRaw {
             enabled: !win.rebootDragging
-            NumberAnimation { duration: win.ad(320); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: win.had(320); easing.type: Easing.OutCubic }
         }
         Timer {
             // same forgotten-prompt safety net as power, mirrored
@@ -3641,6 +3655,34 @@ ShellRoot {
                     NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
+                // TEMP debug toggle — see win.debugExitYDrift
+                Rectangle {
+                    id: yDriftToggle
+                    visible: win.pane === "apps"
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    z: 10
+                    width: yDriftToggleLabel.implicitWidth + 20
+                    height: 24
+                    radius: 8
+                    color: Qt.alpha(root.accent, yDriftToggleArea.containsMouse ? 0.25 : 0.11)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.33)
+                    Text {
+                        id: yDriftToggleLabel
+                        anchors.centerIn: parent
+                        text: "exit y-drift: " + (win.debugExitYDrift ? "on" : "off")
+                        color: root.accent
+                        font { family: root.mono; pixelSize: root.fs(12); weight: Font.Bold }
+                    }
+                    MouseArea {
+                        id: yDriftToggleArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: win.debugExitYDrift = !win.debugExitYDrift
+                    }
+                }
+
                 Grid {
                     id: grid
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -3783,13 +3825,12 @@ ShellRoot {
                             SequentialAnimation {
                                 id: springOut
                                 ParallelAnimation {
-                                    NumberAnimation { target: wrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
-                                    NumberAnimation { target: wrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wrap; property: "scale"; to: win.animOutBounce ? 1.08 : 1; duration: win.animOutBounce ? win.ad(80) : 0; easing.type: Easing.OutQuad }
                                 }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                    NumberAnimation { target: wrap; property: "y"; to: win.debugExitYDrift ? win.animFromY : 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                    NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 }
                             }
                         }
@@ -4982,9 +5023,9 @@ ShellRoot {
                 }
                 ParallelAnimation {
                     id: settingsIn
-                    NumberAnimation { target: settingsPane; property: "opacity"; from: 0; to: 1; duration: win.ad(200); easing.type: Easing.OutCubic }
-                    NumberAnimation { target: settingsPane; property: "scale"; from: 0.9; to: 1; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-                    NumberAnimation { target: settingsPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: settingsPane; property: "opacity"; from: 0; to: 1; duration: win.had(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { target: settingsPane; property: "scale"; from: 0.9; to: 1; duration: win.had(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+                    NumberAnimation { target: settingsPane; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.had(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
                 // header: title + underlined tab links, left-aligned
@@ -5034,7 +5075,7 @@ ShellRoot {
                                     color: root.accent
                                     opacity: settingsTabItem.active ? 1 : 0
                                     Behavior on opacity {
-                                        NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                        NumberAnimation { duration: win.had(150); easing.type: Easing.OutCubic }
                                     }
                                 }
                                 MouseArea {
@@ -5076,11 +5117,12 @@ ShellRoot {
                     id: genCol
                     x: 20 + (0 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
                     SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 190 }
+                    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; sub: "settings pane and power-off/reboot prompts" }
                     SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 190 }
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
@@ -5222,7 +5264,7 @@ ShellRoot {
                     id: flyCol
                     x: 20 + (3 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
@@ -5301,7 +5343,7 @@ ShellRoot {
                     id: settingsCol
                     x: 20 + (1 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
@@ -5344,7 +5386,10 @@ ShellRoot {
                         // (or back past fully-closed) still tracks the
                         // pointer but with resistance that grows the further
                         // past the limit it goes, asymptoting toward min-damp/
-                        // max+damp rather than ever truly reaching it
+                        // max+damp rather than ever truly reaching it — only
+                        // used while Hidden menu animations is on (see
+                        // swipeDrag.onCentroidChanged); off, the reveal is
+                        // hard-clamped instead, with no left-swipe at all
                         function rubberBand(value, min, max, damp) {
                             if (value < min) {
                                 const over = min - value;
@@ -5491,7 +5536,7 @@ ShellRoot {
                                 }
                                 root.rescanUploadedPages();
                                 if (root.alertOn("system"))
-                                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "-t", "0", "Page moved to trash", trashedLabel]);
+                                    Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "Page moved to trash", trashedLabel]);
                             }
                         }
                         // picks up files dropped into/removed from the test
@@ -5529,7 +5574,7 @@ ShellRoot {
                                 // row is already included in the count
                                 height: pagesBlock.rowH * Math.min(win.fullPageOrder.length, 6)
                                 Behavior on height {
-                                    NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                                    NumberAnimation { duration: win.had(180); easing.type: Easing.OutCubic }
                                 }
                                 clip: true
                                 contentWidth: width
@@ -5568,17 +5613,17 @@ ShellRoot {
                                             property real dragOff: held ? (pagesBlock.pointerViewportY - pagesBlock.dragGrabOffset + pagesFlick.contentY - slotY) : 0
                                             Behavior on slotY {
                                                 enabled: !pageRow.held
-                                                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                                NumberAnimation { duration: win.had(220); easing.type: Easing.OutCubic }
                                             }
                                             Behavior on dragOff {
                                                 enabled: !pageRow.held
-                                                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                                                NumberAnimation { duration: win.had(220); easing.type: Easing.OutCubic }
                                             }
                                             y: slotY + dragOff
                                             z: held ? 2 : 0
                                             scale: held ? 1.02 : 1
                                             Behavior on scale {
-                                                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                                NumberAnimation { duration: win.had(140); easing.type: Easing.OutCubic }
                                             }
 
                                             // dismiss animation once a trash is
@@ -5594,11 +5639,11 @@ ShellRoot {
                                             readonly property bool removing: pagesBlock.removingId === modelData
                                             property real removeOffset: removing ? -width : 0
                                             Behavior on removeOffset {
-                                                NumberAnimation { duration: 220; easing.type: Easing.InCubic }
+                                                NumberAnimation { duration: win.had(220); easing.type: Easing.InCubic }
                                             }
                                             opacity: removing ? 0 : 1
                                             Behavior on opacity {
-                                                NumberAnimation { duration: 220; easing.type: Easing.InCubic }
+                                                NumberAnimation { duration: win.had(220); easing.type: Easing.InCubic }
                                             }
                                             x: removeOffset
 
@@ -5611,13 +5656,6 @@ ShellRoot {
                                             // same 8px gap pageContent's Row uses
                                             // between the tickbox and label
                                             readonly property real revealWidth: 26
-                                            // OutBack rather than the plain OutCubic used
-                                            // elsewhere: releasing past either end should
-                                            // settle with a touch of overshoot, not just
-                                            // ease straight to the resting position — the
-                                            // rubber-band in swipeDrag's onCentroidChanged
-                                            // (below) is what provides the resistance
-                                            // while actively dragging
                                             // enabled is toggled imperatively from
                                             // swipeDrag (not bound to !swipeDrag.active):
                                             // that binding races the same handler's own
@@ -5629,10 +5667,20 @@ ShellRoot {
                                             // of animating. An explicit imperative set,
                                             // strictly before the write, always wins the
                                             // race because it's sequenced in code order
+                                            // OutBack (a touch of overshoot on settle)
+                                            // when animations are on, matching the
+                                            // rubber-banded drag above; plain OutCubic
+                                            // when they're off, since win.had() zeroes
+                                            // the duration anyway and there's nothing
+                                            // to overshoot from at that point
                                             Behavior on revealX {
                                                 id: revealXBehavior
                                                 enabled: false
-                                                NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 1.5 }
+                                                NumberAnimation {
+                                                    duration: win.had(220)
+                                                    easing.type: cfg.hiddenMenuAnimations ? Easing.OutBack : Easing.OutCubic
+                                                    easing.overshoot: 1.5
+                                                }
                                             }
                                             Connections {
                                                 target: pagesBlock
@@ -5722,7 +5770,7 @@ ShellRoot {
                                                     border.width: 1
                                                     border.color: pageDelete.confirming ? "#e5484d" : Qt.alpha(root.muted, 0.6)
                                                     Behavior on color {
-                                                        ColorAnimation { duration: 140 }
+                                                        ColorAnimation { duration: win.had(140) }
                                                     }
 
                                                     Text {
@@ -5882,16 +5930,14 @@ ShellRoot {
                                                     onCentroidChanged: {
                                                         if (!active)
                                                             return;
-                                                        // rubber-banded, not clamped: dragging
-                                                        // past either end still tracks the
-                                                        // finger, just with resistance, instead
-                                                        // of hitting a hard wall. damp (90) is
-                                                        // deliberately much bigger than
-                                                        // revealWidth itself — the resting
-                                                        // reveal stays a tight tickbox-sized
-                                                        // slot, but the drag has plenty of room
-                                                        // to keep giving before it feels maxed
-                                                        pageRow.revealX = pagesBlock.rubberBand(centroid.scenePosition.x - grabX, 0, pageRow.revealWidth, 90);
+                                                        // rubber-banded when animations are on
+                                                        // (dragging past either end still tracks
+                                                        // the finger, with resistance); hard-
+                                                        // clamped when they're off — no leftward
+                                                        // swipe, no resistance past either end
+                                                        pageRow.revealX = cfg.hiddenMenuAnimations
+                                                            ? pagesBlock.rubberBand(centroid.scenePosition.x - grabX, 0, pageRow.revealWidth, 90)
+                                                            : Math.max(0, Math.min(pageRow.revealWidth, centroid.scenePosition.x - grabX));
                                                     }
                                                 }
                                             }
@@ -5958,15 +6004,22 @@ ShellRoot {
                                 anchors.top: pagesFlick.top
                                 anchors.bottom: pagesFlick.bottom
                                 width: 18
-                                visible: pagesFlick.contentHeight > pagesFlick.height
+                                readonly property bool shouldShow: pagesFlick.contentHeight > pagesFlick.height
 
                                 Rectangle {
                                     id: pagesScrollTrack
                                     anchors.right: parent.right
                                     anchors.rightMargin: 6
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
+                                    anchors.verticalCenter: parent.verticalCenter
                                     width: 6
+                                    // grows/shrinks in vertically, from the
+                                    // center out, as the list crosses the
+                                    // row-count that needs scrolling, rather
+                                    // than popping in/out
+                                    height: pagesScrollHit.shouldShow ? parent.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: win.had(180); easing.type: Easing.OutCubic }
+                                    }
                                     radius: 3
                                     color: Qt.alpha(root.muted, 0.15)
 
@@ -5982,8 +6035,12 @@ ShellRoot {
                                         // would misrepresent how much is
                                         // visible (e.g. 6 of 7 rows shown should
                                         // read as a thumb spanning ~85% of the
-                                        // track, not a stub)
-                                        height: Math.max(12, pagesFlick.visibleArea.heightRatio * pagesScrollTrack.height)
+                                        // track, not a stub). Also capped to the
+                                        // track's own (animating) height, so the
+                                        // floor doesn't leave the thumb poking
+                                        // out past a track that's mid-shrink or
+                                        // fully collapsed
+                                        height: Math.min(pagesScrollTrack.height, Math.max(12, pagesFlick.visibleArea.heightRatio * pagesScrollTrack.height))
                                         // yPosition alone assumes the thumb is
                                         // exactly heightRatio*trackHeight tall
                                         // (yPosition + heightRatio caps at 1,
@@ -6004,6 +6061,7 @@ ShellRoot {
                                 MouseArea {
                                     id: pagesScrollArea
                                     anchors.fill: parent
+                                    enabled: pagesScrollHit.shouldShow
                                     preventStealing: true
                                     property real pressY: 0
                                     property real pressThumbY: 0
@@ -6157,7 +6215,7 @@ ShellRoot {
                                         color: root.accent
                                         opacity: gridTargetChip.active ? 1 : 0
                                         Behavior on opacity {
-                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                            NumberAnimation { duration: win.had(150); easing.type: Easing.OutCubic }
                                         }
                                     }
                                     MouseArea {
@@ -6333,7 +6391,7 @@ ShellRoot {
                     id: keybindCol
                     x: 20 + (2 - settingsPane.tabIdx) * 840
                     Behavior on x {
-                        NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                     }
                     spacing: 14
 
@@ -6497,7 +6555,7 @@ ShellRoot {
                         readonly property int slideIdx: settingsPane.tabOrder.indexOf(modelData.pageId)
                         x: 20 + (slideIdx - settingsPane.tabIdx) * 840
                         Behavior on x {
-                            NumberAnimation { duration: win.ad(420); easing.type: Easing.OutCubic }
+                            NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                         }
                         spacing: 14
 
@@ -6622,7 +6680,7 @@ ShellRoot {
                 // 1.0 reads as a long pause after the circle looks complete
                 opacity: win.powerProgress >= 0.85 ? 1 : 0
                 Behavior on opacity {
-                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                    NumberAnimation { duration: win.had(160); easing.type: Easing.OutCubic }
                 }
                 font { family: root.mono; pixelSize: root.fs(18); letterSpacing: 2 }
             }
@@ -6716,7 +6774,7 @@ ShellRoot {
                 color: root.fg
                 opacity: win.rebootProgress >= 0.85 ? 1 : 0
                 Behavior on opacity {
-                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                    NumberAnimation { duration: win.had(160); easing.type: Easing.OutCubic }
                 }
                 font { family: root.mono; pixelSize: root.fs(18); letterSpacing: 2 }
             }
@@ -6747,10 +6805,10 @@ ShellRoot {
                     opacity: settingsHover.revealed ? 1 : 0
                     scale: settingsHover.revealed ? 1 : 0.5
                     Behavior on opacity {
-                        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: win.had(160); easing.type: Easing.OutCubic }
                     }
                     Behavior on scale {
-                        NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
+                        NumberAnimation { duration: win.had(260); easing.type: Easing.OutBack; easing.overshoot: 2 }
                     }
 
                     Text {
@@ -6786,6 +6844,7 @@ ShellRoot {
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "launchAnimation": return cfg.launchAnimation;
             case "bgBlur": return cfg.bgBlur ? "on" : "off";
+            case "hiddenMenuAnimations": return cfg.hiddenMenuAnimations ? "on" : "off";
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
             case "volWidth": return cfg.volWidth + " px";
@@ -6838,6 +6897,9 @@ ShellRoot {
             }
             case "bgBlur":
                 cfg.bgBlur = !cfg.bgBlur;
+                break;
+            case "hiddenMenuAnimations":
+                cfg.hiddenMenuAnimations = !cfg.hiddenMenuAnimations;
                 break;
             case "fontFamily": {
                 const list = [""].concat(root.fontFamilies);
@@ -6942,6 +7004,7 @@ ShellRoot {
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
             case "bgBlur": cfg.bgBlur = true; break;
+            case "hiddenMenuAnimations": cfg.hiddenMenuAnimations = true; break;
             case "gestures": cfg.gestures = ({ power: true, panes: true }); break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
@@ -7161,10 +7224,18 @@ ShellRoot {
         // once. fade: soft staggered fade. slide: rows slide up. none: instant.
         readonly property string animStyle: cfg.animStyle
         readonly property real animFromScale: animStyle === "wave" || animStyle === "pop" ? 0.4 : 1
-        readonly property int animFromY: animStyle === "wave" ? 14 : animStyle === "slide" ? 46 : animStyle === "fade" ? 6 : 0
+        readonly property int animFromY: animStyle === "slide" ? 46 : animStyle === "fade" ? 6 : animStyle === "none" ? 0 : 14
         readonly property int animDur: animStyle === "fade" ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
         readonly property int animFadeDur: animStyle === "none" ? 0 : 180
         readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
+        // Exit mirrors entrance: tiles spring back out toward the same
+        // from-state (animFromScale/animFromY) they sprang in from, so
+        // "pop" (no y motion) and "slide"/"fade" (no overshoot bounce)
+        // read as the reverse of their entrance instead of all sharing
+        // wave's bounce-then-shrink shape.
+        readonly property bool animOutBounce: animStyle === "wave" || animStyle === "pop"
+        readonly property int animOutSettleDur: animStyle === "fade" ? 180 : animStyle === "slide" ? 260 : 320
+        readonly property int animOutEase: animOutBounce ? Easing.InQuad : Easing.InCubic
         // "none" (tile animation) zeroes tile/pane-entrance durations only —
         // the launch reveal has its own independent "none" (see lad below),
         // so picking one doesn't silently also flatten the other.
@@ -7175,6 +7246,12 @@ ShellRoot {
         // === "none", never by the tile animation setting above.
         function lad(ms: int): int {
             return win.noneMode ? 0 : ms;
+        }
+        // Hidden-menu-animation duration helper: zeroed only by
+        // cfg.hiddenMenuAnimations, never by the tile animation setting —
+        // the settings pane and power/reboot prompts aren't grids.
+        function had(ms: int): int {
+            return cfg.hiddenMenuAnimations ? ms : 0;
         }
         function animDelay(slot: int, cols: int): int {
             if (!staggering)
