@@ -5535,7 +5535,7 @@ ShellRoot {
                                 { id: "pages", label: "Pages" },
                                 { id: "keybindings", label: "Navigation" },
                                 { id: "flyouts", label: "Flyouts" }
-                            ].concat(win.customSettingsTabs.map(t => ({ id: t.pageId, label: t.label })))
+                            ].concat(win.customSettingsTabs.map(t => ({ id: t.pageId, label: t.label, custom: true })))
 
                             Item {
                                 id: settingsTabItem
@@ -5543,6 +5543,23 @@ ShellRoot {
                                 readonly property bool active: win.settingsTab === modelData.id
                                 width: settingsTabText.implicitWidth
                                 height: 24
+                                // custom pages' tabs come and go as they're toggled in
+                                // Settings > Pages, so they fade in on arrival; the
+                                // built-in tabs are always present and never animate
+                                opacity: modelData.custom ? 0 : 1
+
+                                Component.onCompleted: {
+                                    if (modelData.custom)
+                                        tabFadeIn.start();
+                                }
+                                NumberAnimation {
+                                    id: tabFadeIn
+                                    target: settingsTabItem
+                                    property: "opacity"
+                                    to: 1
+                                    duration: win.had(220)
+                                    easing.type: Easing.OutCubic
+                                }
 
                                 Text {
                                     id: settingsTabText
