@@ -5520,6 +5520,65 @@ ShellRoot {
                     anchors.top: parent.top
                     anchors.topMargin: 26
 
+                    // custom pages' tabs come and go as they're toggled in
+                    // Settings > Pages, but win.customSettingsTabs updates by
+                    // wholesale reassignment (see its own comment) and a plain
+                    // Repeater has no enter/exit transition for that — so tab
+                    // entries are staged here instead: a new id gets one fade-in
+                    // pass, a dropped id is kept around (fading out) until
+                    // exitPurgeTimer sweeps it for real. Built-in tabs are always
+                    // present and never animate.
+                    property var stagedTabs: [
+                        { id: "general", label: "General", custom: false, phase: "in" },
+                        { id: "pages", label: "Pages", custom: false, phase: "in" },
+                        { id: "keybindings", label: "Navigation", custom: false, phase: "in" },
+                        { id: "flyouts", label: "Flyouts", custom: false, phase: "in" }
+                    ]
+                    function reconcileTabs() {
+                        const desired = win.customSettingsTabs;
+                        const desiredLabel = {};
+                        for (const t of desired)
+                            desiredLabel[t.pageId] = t.label;
+                        const seen = {};
+                        const next = [];
+                        for (const t of stagedTabs) {
+                            if (!t.custom) {
+                                next.push(t);
+                                continue;
+                            }
+                            seen[t.id] = true;
+                            if (t.id in desiredLabel)
+                                next.push({ id: t.id, label: desiredLabel[t.id], custom: true, phase: "in" });
+                            else if (t.phase === "exiting")
+                                next.push(t);
+                            else {
+                                next.push({ id: t.id, label: t.label, custom: true, phase: "exiting" });
+                                exitPurgeTimer.restart();
+                            }
+                        }
+                        for (const t of desired) {
+                            if (!seen[t.pageId])
+                                next.push({ id: t.pageId, label: t.label, custom: true, phase: "entering" });
+                        }
+                        stagedTabs = next;
+                    }
+                    Component.onCompleted: reconcileTabs()
+                    Connections {
+                        target: win
+                        function onCustomSettingsTabsChanged() { settingsHeader.reconcileTabs(); }
+                    }
+                    // generous over tabFadeOut's duration so a tab that just
+                    // started exiting is guaranteed to have finished fading
+                    Timer {
+                        id: exitPurgeTimer
+                        interval: win.had(260)
+                        onTriggered: {
+                            const next = settingsHeader.stagedTabs.filter(t => t.phase !== "exiting");
+                            if (next.length !== settingsHeader.stagedTabs.length)
+                                settingsHeader.stagedTabs = next;
+                        }
+                    }
+
                     Text {
                         text: "SETTINGS"
                         color: root.muted
@@ -5530,12 +5589,7 @@ ShellRoot {
                         spacing: 26
 
                         Repeater {
-                            model: [
-                                { id: "general", label: "General" },
-                                { id: "pages", label: "Pages" },
-                                { id: "keybindings", label: "Navigation" },
-                                { id: "flyouts", label: "Flyouts" }
-                            ].concat(win.customSettingsTabs.map(t => ({ id: t.pageId, label: t.label, custom: true })))
+                            model: settingsHeader.stagedTabs
 
                             Item {
                                 id: settingsTabItem
@@ -5543,20 +5597,27 @@ ShellRoot {
                                 readonly property bool active: win.settingsTab === modelData.id
                                 width: settingsTabText.implicitWidth
                                 height: 24
-                                // custom pages' tabs come and go as they're toggled in
-                                // Settings > Pages, so they fade in on arrival; the
-                                // built-in tabs are always present and never animate
-                                opacity: modelData.custom ? 0 : 1
+                                opacity: modelData.phase === "entering" ? 0 : 1
 
                                 Component.onCompleted: {
-                                    if (modelData.custom)
+                                    if (modelData.phase === "entering")
                                         tabFadeIn.start();
+                                    else if (modelData.phase === "exiting")
+                                        tabFadeOut.start();
                                 }
                                 NumberAnimation {
                                     id: tabFadeIn
                                     target: settingsTabItem
                                     property: "opacity"
                                     to: 1
+                                    duration: win.had(220)
+                                    easing.type: Easing.OutCubic
+                                }
+                                NumberAnimation {
+                                    id: tabFadeOut
+                                    target: settingsTabItem
+                                    property: "opacity"
+                                    to: 0
                                     duration: win.had(220)
                                     easing.type: Easing.OutCubic
                                 }
