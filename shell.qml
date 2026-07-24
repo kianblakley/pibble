@@ -7283,11 +7283,16 @@ ShellRoot {
             if (revealStarted || !backingWindowVisible)
                 return;
             revealStarted = true;
-            // With animations off there is no reveal to protect from the
-            // warm-up frames: show everything on the very first frame.
-            // (firstFrames still runs for cache warming; the zero-duration
-            // fadeIn it triggers just re-sets these same values.)
-            if (animStyle === "none") {
+            // With the launch animation off there is no reveal to protect
+            // from the warm-up frames: show everything on the very first
+            // frame. (firstFrames still runs for cache warming; the
+            // zero-duration fadeIn it triggers just re-sets these same
+            // values.) Gated on noneMode, not the grid tile animStyle —
+            // fadeIn's duration comes from win.lad()/noneMode, so checking
+            // animStyle here let a "none" grid style with a real launch
+            // animation snap reveal/opacity to 1 for a frame and then have
+            // fadeIn yank them back to 0 to animate in, flickering.
+            if (noneMode) {
                 reveal = 1;
                 content.opacity = 1;
             }
