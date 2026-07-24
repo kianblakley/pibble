@@ -2664,10 +2664,28 @@ ShellRoot {
         property bool powerArmed: false
         readonly property real powerThreshold: 300
         readonly property real powerProgress: Math.min(1, powerRaw / powerThreshold)
+        // how gradually powerPull's resistance ramps up — bigger means more
+        // "give" (the curve stays closer to linear for longer before it
+        // starts noticeably fighting the finger). Tune this alone for feel;
+        // powerRingScale below re-derives to compensate, so the resting
+        // depth never has to be re-tuned alongside it
+        readonly property real powerPullDecay: 400
         // content shift lags the finger with increasing resistance — same
         // curve whether raw is coming straight off the finger (live drag)
         // or being eased by the Behavior below (keybind / release rebound)
-        readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / 260))
+        readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / powerPullDecay))
+        // powerPull's own value once raw reaches the threshold, at the
+        // *live* powerPullDecay — used below to derive powerRingScale
+        readonly property real powerPullAtThreshold: 170 * (1 - Math.exp(-powerThreshold / powerPullDecay))
+        // the ring's resting depth (pull*2.6 - 200) back when the curve
+        // used the original decay of 260 — fixed regardless of
+        // powerPullDecay so retuning the drag's "give" never moves the
+        // settled/rebounded position
+        readonly property real powerRestDepth: 170 * (1 - Math.exp(-powerThreshold / 260)) * 2.6 - 200
+        // single multiplier on powerPull that reproduces powerRestDepth
+        // exactly at the threshold, as one smooth scale of powerPull
+        // instead of two competing terms (see the comment on powerRing's y)
+        readonly property real powerRingScale: powerRestDepth / powerPullAtThreshold
         Behavior on powerRaw {
             enabled: !win.powerDragging
             NumberAnimation { duration: win.had(320); easing.type: Easing.OutCubic }
@@ -2700,8 +2718,13 @@ ShellRoot {
         property bool rebootArmed: false
         readonly property real rebootThreshold: 300
         readonly property real rebootProgress: Math.min(1, rebootRaw / rebootThreshold)
-        // mirror of powerPull above — see the comment there
-        readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / 260))
+        // mirror of powerPullDecay/powerPull/powerPullAtThreshold/
+        // powerRestDepth/powerRingScale above — see the comments there
+        readonly property real rebootPullDecay: 400
+        readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / rebootPullDecay))
+        readonly property real rebootPullAtThreshold: 170 * (1 - Math.exp(-rebootThreshold / rebootPullDecay))
+        readonly property real rebootRestDepth: 170 * (1 - Math.exp(-rebootThreshold / 260)) * 2.6 - 200
+        readonly property real rebootRingScale: rebootRestDepth / rebootPullAtThreshold
         Behavior on rebootRaw {
             enabled: !win.rebootDragging
             NumberAnimation { duration: win.had(320); easing.type: Easing.OutCubic }
@@ -6838,16 +6861,18 @@ ShellRoot {
                 visible: win.powerRaw > 1
                 anchors.horizontalCenter: parent.horizontalCenter
                 // "lands higher than the stock *2.6 spot" used to be a
-                // separate `- 150 * powerProgress` term, but powerProgress
+                // separate `- 200 * powerProgress` term, but powerProgress
                 // is linear-then-hard-capped-at-1 while powerPull is a
                 // smooth exponential — subtracting one from the other left
                 // a kink right at the threshold (progress's contribution to
                 // the rate stops instantly, pull's doesn't), which read as
-                // the ring slowing then suddenly speeding back up. Scaling
-                // powerPull itself instead keeps the whole expression a
-                // single multiple of one smooth curve, so the rate can only
-                // ever shrink (resistance) and never kinks or reverses
-                y: -height + win.powerPull * (2.6 - 150 / 170)
+                // the ring slowing then suddenly speeding back up.
+                // powerRingScale folds that same "-200 at the threshold"
+                // target into a single multiplier on powerPull instead, so
+                // the resting depth is unchanged but the expression is one
+                // smooth curve throughout — the rate can only ever shrink
+                // (resistance) and never kinks or reverses
+                y: -height + win.powerPull * win.powerRingScale
                 width: 36
                 height: 36
                 opacity: Math.min(1, win.powerRaw / 80)
@@ -6868,7 +6893,10 @@ ShellRoot {
                         // gaps around the dash stay fixed instead of
                         // stretching apart
                         const p = Math.min(1, win.powerRaw / win.powerThreshold);
-                        const maxOvershoot = 0.4;
+                        // 0.5 of a full turn: the dash ends up pointing
+                        // straight down (180° from its resting 12 o'clock)
+                        // once the spin is fully wound up
+                        const maxOvershoot = 0.5;
                         const excess = Math.max(0, win.powerRaw - win.powerThreshold);
                         const rot = maxOvershoot * (1 - Math.exp(-excess / 260)) * Math.PI * 2;
                         // a fixed dash marks 12 o'clock the whole time; the
@@ -6938,7 +6966,7 @@ ShellRoot {
                 anchors.bottom: parent.bottom
                 // scaled powerPull-style, not a separate capped term — see
                 // the comment on powerRing's y above
-                anchors.bottomMargin: -height + win.rebootPull * (2.6 - 150 / 170)
+                anchors.bottomMargin: -height + win.rebootPull * win.rebootRingScale
                 width: 36
                 height: 36
                 opacity: Math.min(1, win.rebootRaw / 80)
@@ -6961,7 +6989,8 @@ ShellRoot {
                         // rebootPull, so it matches the drag's own
                         // overshoot limits rather than spinning forever
                         const maxArc = 0.82;
-                        const maxOvershoot = 0.4;
+                        // mirror of powerRing's maxOvershoot — see the comment there
+                        const maxOvershoot = 0.5;
                         const excess = Math.max(0, win.rebootRaw - win.rebootThreshold);
                         const headFrac = Math.min(1, win.rebootRaw / win.rebootThreshold)
                             + maxOvershoot * (1 - Math.exp(-excess / 260));
@@ -7016,7 +7045,7 @@ ShellRoot {
                 // trails above the ring by the same gap powerText trails
                 // below powerRing, mirrored around the bottom edge (scaled
                 // powerPull-style — see the comment on powerRing's y above)
-                anchors.bottomMargin: win.rebootPull * (2.6 - 150 / 170) + 12
+                anchors.bottomMargin: win.rebootPull * win.rebootRingScale + 12
                 text: "reboot?"
                 color: root.fg
                 opacity: win.rebootProgress >= 0.85 ? 1 : 0
