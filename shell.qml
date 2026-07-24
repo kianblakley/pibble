@@ -2626,7 +2626,7 @@ ShellRoot {
         Timer {
             // a forgotten armed prompt must not lie in wait to turn the next
             // launch Return into a poweroff: let go on its own after a beat
-            interval: 6000
+            interval: 8000
             running: win.powerArmed && !win.powerDragging
             onTriggered: win.disarmPower()
         }
@@ -2657,7 +2657,8 @@ ShellRoot {
             NumberAnimation { duration: win.ad(320); easing.type: Easing.OutCubic }
         }
         Timer {
-            interval: 6000
+            // same forgotten-prompt safety net as power, mirrored
+            interval: 8000
             running: win.rebootArmed && !win.rebootDragging
             onTriggered: win.disarmReboot()
         }
@@ -6514,15 +6515,39 @@ ShellRoot {
                     onPaint: {
                         const ctx = getContext("2d");
                         ctx.reset();
-                        // a plain ring that strokes itself closed clockwise
-                        // from the top as the drag completes
+                        const cx = width / 2, cy = height / 2, r = 10;
+                        const p = win.powerProgress;
+                        // a fixed dash marks 12 o'clock the whole time; the
+                        // ring never closes onto it — both ends pull away
+                        // from the dash as the drag progresses, landing with
+                        // an equal gap to either side of it once complete
+                        const finalGap = 1.1;
+                        const tail = -Math.PI / 2 + (finalGap / 2) * p;
+                        const head = tail + (Math.PI * 2 - finalGap) * p;
                         ctx.lineWidth = 3.6;
-                        ctx.lineCap = "round";
+                        ctx.lineCap = "butt";
                         ctx.strokeStyle = root.accent;
                         ctx.beginPath();
-                        ctx.arc(width / 2, height / 2, 10, -Math.PI / 2,
-                            -Math.PI / 2 + Math.PI * 2 * win.powerProgress, false);
+                        ctx.arc(cx, cy, r, tail, head, false);
                         ctx.stroke();
+
+                        // the dash itself: perpendicular to the ring (i.e.
+                        // radial), leading a constant finalGap/2 ahead of
+                        // the head — so it rides along with the head,
+                        // landing exactly at 12 o'clock once the head
+                        // completes its sweep. Held back until the drag is
+                        // two thirds of the way through, then grows from a
+                        // sliver
+                        if (p > 2 / 3) {
+                            const dashAngle = head + finalGap / 2;
+                            const dx = Math.cos(dashAngle), dy = Math.sin(dashAngle);
+                            const dcx = cx + r * dx, dcy = cy + r * dy;
+                            const halfLen = (0.05 + 4.55 * (p - 2 / 3) / (1 / 3));
+                            ctx.beginPath();
+                            ctx.moveTo(dcx - dx * halfLen, dcy - dy * halfLen);
+                            ctx.lineTo(dcx + dx * halfLen, dcy + dy * halfLen);
+                            ctx.stroke();
+                        }
                     }
                 }
                 Connections {
@@ -6565,16 +6590,46 @@ ShellRoot {
                     onPaint: {
                         const ctx = getContext("2d");
                         ctx.reset();
-                        // a plain ring that strokes itself closed clockwise
-                        // from the top as the drag completes — identical to
-                        // powerRing
+                        const cx = width / 2, cy = height / 2, r = 10;
+                        // unlike powerRing, this one never lets the arc
+                        // close: past maxArc of a full turn the tail chases
+                        // the head at the same rate instead of staying
+                        // pinned at the top, so the gap holds steady and the
+                        // ring reads as a snake that can't catch its tail
+                        const maxArc = 0.82;
+                        const headFrac = win.rebootProgress;
+                        const tailFrac = Math.max(0, headFrac - maxArc);
+                        const start = -Math.PI / 2 + Math.PI * 2 * tailFrac;
+                        const end = -Math.PI / 2 + Math.PI * 2 * headFrac;
                         ctx.lineWidth = 3.6;
-                        ctx.lineCap = "round";
+                        ctx.lineCap = "butt";
                         ctx.strokeStyle = root.accent;
                         ctx.beginPath();
-                        ctx.arc(width / 2, height / 2, 10, -Math.PI / 2,
-                            -Math.PI / 2 + Math.PI * 2 * win.rebootProgress, false);
+                        ctx.arc(cx, cy, r, start, end, false);
                         ctx.stroke();
+
+                        // leading arrowhead, oriented along the direction of travel
+                        if (headFrac > 0.02) {
+                            const hx = cx + r * Math.cos(end);
+                            const hy = cy + r * Math.sin(end);
+                            const tangent = end + Math.PI / 2;
+                            const nx = Math.cos(tangent + Math.PI / 2);
+                            const ny = Math.sin(tangent + Math.PI / 2);
+                            // grows over the course of the drag, from a
+                            // small nub to the full arrowhead
+                            const arrowScale = 0.3 + 0.7 * headFrac;
+                            const tipX = hx + Math.cos(tangent) * 4.5 * arrowScale;
+                            const tipY = hy + Math.sin(tangent) * 4.5 * arrowScale;
+                            const backX = hx - Math.cos(tangent) * 3 * arrowScale;
+                            const backY = hy - Math.sin(tangent) * 3 * arrowScale;
+                            ctx.beginPath();
+                            ctx.moveTo(tipX, tipY);
+                            ctx.lineTo(backX + nx * 5 * arrowScale, backY + ny * 5 * arrowScale);
+                            ctx.lineTo(backX - nx * 5 * arrowScale, backY - ny * 5 * arrowScale);
+                            ctx.closePath();
+                            ctx.fillStyle = root.accent;
+                            ctx.fill();
+                        }
                     }
                 }
                 Connections {
