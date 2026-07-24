@@ -6546,7 +6546,26 @@ ShellRoot {
                         required property var modelData
                         readonly property int slideIdx: settingsPane.tabOrder.indexOf(modelData.pageId)
                         x: 20 + (slideIdx - settingsPane.tabIdx) * 840
+                        // a freshly-appearing tab's slideIdx starts at -1 for
+                        // one tick — win.customSettingsTabs (which this
+                        // Repeater's model is) picks up the page's newly-
+                        // loaded settingsTab a moment before
+                        // settingsPane.tabOrder, which derives from it, has
+                        // recomputed to include this pageId — so x's first
+                        // real value briefly parks off-screen left before
+                        // jumping to its actual off-screen-right slot once
+                        // slideIdx corrects. With the Behavior live for that
+                        // correction, it animates the whole ~4200px hop,
+                        // sweeping straight through the visible viewport
+                        // (the "page content flying across the screen" bug).
+                        // Qt.callLater defers arming the Behavior past that
+                        // initial settle, so only genuine later tab switches
+                        // (settingsPane.tabIdx changing, not this one-time
+                        // slideIdx correction) animate.
+                        property bool animateX: false
+                        Component.onCompleted: Qt.callLater(() => customTabCol.animateX = true)
                         Behavior on x {
+                            enabled: customTabCol.animateX
                             NumberAnimation { duration: win.had(420); easing.type: Easing.OutCubic }
                         }
                         spacing: 14
