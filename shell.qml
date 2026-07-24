@@ -2727,6 +2727,14 @@ ShellRoot {
             return wall.path.split("/").pop().replace(/\.[^.]+$/, "");
         }
         property var wallMatches: {
+            // The "windows" carousel is a spatial strip, not a list: reordering
+            // or dropping entries out from under it as the query changes reads
+            // as chaos (tiles teleporting to unrelated slots every keystroke).
+            // It keeps root.wallpapers's natural order/contents always, and
+            // typing instead jumps the selection to the best match — see
+            // jumpWallCarousel(), driven from input.onTextChanged.
+            if (cfg.wallpaperStyle !== "tiles")
+                return root.wallpapers;
             const q = input.text.toLowerCase().trim();
             if (!q)
                 return root.wallpapers;
@@ -2743,6 +2751,45 @@ ShellRoot {
         onWallMatchesChanged: {
             wallSelected = 0;
             wallCarouselStep = 0;
+        }
+        // Windows-carousel-only: true once a query has no fuzzy match at all
+        // anywhere in root.wallpapers, so every tile plays its exit spring
+        // (see wcCell.wall below) instead of the carousel sitting frozen on
+        // stale content.
+        property bool wallCarouselEmpty: false
+        // Jumps the (unfiltered) windows carousel to the best fuzzy match for
+        // the current query, choosing whichever wrap direction is shorter so
+        // the slide always takes the short way around the ring. Called from
+        // input.onTextChanged and whenever the walls pane/style is (re)entered
+        // with a query already typed.
+        function jumpWallCarousel() {
+            const q = input.text.toLowerCase().trim();
+            if (!q) {
+                wallCarouselEmpty = false;
+                return;
+            }
+            let best = -1;
+            let bestScore = -Infinity;
+            for (let i = 0; i < root.wallpapers.length; i++) {
+                const s = root.fuzzyScore(wallName(root.wallpapers[i]).toLowerCase(), q);
+                if (s !== null && s > bestScore) {
+                    bestScore = s;
+                    best = i;
+                }
+            }
+            if (best < 0) {
+                wallCarouselEmpty = true;
+                return;
+            }
+            wallCarouselEmpty = false;
+            const count = root.wallpapers.length;
+            if (count > 0 && best !== wallSelected) {
+                let delta = ((best - wallSelected) % count + count) % count;
+                if (delta > count / 2)
+                    delta -= count;
+                wallSelected = best;
+                wallCarouselStep += delta;
+            }
         }
         readonly property int wallPageSize: cfg.wallsCols * cfg.wallsRows
         readonly property int wallPage: wallPageSize > 0 ? Math.floor(wallSelected / wallPageSize) : 0
@@ -4078,8 +4125,10 @@ ShellRoot {
                 Connections {
                     target: win
                     function onPaneChanged() {
-                        if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
+                        if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles") {
+                            win.jumpWallCarousel();
                             carouselIn.restart();
+                        }
                     }
                 }
 
@@ -4104,7 +4153,7 @@ ShellRoot {
                         readonly property real rank: absStep - win.wallCarouselAnim
                         readonly property int count: win.wallMatches.length
                         readonly property int wallIndex: count > 0 ? ((absStep % count) + count) % count : -1
-                        readonly property var wall: wallIndex >= 0 ? win.wallMatches[wallIndex] : null
+                        readonly property var wall: (wallIndex >= 0 && !win.wallCarouselEmpty) ? win.wallMatches[wallIndex] : null
                         readonly property bool isCenter: wallIndex >= 0 && wallIndex === win.wallSelected && Math.abs(rank) < 0.5
                         // drives the ring/stroke/fill selection highlight
                         // below; continuous in |rank| (not isCenter's hard
@@ -4152,7 +4201,15 @@ ShellRoot {
                         // isCenter branch here would snap scale mid-slide
                         // the moment rank crosses 0.5
                         scale: Math.max(0.82, 1 - Math.abs(rank) * 0.05)
-                        opacity: wall === null ? 0 : Math.max(0, Math.min(1, wallCarousel.halfVisible + 1 - Math.abs(rank)))
+                        // No wall===null cut here (unlike the plain
+                        // opacity/rank cull below): a cell losing its wall
+                        // (query no longer matches, list emptied) still needs
+                        // to render while wcWrap's own opacity plays the exit
+                        // spring — hard-cutting the parent to 0 here would
+                        // hide that animation entirely. A cell that's never
+                        // had a wall (count === 0) just stays invisible via
+                        // wcWrap's untouched initial opacity of 0.
+                        opacity: Math.max(0, Math.min(1, wallCarousel.halfVisible + 1 - Math.abs(rank)))
 
                         // entrance/exit spring for this window's content,
                         // replayed whenever filtering changes which wallpaper
@@ -4249,14 +4306,19 @@ ShellRoot {
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
                                     sourceSize: Qt.size(0, wallCarousel.barHeight)
-                                    source: wcCell.wall ? "file://" + wcCell.wall.path : ""
+                                    // shownWall, not wall: wall goes null the instant
+                                    // the cell is filtered/emptied out, but the exit
+                                    // spring below still needs something to fade —
+                                    // shownWall keeps the last-rendered wallpaper
+                                    // until a new one replaces it (see onWallChanged)
+                                    source: wcCell.shownWall ? "file://" + wcCell.shownWall.path : ""
                                 }
                                 // Only the centered window plays its .gif from the
                                 // source file; side windows keep the still Image
                                 // above (which already shows frame 0 of a gif) so
                                 // scrolling the carousel doesn't decode a movie
                                 // per window.
-                                readonly property bool animating: wcCell.isCenter && win.wallCarouselSettled && !!wcCell.wall?.gif
+                                readonly property bool animating: wcCell.isCenter && win.wallCarouselSettled && !!wcCell.shownWall?.gif
                                 AnimatedImage {
                                     // Same (wider-than-bar) target width as the still
                                     // Image above, not just barWidth: PreserveAspectCrop
@@ -4272,7 +4334,7 @@ ShellRoot {
                                     playing: wcThumb.animating
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
-                                    source: wcThumb.animating ? "file://" + wcCell.wall.path : ""
+                                    source: wcThumb.animating ? "file://" + wcCell.shownWall.path : ""
                                 }
                             }
                             // Stroke above the image, not a border on wcThumb:
@@ -4337,6 +4399,8 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: Math.min(implicitWidth, wallCarousel.width)
                     text: {
+                        if (win.wallCarouselEmpty)
+                            return "";
                         const w = win.wallMatches[win.wallSelected];
                         return w ? win.wallName(w) : "";
                     }
@@ -4366,6 +4430,18 @@ ShellRoot {
                     target: win
                     function onWallMatchesChanged() {
                         if (win.wallMatches.length === 0)
+                            wallsNoMatchesFade.restart();
+                        else {
+                            wallsNoMatchesFade.stop();
+                            wallsNoMatches.opacity = 0;
+                        }
+                    }
+                    // windows carousel: wallMatches never empties (it always
+                    // holds the full, unfiltered list — see wallMatches
+                    // above), so its "nothing matched" state is signaled
+                    // separately by wallCarouselEmpty instead.
+                    function onWallCarouselEmptyChanged() {
+                        if (win.wallCarouselEmpty)
                             wallsNoMatchesFade.restart();
                         else {
                             wallsNoMatchesFade.stop();
@@ -7065,6 +7141,8 @@ ShellRoot {
             onTextChanged: {
                 if (text.length > 0 && win.pane === "clock" && win.activePanes.includes("apps"))
                     win.pane = "apps";
+                if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
+                    win.jumpWallCarousel();
             }
 
             Keys.onPressed: event => {
