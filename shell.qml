@@ -3667,12 +3667,23 @@ ShellRoot {
 
                             onEntryChanged: {
                                 if (entry) {
-                                    const isNew = !filled || !shownEntry || shownEntry.id !== entry.id;
+                                    const wasFilled = filled;
+                                    const isNew = !wasFilled || !shownEntry || shownEntry.id !== entry.id;
                                     shownEntry = entry;
                                     filled = true;
                                     if (isNew) {
+                                        springIn.stop();
                                         springOut.stop();
-                                        springIn.restart();
+                                        if (wasFilled) {
+                                            // direct replacement (filter narrowed and a
+                                            // different app slid into this slot): snap
+                                            // straight to the resting state, no animation
+                                            wrap.opacity = 1;
+                                            wrap.scale = 1;
+                                            wrap.y = 0;
+                                        } else {
+                                            springIn.restart();
+                                        }
                                     }
                                 } else if (filled) {
                                     // ghost: the old tile springs out in place
@@ -3875,12 +3886,22 @@ ShellRoot {
                             property bool filled: false
                             onWallChanged: {
                                 if (wall) {
-                                    const isNew = !filled || !shownWall || shownWall.path !== wall.path;
+                                    const wasFilled = filled;
+                                    const isNew = !wasFilled || !shownWall || shownWall.path !== wall.path;
                                     shownWall = wall;
                                     filled = true;
                                     if (isNew) {
+                                        wallSpringIn.stop();
                                         wallSpringOut.stop();
-                                        wallSpringIn.restart();
+                                        if (wasFilled) {
+                                            // direct replacement: snap straight to the
+                                            // resting state, no animation
+                                            wallWrap.opacity = 1;
+                                            wallWrap.scale = 1;
+                                            wallWrap.y = 0;
+                                        } else {
+                                            wallSpringIn.restart();
+                                        }
                                     }
                                 } else if (filled) {
                                     filled = false;
@@ -4134,12 +4155,22 @@ ShellRoot {
                         property bool filled: false
                         onWallChanged: {
                             if (wall) {
-                                const isNew = !filled || !shownWall || shownWall.path !== wall.path;
+                                const wasFilled = filled;
+                                const isNew = !wasFilled || !shownWall || shownWall.path !== wall.path;
                                 shownWall = wall;
                                 filled = true;
                                 if (isNew) {
+                                    wcSpringIn.stop();
                                     wcSpringOut.stop();
-                                    wcSpringIn.restart();
+                                    if (wasFilled) {
+                                        // direct replacement: snap straight to the
+                                        // resting state, no animation
+                                        wcWrap.opacity = 1;
+                                        wcWrap.scale = 1;
+                                        wcWrap.y = 0;
+                                    } else {
+                                        wcSpringIn.restart();
+                                    }
                                 }
                             } else if (filled) {
                                 filled = false;
@@ -4400,12 +4431,22 @@ ShellRoot {
                                     property bool filled: false
                                     onClipChanged: {
                                         if (clip) {
-                                            const isNew = !filled || !shownClip || shownClip.id !== clip.id;
+                                            const wasFilled = filled;
+                                            const isNew = !wasFilled || !shownClip || shownClip.id !== clip.id;
                                             shownClip = clip;
                                             filled = true;
                                             if (isNew) {
+                                                clipSpringIn.stop();
                                                 clipSpringOut.stop();
-                                                clipSpringIn.restart();
+                                                if (wasFilled) {
+                                                    // direct replacement: snap straight to the
+                                                    // resting state, no animation
+                                                    clipTile.opacity = 1;
+                                                    clipTile.scale = 1;
+                                                    clipTile.y = 0;
+                                                } else {
+                                                    clipSpringIn.restart();
+                                                }
                                             }
                                         } else if (filled) {
                                             filled = false;
