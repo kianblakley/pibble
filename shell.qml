@@ -1056,7 +1056,7 @@ ShellRoot {
             property string customAccent: "#cfcfcf"
             property string customFg: "#f0f0f0"
             property string customMuted: "#8a8a8a"
-            // "tiles" is the grid picker; "windows" and "windows-flat" are
+            // "tiles" is the grid picker; "carousel" and "carousel-flat" are
             // the horizontal carousel (see wallCarousel), the latter with
             // the backdrop parallax pan disabled
             property string wallpaperStyle: "tiles"
@@ -1082,6 +1082,13 @@ ShellRoot {
             // through the current pane's grid. The keybind/Enter-confirm
             // flow the power gesture feeds into stays available either way.
             property bool gestures: true
+            // when on, clicking an app/wall/clip tile that isn't already
+            // selected only highlights it — a second click (on the now-
+            // selected tile) is what actually activates it. Off reverts to
+            // instant activate-on-any-click. The wallpaper carousel already
+            // behaves this way inherently (tapping a bar off-center recenters
+            // it, tapping the centered one applies it) so isn't gated by this.
+            property bool clickToSelect: true
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
             // flyouts (volume + notification OSDs) — independent of whether
             // other apps' notifications show
@@ -1457,13 +1464,13 @@ ShellRoot {
 
     // internal errors surface as regular notifications (we are the
     // server); always the generic alert glyph (see notifGlyph) so every
-    // pibble-raised error reads the same at a glance.
-    // -t 0 (expire_timeout 0, "never expire" per spec — see showTimer) so
-    // an actionable error can't auto-dismiss before it's been read
+    // pibble-raised error reads the same at a glance. Auto-dismisses like
+    // any other pibble alert, on the flyout's normal cfg.notifTimeout (no
+    // -t override — expire_timeout -1, "let the server/flyout decide").
     function notifyError(summary: string, body: string) {
         if (!alertOn("errors"))
             return;
-        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", "-t", "0", summary, body]);
+        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text
@@ -1553,7 +1560,13 @@ ShellRoot {
             cfg.theme = "matugen";
             saveSettings();
         }
-        if (!["tiles", "windows", "windows-flat"].includes(cfg.wallpaperStyle)) {
+        // "windows"/"windows-flat" (the parallax bar carousel) renamed
+        // "carousel"/"carousel-flat"
+        if (cfg.wallpaperStyle === "windows" || cfg.wallpaperStyle === "windows-flat") {
+            cfg.wallpaperStyle = cfg.wallpaperStyle === "windows-flat" ? "carousel-flat" : "carousel";
+            saveSettings();
+        }
+        if (!["tiles", "carousel", "carousel-flat"].includes(cfg.wallpaperStyle)) {
             cfg.wallpaperStyle = "tiles";
             saveSettings();
         }
@@ -1924,7 +1937,7 @@ ShellRoot {
                             if ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
@@ -2161,7 +2174,7 @@ ShellRoot {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
@@ -2296,7 +2309,7 @@ ShellRoot {
                 lowBatteryAlerted = true;
                 if (alertOn("battery"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-u", "critical",
-                        "-i", "battery-low", "-t", "0", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
+                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
             }
         } else if (pct > 8) {
             lowBatteryAlerted = false;
@@ -2628,6 +2641,15 @@ ShellRoot {
             input.text = "";
             cancelCapture();
             expandedClip = null;
+            // leaving a page resets its selection back to the first item, so
+            // returning to it later doesn't resume wherever it was left —
+            // set directly rather than relying on input.text = "" above to
+            // reset `selected` via onMatchesChanged, which is a no-op (no
+            // change signal) whenever the filter was already empty, i.e.
+            // most of the time
+            selected = 0;
+            wallSelected = 0;
+            clipSelected = 0;
             pane = (p === "settings" || activePanes.includes(p)) ? p : homePane();
             if (pane === "clips")
                 root.checkClipAlert();
@@ -2657,6 +2679,10 @@ ShellRoot {
         // geometry. Outside either zone the vertical drag belongs to pane
         // navigation instead (see the MouseArea above).
         readonly property real edgeSwipeZone: 56
+        // true while either prompt is armed — every navigation gesture on
+        // screen (pane cycling, page paging, carousel scrolling) stands down
+        // for it, see bgArea.onPressed and wcCell's handlers below
+        readonly property bool promptOpen: powerArmed || rebootArmed
         property string dragZone: "none" // "top" | "bottom" | "none" — which edge (if any) the in-flight drag started in
         property bool powerDragging: false
         property real dragGrabY: 0
@@ -2856,7 +2882,7 @@ ShellRoot {
         readonly property int wallPageSize: cfg.wallsCols * cfg.wallsRows
         readonly property int wallPage: wallPageSize > 0 ? Math.floor(wallSelected / wallPageSize) : 0
 
-        // ---------- wallpaper carousel ("windows" style) ----------
+        // ---------- wallpaper carousel ("carousel" style) ----------
         // Unbounded step counter driving the carousel's animated position:
         // it only ever moves by ±1 per navigation (never wraps), so a
         // Behavior on wallCarouselAnim always eases in the direction the
@@ -3029,6 +3055,23 @@ ShellRoot {
                 clipSelected = next;
             }
         }
+        // Shared dominant-axis swipe dispatch: a completed drag's total
+        // travel decides pane-cycling (horizontal) vs paging (vertical), one
+        // or the other never both. Used by the per-tile DragHandlers (tiles
+        // grab their own presses, so bgArea never sees those drags) — bgArea
+        // keeps its own inline copy since it additionally has to gate each
+        // axis independently on where the press started (edge zone, over the
+        // wallpaper carousel), which a shared single dx/dy call can't express
+        // without corrupting which axis reads as "dominant".
+        function gestureRelease(dx: real, dy: real) {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+                if (Math.abs(dx) > 80)
+                    cyclePane(dx < 0 ? 1 : -1);
+            } else {
+                if (Math.abs(dy) > 80)
+                    pageMove(dy < 0 ? 1 : -1);
+            }
+        }
 
         // ---------- actions ----------
         // Launch through gtk-launch (GLib): quickshell's own Exec parser
@@ -3039,6 +3082,14 @@ ShellRoot {
         // DBusActivatable. Falls back to the entry's own execute() if
         // gtk-launch can't find the id.
         property var launchEntry: null
+        // recordLaunch() bumps the entry's score, which win.matches (sorted
+        // by launchCount) reactively re-sorts on — bumping it immediately
+        // visibly reshuffles the grid while the close animation is still
+        // fading it out. Held here and only recorded once fadeOut actually
+        // hides the window (see its ScriptAction below), so the re-sort
+        // happens off-screen. Separate from launchEntry, which onExited
+        // below usually clears well before that animation finishes.
+        property var pendingRecordEntry: null
         Process {
             id: appLaunch
             onExited: exitCode => {
@@ -3050,7 +3101,7 @@ ShellRoot {
         function launch(entry) {
             if (!entry)
                 return;
-            root.recordLaunch(entry);
+            pendingRecordEntry = entry;
             launchEntry = entry;
             // The launched app inherits gtk-launch's stdio, i.e. this Process's
             // pipes — which close once gtk-launch exits, so chatty apps
@@ -3090,12 +3141,12 @@ ShellRoot {
                         if command -v magick >/dev/null 2>&1; then
                             magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
-                            notify-send -a pibble -i dialog-error -t 0 "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
+                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
                         fi
                     fi
                 fi
                 export WALL BLUR
-                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error -t 0 "Wallpaper command failed" "$4"; }
+                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$4"; }
             `, "_", wall.path, wall.blur, root.wallCacheDir, cfg.wallCommand,
                 cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.alertOn("errors") ? "1" : "0"]);
             exit();
@@ -3160,7 +3211,7 @@ ShellRoot {
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 if ! command -v wl-copy >/dev/null 2>&1; then
-                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error -t 0 "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
+                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
                     exit 0
                 fi
                 tmp=$(mktemp)
@@ -3437,6 +3488,16 @@ ShellRoot {
             ScriptAction {
                 script: win.shown = false
             }
+            // now off-screen: safe to bump the launch score (see
+            // pendingRecordEntry above)
+            ScriptAction {
+                script: {
+                    if (win.pendingRecordEntry) {
+                        root.recordLaunch(win.pendingRecordEntry);
+                        win.pendingRecordEntry = null;
+                    }
+                }
+            }
             ScriptAction {
                 script: {
                     if (win.dialogPending === "folder") {
@@ -3550,12 +3611,22 @@ ShellRoot {
                 property bool vertTracking: false
                 property bool carouselTracking: false
                 property bool edgePress: false
-                onClicked: {
-                    if (win.powerArmed)
-                        win.disarmPower();
-                    else if (win.rebootArmed)
-                        win.disarmReboot();
-                    else if (win.expandedClip)
+                onClicked: mouse => {
+                    if (win.powerArmed || win.rebootArmed) {
+                        // MouseArea's clicked doesn't care how far the
+                        // pointer traveled between press and release — a
+                        // horizontal swipe lands here too (the power/reboot
+                        // DragHandler only tracks the y axis, so it never
+                        // grabs a horizontal drag and steals it away from
+                        // this click). Only a real tap should count as
+                        // "anything else lets go"; a swipe must do nothing.
+                        if (Math.abs(mouse.x - pressX) > 15 || Math.abs(mouse.y - pressY) > 15)
+                            return;
+                        if (win.powerArmed)
+                            win.disarmPower();
+                        else
+                            win.disarmReboot();
+                    } else if (win.expandedClip)
                         win.collapseClip();
                     else if (win.capturingBind)
                         win.cancelCapture();
@@ -3571,12 +3642,11 @@ ShellRoot {
                     // screen belongs to it (see the DragHandler below) —
                     // pane/grid navigation and the carousel flick sit out
                     // entirely so they can't fire alongside it
-                    const promptOpen = win.powerArmed || win.rebootArmed;
                     const inCarousel = onCarousel
                         && wallCarousel.contains(wallCarousel.mapFromItem(bgArea, mouse.x, mouse.y));
-                    carouselTracking = !promptOpen && inCarousel && root.gestureOn();
-                    horizTracking = !promptOpen && root.gestureOn() && !inCarousel;
-                    vertTracking = !promptOpen && root.gestureOn() && !onCarousel && !edgePress;
+                    carouselTracking = !win.promptOpen && inCarousel && root.gestureOn();
+                    horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel;
+                    vertTracking = !win.promptOpen && root.gestureOn() && !onCarousel && !edgePress;
                 }
                 onReleased: mouse => {
                     const dx = mouse.x - pressX;
@@ -3646,7 +3716,20 @@ ShellRoot {
                                 : y > win.revH - win.edgeSwipeZone ? "bottom" : "none";
                             win.powerDragging = win.dragZone === "top";
                             win.rebootDragging = win.dragZone === "bottom";
-                            win.dragGrabY = y - win.powerRaw + win.rebootRaw;
+                            // only fold in the live raw values when actually
+                            // continuing an already-armed prompt's drag — a
+                            // fresh, unarmed edge press must start from a
+                            // clean baseline. powerRaw/rebootRaw spring back
+                            // to 0 over win.had(320)ms on disarm (Behavior
+                            // enabled once *Dragging above is false), so a
+                            // re-swipe from the edge started before that
+                            // finishes would otherwise bake the still-
+                            // animating leftover value into this drag's
+                            // reference point, corrupting it until the old
+                            // animation happens to finish on its own.
+                            win.dragGrabY = (win.powerArmed || win.rebootArmed)
+                                ? y - win.powerRaw + win.rebootRaw
+                                : y;
                         } else {
                             win.powerDragging = false;
                             win.rebootDragging = false;
@@ -3988,10 +4071,39 @@ ShellRoot {
                                             color: root.accent
                                             font { family: root.mono; pixelSize: root.fs(16); weight: Font.Bold }
                                         }
-                                        MouseArea {
-                                            anchors.fill: parent
+                                        // TapHandler (not a plain MouseArea) so a
+                                        // completed swipe below doesn't also
+                                        // register as a click — same tap-vs-drag
+                                        // split the wallpaper carousel's wcCell uses
+                                        TapHandler {
                                             enabled: cell.filled
-                                            onClicked: win.launch(cell.entry)
+                                            onTapped: {
+                                                if (!cfg.clickToSelect || cell.isSelected)
+                                                    win.launch(cell.entry);
+                                                else
+                                                    win.selected = cell.appIndex;
+                                            }
+                                        }
+                                        // lets a pane-cycle/page swipe start with the
+                                        // finger/cursor right on the icon, instead of
+                                        // only working over the gaps between tiles —
+                                        // same DragHandler-alongside-TapHandler split
+                                        // wcCell uses for the carousel, just forwarding
+                                        // into the shared dominant-axis dispatch
+                                        // instead of a carousel-specific flick
+                                        DragHandler {
+                                            target: null
+                                            enabled: cell.filled && root.gestureOn() && !win.promptOpen
+                                            property real grabX: 0
+                                            property real grabY: 0
+                                            onActiveChanged: {
+                                                if (active) {
+                                                    grabX = centroid.scenePosition.x;
+                                                    grabY = centroid.scenePosition.y;
+                                                } else {
+                                                    win.gestureRelease(centroid.scenePosition.x - grabX, centroid.scenePosition.y - grabY);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -4203,10 +4315,30 @@ ShellRoot {
                                         fillMode: Image.PreserveAspectCrop
                                         source: thumb.animating ? "file://" + wallCell.shownWall.path : ""
                                     }
-                                    MouseArea {
-                                        anchors.fill: parent
+                                    // TapHandler + DragHandler split, see the
+                                    // matching app-tile handlers above
+                                    TapHandler {
                                         enabled: wallCell.filled
-                                        onClicked: win.applyWallpaper(wallCell.wall)
+                                        onTapped: {
+                                            if (!cfg.clickToSelect || wallCell.isSelected)
+                                                win.applyWallpaper(wallCell.wall);
+                                            else
+                                                win.wallSelected = wallCell.wallIndex;
+                                        }
+                                    }
+                                    DragHandler {
+                                        target: null
+                                        enabled: wallCell.filled && root.gestureOn() && !win.promptOpen
+                                        property real grabX: 0
+                                        property real grabY: 0
+                                        onActiveChanged: {
+                                            if (active) {
+                                                grabX = centroid.scenePosition.x;
+                                                grabY = centroid.scenePosition.y;
+                                            } else {
+                                                win.gestureRelease(centroid.scenePosition.x - grabX, centroid.scenePosition.y - grabY);
+                                            }
+                                        }
                                     }
                                 }
                                 // Stroke above the image, not a border on thumb
@@ -4297,7 +4429,7 @@ ShellRoot {
                 readonly property int barWidth: 205
                 readonly property int barHeight: 440
                 readonly property int slotSpacing: 240
-                readonly property real parallaxPx: cfg.wallpaperStyle === "windows-flat" ? 0 : 75
+                readonly property real parallaxPx: cfg.wallpaperStyle === "carousel-flat" ? 0 : 75
                 readonly property int captionGap: 14
                 width: (2 * halfVisible + 1) * slotSpacing
                 height: barHeight + captionGap + 22
@@ -4544,7 +4676,7 @@ ShellRoot {
                             // as a click — same tap-vs-drag split the
                             // pages list's swipe-to-delete row uses.
                             TapHandler {
-                                enabled: wcCell.wall !== null
+                                enabled: wcCell.wall !== null && !win.promptOpen
                                 onTapped: {
                                     if (wcCell.isCenter)
                                         win.applyWallpaper(wcCell.wall);
@@ -4560,7 +4692,7 @@ ShellRoot {
                             DragHandler {
                                 target: null
                                 yAxis.enabled: false
-                                enabled: wcCell.wall !== null && root.gestureOn()
+                                enabled: wcCell.wall !== null && root.gestureOn() && !win.promptOpen
                                 property real grabX: 0
                                 onActiveChanged: {
                                     if (active)
@@ -4896,12 +5028,31 @@ ShellRoot {
                                             font { family: root.mono; pixelSize: root.fs(13) }
                                         }
 
-                                        MouseArea {
-                                            anchors.fill: parent
+                                        // TapHandler + DragHandler split, see the
+                                        // matching app-tile handlers above
+                                        TapHandler {
                                             enabled: clipCell.filled && win.expandedClip === null
-                                            onClicked: {
-                                                win.clipSelected = clipCell.clipIndex;
-                                                win.expandClip(clipCell.clip);
+                                            onTapped: {
+                                                if (!cfg.clickToSelect || clipCell.isSelected) {
+                                                    win.clipSelected = clipCell.clipIndex;
+                                                    win.expandClip(clipCell.clip);
+                                                } else {
+                                                    win.clipSelected = clipCell.clipIndex;
+                                                }
+                                            }
+                                        }
+                                        DragHandler {
+                                            target: null
+                                            enabled: clipCell.filled && win.expandedClip === null && root.gestureOn() && !win.promptOpen
+                                            property real grabX: 0
+                                            property real grabY: 0
+                                            onActiveChanged: {
+                                                if (active) {
+                                                    grabX = centroid.scenePosition.x;
+                                                    grabY = centroid.scenePosition.y;
+                                                } else {
+                                                    win.gestureRelease(centroid.scenePosition.x - grabX, centroid.scenePosition.y - grabY);
+                                                }
                                             }
                                         }
                                     }
@@ -5321,7 +5472,7 @@ ShellRoot {
                             model: [
                                 { id: "general", label: "General" },
                                 { id: "pages", label: "Pages" },
-                                { id: "keybindings", label: "Keybindings" },
+                                { id: "keybindings", label: "Navigation" },
                                 { id: "flyouts", label: "Flyouts" }
                             ].concat(win.customSettingsTabs.map(t => ({ id: t.pageId, label: t.label })))
 
@@ -6779,6 +6930,11 @@ ShellRoot {
                         label: "Navigation gestures"
                         sub: "swipe from the top/bottom edge to arm the power/reboot prompt (swipe again to confirm or dismiss it) · swipe left/right to cycle panes/settings tabs · swipe up/down to page through the current grid"
                     }
+                    SettingRow {
+                        key: "clickToSelect"
+                        label: "Click to select"
+                        sub: "first click on an app/wallpaper/clip only highlights it; a second click activates it"
+                    }
                 }
 
                 // one slide per custom page that contributes a settings
@@ -7101,7 +7257,6 @@ ShellRoot {
                     }
                 }
             }
-
         }
 
         function cycleIconTheme(dir: int) {
@@ -7121,6 +7276,7 @@ ShellRoot {
             case "launchAnimation": return cfg.launchAnimation;
             case "bgBlur": return cfg.bgBlur ? "on" : "off";
             case "gestures": return cfg.gestures ? "on" : "off";
+            case "clickToSelect": return cfg.clickToSelect ? "on" : "off";
             case "hiddenMenuAnimations": return cfg.hiddenMenuAnimations ? "on" : "off";
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
@@ -7133,7 +7289,7 @@ ShellRoot {
             case "replayCount": return "" + cfg.replayCount;
             case "notifStyle": return cfg.notifStyle;
             case "notifAnim": return cfg.notifAnim;
-            case "wallpaperStyle": return cfg.wallpaperStyle === "windows-flat" ? "windows no parallax" : cfg.wallpaperStyle;
+            case "wallpaperStyle": return cfg.wallpaperStyle === "carousel-flat" ? "carousel no parallax" : cfg.wallpaperStyle;
             }
             return "";
         }
@@ -7178,6 +7334,9 @@ ShellRoot {
             case "gestures":
                 cfg.gestures = !cfg.gestures;
                 break;
+            case "clickToSelect":
+                cfg.clickToSelect = !cfg.clickToSelect;
+                break;
             case "hiddenMenuAnimations":
                 cfg.hiddenMenuAnimations = !cfg.hiddenMenuAnimations;
                 break;
@@ -7220,7 +7379,7 @@ ShellRoot {
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
             case "wallpaperStyle":
-                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "windows", "windows-flat"], dir);
+                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "carousel", "carousel-flat"], dir);
                 break;
             }
             root.saveSettings();
