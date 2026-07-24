@@ -1070,6 +1070,11 @@ ShellRoot {
             // whether the launcher asks the compositor to blur behind it at
             // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
             property bool bgBlur: true
+            // gates the swipe-up/swipe-down power-off/reboot drag gesture
+            // and the swipe-left/swipe-right pane/tab-cycle gesture,
+            // independently; the keybind/Enter-confirm flow the power
+            // gesture feeds into stays available either way
+            property var gestures: ({ power: true, panes: true })
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
             // flyouts (volume + notification OSDs) — independent of whether
             // other apps' notifications show
@@ -1273,6 +1278,9 @@ ShellRoot {
     }
     function alertOn(name: string): bool {
         return (cfg.pibbleAlerts ?? {})[name] !== false;
+    }
+    function gestureOn(name: string): bool {
+        return (cfg.gestures ?? {})[name] !== false;
     }
     // icon-name → displayable URL; senders (and .desktop Icon= entries)
     // sometimes resolve the icon themselves, so paths and urls pass through
@@ -1550,6 +1558,14 @@ ShellRoot {
             const fly = Object.assign({}, cfg.flyouts);
             delete fly.alerts;
             cfg.flyouts = fly;
+            saveSettings();
+        }
+        // the single "gestures" checkbox split into per-category swipe
+        // toggles (power: swipe up/down to arm the reboot/power-off
+        // prompt; panes: swipe left/right to cycle panes/settings tabs)
+        if (typeof cfg.gestures === "boolean") {
+            const wasOn = cfg.gestures;
+            cfg.gestures = { power: wasOn, panes: wasOn };
             saveSettings();
         }
     }
@@ -3332,6 +3348,17 @@ ShellRoot {
             MouseArea {
                 anchors.fill: parent
                 property real wheelAcc: 0
+                // swipe-left/right to cycle panes (or, inside settings,
+                // settings tabs) — same cyclePane() the Tab/Shift+Tab
+                // keybinds drive. Tracked here (rather than with a second,
+                // orthogonal DragHandler alongside the power/reboot one
+                // below) because PointerHandlers on this layer-shell
+                // surface aren't reliably delivered events — see the
+                // onWheel note above this MouseArea about the WheelHandler
+                // that never fired; MouseArea's own press/move/release is
+                // the path already proven to work here.
+                property real pressX: 0
+                property bool horizTracking: false
                 onClicked: {
                     if (win.powerArmed)
                         win.disarmPower();
@@ -3343,6 +3370,15 @@ ShellRoot {
                         win.cancelCapture();
                     else
                         input.forceActiveFocus();
+                }
+                onPressed: mouse => {
+                    pressX = mouse.x;
+                    horizTracking = root.gestureOn("panes");
+                }
+                onReleased: mouse => {
+                    if (horizTracking && Math.abs(mouse.x - pressX) > 80)
+                        win.cyclePane(mouse.x - pressX < 0 ? 1 : -1);
+                    horizTracking = false;
                 }
                 onWheel: wheel => {
                     wheelAcc += wheel.angleDelta.y;
@@ -3364,6 +3400,7 @@ ShellRoot {
                 // powerRaw, upward feeds rebootRaw, the other stays at 0.
                 DragHandler {
                     target: null
+                    enabled: root.gestureOn("power")
                     xAxis.enabled: false
                     yAxis.enabled: true
                     onActiveChanged: {
@@ -5001,9 +5038,8 @@ ShellRoot {
                     }
                     spacing: 14
 
-                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 150 }
-                    SettingRow { key: "iconTheme"; label: "Icon theme"; sub: "applies on next launch"; valueWidth: 260 }
-                    SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 260 }
+                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 190 }
+                    SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 190 }
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
                     CustomColorRow {}
@@ -5953,67 +5989,9 @@ ShellRoot {
                         }
                     }
 
-                    // grid size: one visible tile grid, switchable between the
-                    // three pages that have a configurable grid size
-                    Item {
-                        width: 780
-                        height: 34
+                    SettingRow { key: "dimOpacity"; label: "Background opacity" }
 
-                        SLabel {
-                            anchors.left: parent.left
-                            text: "Grid size"
-                        }
-                        SReset {
-                            key: root.gridTargets[win.gridTarget].resetKey
-                            anchors.right: parent.right
-                        }
-                        Row {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 34 + 32
-                            spacing: 24
-                            height: parent.height
-
-                            Repeater {
-                                model: ["apps", "walls", "clips"]
-
-                                Item {
-                                    id: gridTargetChip
-                                    required property string modelData
-                                    readonly property bool active: win.gridTarget === modelData
-                                    width: gridTargetText.implicitWidth
-                                    height: parent.height
-
-                                    Text {
-                                        id: gridTargetText
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: root.gridTargets[gridTargetChip.modelData].label
-                                        color: gridTargetChip.active ? root.fg : root.muted
-                                        font { family: root.mono; pixelSize: root.fs(13) }
-                                    }
-                                    Rectangle {
-                                        anchors.top: gridTargetText.bottom
-                                        anchors.topMargin: 4
-                                        width: parent.width
-                                        height: 2
-                                        radius: 1
-                                        color: root.accent
-                                        opacity: gridTargetChip.active ? 1 : 0
-                                        Behavior on opacity {
-                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: win.gridTarget = gridTargetChip.modelData
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    GridSizeTiles {
-                        target: win.gridTarget
-                    }
+                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
 
                     // clock-page layout: three stationary tickboxes (date,
                     // battery, weather). The grouping itself is fixed, not
@@ -6091,25 +6069,73 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "animStyle"; label: "Transitions" }
+                    // grid size: one visible tile grid, switchable between the
+                    // three pages that have a configurable grid size
+                    Item {
+                        width: 780
+                        height: 34
 
-                    Repeater {
-                        model: [
-                            { key: "clipsMax", label: "Clipboard entries" },
-                            { key: "dimOpacity", label: "Background opacity" }
-                        ]
+                        SLabel {
+                            anchors.left: parent.left
+                            text: "Grid size"
+                        }
+                        SReset {
+                            key: root.gridTargets[win.gridTarget].resetKey
+                            anchors.right: parent.right
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 34 + 32
+                            spacing: 24
+                            height: parent.height
 
-                        SettingRow {
-                            required property var modelData
-                            key: modelData.key
-                            label: modelData.label
-                            sub: modelData.sub ?? ""
+                            Repeater {
+                                model: ["apps", "walls", "clips"]
+
+                                Item {
+                                    id: gridTargetChip
+                                    required property string modelData
+                                    readonly property bool active: win.gridTarget === modelData
+                                    width: gridTargetText.implicitWidth
+                                    height: parent.height
+
+                                    Text {
+                                        id: gridTargetText
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.gridTargets[gridTargetChip.modelData].label
+                                        color: gridTargetChip.active ? root.fg : root.muted
+                                        font { family: root.mono; pixelSize: root.fs(13) }
+                                    }
+                                    Rectangle {
+                                        anchors.top: gridTargetText.bottom
+                                        anchors.topMargin: 4
+                                        width: parent.width
+                                        height: 2
+                                        radius: 1
+                                        color: root.accent
+                                        opacity: gridTargetChip.active ? 1 : 0
+                                        Behavior on opacity {
+                                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: win.gridTarget = gridTargetChip.modelData
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
+                    GridSizeTiles {
+                        target: win.gridTarget
+                    }
 
-                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style"; valueWidth: 170 }
+                    SettingRow { key: "animStyle"; label: "Grid animation" }
+
+                    SettingRow { key: "iconTheme"; label: "App icon theme"; sub: "applies on next launch"; valueWidth: 190 }
+
+                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style"; valueWidth: 190 }
 
                     // wallpaper path
                     Item {
@@ -6256,6 +6282,8 @@ ShellRoot {
                         }
                     }
 
+                    SettingRow { key: "clipsMax"; label: "Clipboard entries" }
+
                 }
 
                 // keybindings tab
@@ -6372,6 +6400,43 @@ ShellRoot {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    Item {
+                        width: 780
+                        height: 34 + gestureSub.implicitHeight + 2
+
+                        Item {
+                            id: gestureMain
+                            width: parent.width
+                            height: 34
+
+                            SLabel {
+                                anchors.left: parent.left
+                                text: "Gestures"
+                            }
+                            SReset {
+                                key: "gestures"
+                                anchors.right: parent.right
+                            }
+                            ChipRow {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 34 + 32
+                                anchors.verticalCenter: parent.verticalCenter
+                                items: [
+                                    { id: "power", label: "power/reboot" },
+                                    { id: "panes", label: "pages" }
+                                ]
+                                isOn: root.gestureOn
+                                toggle: win.toggleGesture
+                            }
+                        }
+                        SSub {
+                            id: gestureSub
+                            anchors.top: gestureMain.bottom
+                            anchors.topMargin: 2
+                            text: "power/reboot: swipe up/down to arm the prompt · pages: swipe left/right to cycle panes/settings tabs"
                         }
                     }
                 }
@@ -6711,6 +6776,13 @@ ShellRoot {
             root.saveSettings();
         }
 
+        function toggleGesture(g: string) {
+            const ges = Object.assign({ power: true, panes: true }, cfg.gestures);
+            ges[g] = ges[g] === false;
+            cfg.gestures = ges;
+            root.saveSettings();
+        }
+
         function togglePage(p: string) {
             const pages = Object.assign({ clock: true, apps: true, walls: true, clips: true }, cfg.pages);
             // keep at least one page enabled overall (built-in or custom)
@@ -6748,6 +6820,7 @@ ShellRoot {
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
             case "bgBlur": cfg.bgBlur = true; break;
+            case "gestures": cfg.gestures = ({ power: true, panes: true }); break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
             case "theme": cfg.theme = "matugen"; break;
