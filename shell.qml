@@ -2557,9 +2557,6 @@ ShellRoot {
             return tabs;
         }
         readonly property bool drawerOpen: pane === "apps"
-        // TEMP debug toggle for comparing tile exit with/without y drift —
-        // remove once the app drawer animation decision is finalized.
-        property bool debugExitYDrift: false
 
         // ---------- clock line layout ----------
         // fixed layout, not user-reorderable: battery+weather always
@@ -3655,34 +3652,6 @@ ShellRoot {
                     NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: win.ad(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
                 }
 
-                // TEMP debug toggle — see win.debugExitYDrift
-                Rectangle {
-                    id: yDriftToggle
-                    visible: win.pane === "apps"
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    z: 10
-                    width: yDriftToggleLabel.implicitWidth + 20
-                    height: 24
-                    radius: 8
-                    color: Qt.alpha(root.accent, yDriftToggleArea.containsMouse ? 0.25 : 0.11)
-                    border.width: 1
-                    border.color: Qt.alpha(root.accent, 0.33)
-                    Text {
-                        id: yDriftToggleLabel
-                        anchors.centerIn: parent
-                        text: "exit y-drift: " + (win.debugExitYDrift ? "on" : "off")
-                        color: root.accent
-                        font { family: root.mono; pixelSize: root.fs(12); weight: Font.Bold }
-                    }
-                    MouseArea {
-                        id: yDriftToggleArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: win.debugExitYDrift = !win.debugExitYDrift
-                    }
-                }
-
                 Grid {
                     id: grid
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -3829,7 +3798,7 @@ ShellRoot {
                                 }
                                 ParallelAnimation {
                                     NumberAnimation { target: wrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
-                                    NumberAnimation { target: wrap; property: "y"; to: win.debugExitYDrift ? win.animFromY : 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                    NumberAnimation { target: wrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                     NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 }
                             }
@@ -4054,13 +4023,12 @@ ShellRoot {
                             SequentialAnimation {
                                 id: wallSpringOut
                                 ParallelAnimation {
-                                    NumberAnimation { target: wallWrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                    NumberAnimation { target: wallWrap; property: "scale"; to: win.animOutBounce ? 1.08 : 1; duration: win.animOutBounce ? win.ad(80) : 0; easing.type: Easing.OutQuad }
                                 }
                                 ParallelAnimation {
-                                    NumberAnimation { target: wallWrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
-                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
+                                    NumberAnimation { target: wallWrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                    NumberAnimation { target: wallWrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                    NumberAnimation { target: wallWrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 }
                             }
                         }
@@ -4355,13 +4323,12 @@ ShellRoot {
                         SequentialAnimation {
                             id: wcSpringOut
                             ParallelAnimation {
-                                NumberAnimation { target: wcWrap; property: "scale"; to: 1.08; duration: win.ad(80); easing.type: Easing.OutQuad }
-                                NumberAnimation { target: wcWrap; property: "y"; to: -3; duration: win.ad(80); easing.type: Easing.OutQuad }
+                                NumberAnimation { target: wcWrap; property: "scale"; to: win.animOutBounce ? 1.08 : 1; duration: win.animOutBounce ? win.ad(80) : 0; easing.type: Easing.OutQuad }
                             }
                             ParallelAnimation {
-                                NumberAnimation { target: wcWrap; property: "scale"; to: 0.4; duration: win.ad(320); easing.type: Easing.InQuad }
-                                NumberAnimation { target: wcWrap; property: "y"; to: 14; duration: win.ad(320); easing.type: Easing.InQuad }
-                                NumberAnimation { target: wcWrap; property: "opacity"; to: 0; duration: win.ad(320); easing.type: Easing.InQuad }
+                                NumberAnimation { target: wcWrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                NumberAnimation { target: wcWrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                NumberAnimation { target: wcWrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                             }
                         }
                     }
@@ -4652,9 +4619,12 @@ ShellRoot {
                                     SequentialAnimation {
                                         id: clipSpringOut
                                         ParallelAnimation {
-                                            NumberAnimation { target: clipTile; property: "scale"; to: 0.7; duration: win.ad(240); easing.type: Easing.InQuad }
-                                            NumberAnimation { target: clipTile; property: "y"; to: 10; duration: win.ad(240); easing.type: Easing.InQuad }
-                                            NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: win.ad(240); easing.type: Easing.InQuad }
+                                            NumberAnimation { target: clipTile; property: "scale"; to: win.animOutBounce ? 1.08 : 1; duration: win.animOutBounce ? win.ad(80) : 0; easing.type: Easing.OutQuad }
+                                        }
+                                        ParallelAnimation {
+                                            NumberAnimation { target: clipTile; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                            NumberAnimation { target: clipTile; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                                            NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                         }
                                         // clear shownClip once the tile is actually gone, not just
                                         // invisible: tileH (and so this cell's visible/height) is
@@ -7230,12 +7200,16 @@ ShellRoot {
         readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
         // Exit mirrors entrance: tiles spring back out toward the same
         // from-state (animFromScale/animFromY) they sprang in from, so
-        // "pop" (no y motion) and "slide"/"fade" (no overshoot bounce)
-        // read as the reverse of their entrance instead of all sharing
-        // wave's bounce-then-shrink shape.
+        // "wave"/"pop" (bounce) read as the reverse of their entrance
+        // instead of all sharing one bounce-then-shrink shape.
         readonly property bool animOutBounce: animStyle === "wave" || animStyle === "pop"
         readonly property int animOutSettleDur: animStyle === "fade" ? 180 : animStyle === "slide" ? 260 : 320
         readonly property int animOutEase: animOutBounce ? Easing.InQuad : Easing.InCubic
+        // slide's entrance drift (46px, rows sliding up) is dramatic by
+        // design, but the same distance on the way out read as an
+        // overlong, disconnected slide-off — so exit borrows fade's
+        // shorter 6px instead of reusing animFromY like the other styles.
+        readonly property int animExitY: animStyle === "slide" ? 6 : animFromY
         // "none" (tile animation) zeroes tile/pane-entrance durations only —
         // the launch reveal has its own independent "none" (see lad below),
         // so picking one doesn't silently also flatten the other.
