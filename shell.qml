@@ -6516,13 +6516,24 @@ ShellRoot {
                         const ctx = getContext("2d");
                         ctx.reset();
                         const cx = width / 2, cy = height / 2, r = 10;
-                        const p = win.powerProgress;
+                        // p drives the sweep growth and stops at 1 — past
+                        // the arm threshold the shape (and its gaps) is
+                        // done growing. Instead, overshoot dragging spins
+                        // the whole completed assembly (tail, head, dash)
+                        // rigidly together, capped with the same
+                        // diminishing-returns curve as powerPull, so the
+                        // gaps around the dash stay fixed instead of
+                        // stretching apart
+                        const p = Math.min(1, win.powerRaw / win.powerThreshold);
+                        const maxOvershoot = 0.4;
+                        const excess = Math.max(0, win.powerRaw - win.powerThreshold);
+                        const rot = maxOvershoot * (1 - Math.exp(-excess / 260)) * Math.PI * 2;
                         // a fixed dash marks 12 o'clock the whole time; the
                         // ring never closes onto it — both ends pull away
                         // from the dash as the drag progresses, landing with
                         // an equal gap to either side of it once complete
                         const finalGap = 1.1;
-                        const tail = -Math.PI / 2 + (finalGap / 2) * p;
+                        const tail = -Math.PI / 2 + (finalGap / 2) * p + rot;
                         const head = tail + (Math.PI * 2 - finalGap) * p;
                         ctx.lineWidth = 3.3;
                         ctx.lineCap = "butt";
@@ -6552,7 +6563,10 @@ ShellRoot {
                 }
                 Connections {
                     target: win
-                    function onPowerProgressChanged() {
+                    // powerRaw (not powerProgress, which clamps at 1)
+                    // drives the paint so dragging past the threshold keeps
+                    // repainting the overshoot spin
+                    function onPowerRawChanged() {
                         ringCanvas.requestPaint();
                     }
                 }
@@ -6595,9 +6609,17 @@ ShellRoot {
                         // close: past maxArc of a full turn the tail chases
                         // the head at the same rate instead of staying
                         // pinned at the top, so the gap holds steady and the
-                        // ring reads as a snake that can't catch its tail
+                        // ring reads as a snake that can't catch its tail.
+                        // headFrac keeps advancing past the arm threshold
+                        // instead of freezing there, but the extra spin is
+                        // capped with the same diminishing-returns curve as
+                        // rebootPull, so it matches the drag's own
+                        // overshoot limits rather than spinning forever
                         const maxArc = 0.82;
-                        const headFrac = win.rebootProgress;
+                        const maxOvershoot = 0.4;
+                        const excess = Math.max(0, win.rebootRaw - win.rebootThreshold);
+                        const headFrac = Math.min(1, win.rebootRaw / win.rebootThreshold)
+                            + maxOvershoot * (1 - Math.exp(-excess / 260));
                         const tailFrac = Math.max(0, headFrac - maxArc);
                         const start = -Math.PI / 2 + Math.PI * 2 * tailFrac;
                         const end = -Math.PI / 2 + Math.PI * 2 * headFrac;
@@ -6616,8 +6638,9 @@ ShellRoot {
                             const nx = Math.cos(tangent + Math.PI / 2);
                             const ny = Math.sin(tangent + Math.PI / 2);
                             // grows over the course of the drag, from a
-                            // small nub to the full arrowhead
-                            const arrowScale = 0.3 + 0.7 * headFrac;
+                            // small nub to the full arrowhead — capped so
+                            // it doesn't keep bloating during overshoot
+                            const arrowScale = 0.3 + 0.7 * Math.min(1, headFrac);
                             const tipX = hx + Math.cos(tangent) * 4.5 * arrowScale;
                             const tipY = hy + Math.sin(tangent) * 4.5 * arrowScale;
                             const backX = hx - Math.cos(tangent) * 3 * arrowScale;
@@ -6634,7 +6657,10 @@ ShellRoot {
                 }
                 Connections {
                     target: win
-                    function onRebootProgressChanged() {
+                    // rebootRaw (not rebootProgress, which clamps at 1)
+                    // drives the paint so dragging past the threshold keeps
+                    // repainting the overshoot spin
+                    function onRebootRawChanged() {
                         rebootRingCanvas.requestPaint();
                     }
                 }
