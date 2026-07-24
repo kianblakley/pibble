@@ -4389,6 +4389,13 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: cfg.clipsCols * 240 + (cfg.clipsCols - 1) * 16 + 52
                 height: Math.max(clipMasonry.height, 120) + 52
+                // a filtered-out tile collapsing to 0 height shrinks
+                // clipMasonry, which (via centerIn: parent below) would
+                // otherwise snap the whole drawer's top edge down instantly;
+                // animate the resize instead so it reads as a settle
+                Behavior on height {
+                    NumberAnimation { duration: win.ad(240); easing.type: Easing.OutCubic }
+                }
                 transform: panePull
                 opacity: 0.004
                 visible: win.pane === "clips"
@@ -4412,6 +4419,12 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: 26
+                    // pinned directly rather than left implicit: even with
+                    // each clipColumn's own width fixed at 240, relying on
+                    // Row to sum them back up is one more layer that could
+                    // drift when a column empties out, so state the total
+                    // outright to match clipDrawer's own (also fixed) width
+                    width: cfg.clipsCols * 240 + (cfg.clipsCols - 1) * 16
                     spacing: 16
 
                     Repeater {
@@ -4420,7 +4433,20 @@ ShellRoot {
                         Column {
                             id: clipColumn
                             required property int index
+                            // fixed, not implicit: an empty column (fewer
+                            // matches than clipsCols) would otherwise
+                            // collapse to 0 width, shrinking clipMasonry and
+                            // shifting the other columns sideways to stay
+                            // centered in clipDrawer's fixed-width box
+                            width: 240
                             spacing: 16
+                            // a tile above collapsing to 0 height (see
+                            // clipSpringOut.onStopped) shifts every cell
+                            // below it up within the column; animate that
+                            // reflow instead of letting it snap
+                            move: Transition {
+                                NumberAnimation { property: "y"; duration: win.ad(220); easing.type: Easing.OutCubic }
+                            }
 
                             Repeater {
                                 model: win.clipRowsC
