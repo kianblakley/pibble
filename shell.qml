@@ -3798,7 +3798,6 @@ ShellRoot {
                                 }
                                 ParallelAnimation {
                                     NumberAnimation { target: wrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
-                                    NumberAnimation { target: wrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                     NumberAnimation { target: wrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 }
                             }
@@ -4027,7 +4026,6 @@ ShellRoot {
                                 }
                                 ParallelAnimation {
                                     NumberAnimation { target: wallWrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
-                                    NumberAnimation { target: wallWrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                     NumberAnimation { target: wallWrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 }
                             }
@@ -4327,7 +4325,6 @@ ShellRoot {
                             }
                             ParallelAnimation {
                                 NumberAnimation { target: wcWrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
-                                NumberAnimation { target: wcWrap; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 NumberAnimation { target: wcWrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                             }
                         }
@@ -4649,7 +4646,6 @@ ShellRoot {
                                         }
                                         ParallelAnimation {
                                             NumberAnimation { target: clipTile; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
-                                            NumberAnimation { target: clipTile; property: "y"; to: win.animExitY; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                             NumberAnimation { target: clipTile; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                         }
                                         // clear shownClip once the tile is actually gone, not just
@@ -7231,11 +7227,6 @@ ShellRoot {
         readonly property bool animOutBounce: animStyle === "wave" || animStyle === "pop"
         readonly property int animOutSettleDur: animStyle === "fade" ? 180 : animStyle === "slide" ? 260 : 320
         readonly property int animOutEase: animOutBounce ? Easing.InQuad : Easing.InCubic
-        // slide's entrance drift (46px, rows sliding up) is dramatic by
-        // design, but the same distance on the way out read as an
-        // overlong, disconnected slide-off — so exit borrows fade's
-        // shorter 6px instead of reusing animFromY like the other styles.
-        readonly property int animExitY: animStyle === "slide" ? 6 : animFromY
         // "none" (tile animation) zeroes tile/pane-entrance durations only —
         // the launch reveal has its own independent "none" (see lad below),
         // so picking one doesn't silently also flatten the other.
