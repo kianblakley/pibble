@@ -1074,11 +1074,14 @@ ShellRoot {
             // whether the launcher asks the compositor to blur behind it at
             // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
             property bool bgBlur: true
-            // gates the swipe-up/swipe-down power-off/reboot drag gesture
-            // and the swipe-left/swipe-right pane/tab-cycle gesture,
-            // independently; the keybind/Enter-confirm flow the power
-            // gesture feeds into stays available either way
-            property var gestures: ({ power: true, panes: true })
+            // gates every navigation gesture as one switch: the edge
+            // swipe-up/swipe-down power-off/reboot drag (and, once that
+            // prompt is armed, the screen-wide swipe that confirms/dismisses
+            // it), swipe-left/swipe-right to cycle panes/tabs (or scroll the
+            // windows wallpaper carousel), and swipe-up/swipe-down to page
+            // through the current pane's grid. The keybind/Enter-confirm
+            // flow the power gesture feeds into stays available either way.
+            property bool gestures: true
             property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
             // flyouts (volume + notification OSDs) — independent of whether
             // other apps' notifications show
@@ -1283,8 +1286,8 @@ ShellRoot {
     function alertOn(name: string): bool {
         return (cfg.pibbleAlerts ?? {})[name] !== false;
     }
-    function gestureOn(name: string): bool {
-        return (cfg.gestures ?? {})[name] !== false;
+    function gestureOn(): bool {
+        return cfg.gestures !== false;
     }
     // icon-name → displayable URL; senders (and .desktop Icon= entries)
     // sometimes resolve the icon themselves, so paths and urls pass through
@@ -1564,12 +1567,11 @@ ShellRoot {
             cfg.flyouts = fly;
             saveSettings();
         }
-        // the single "gestures" checkbox split into per-category swipe
-        // toggles (power: swipe up/down to arm the reboot/power-off
-        // prompt; panes: swipe left/right to cycle panes/settings tabs)
-        if (typeof cfg.gestures === "boolean") {
-            const wasOn = cfg.gestures;
-            cfg.gestures = { power: wasOn, panes: wasOn };
+        // the old power/panes per-category gesture toggles collapsed back
+        // into a single "gestures" switch that gates all navigation
+        // gestures at once — on only if both halves were
+        if (cfg.gestures && typeof cfg.gestures === "object") {
+            cfg.gestures = cfg.gestures.power !== false && cfg.gestures.panes !== false;
             saveSettings();
         }
     }
@@ -2644,20 +2646,27 @@ ShellRoot {
             }
         }
         // ---------- swipe-to-power / swipe-to-reboot ----------
-        // Dragging down on empty space pulls the pane content down (rubber
-        // band) and reveals a ring that strokes itself closed as you drag,
-        // like a swipe-to-refresh. Releasing with the ring complete (or the
-        // power keybind) arms the "power off?" prompt; Enter then powers
-        // off, anything else (Escape, a click, another key) lets go. Dragging
-        // up does the same from the bottom edge, arming a "reboot?" prompt
-        // instead — same physics, opposite sign, mirrored geometry.
+        // Android-notification-shade style: dragging down from inside the
+        // top edgeSwipeZone pulls the pane content down (rubber band) and
+        // reveals a ring that strokes itself closed as you drag, like a
+        // swipe-to-refresh. Releasing with the ring complete (or the power
+        // keybind) arms the "power off?" prompt; Enter then powers off,
+        // anything else (Escape, a click, another key) lets go. Dragging up
+        // from inside the bottom edgeSwipeZone does the same, arming a
+        // "reboot?" prompt instead — same physics, opposite sign, mirrored
+        // geometry. Outside either zone the vertical drag belongs to pane
+        // navigation instead (see the MouseArea above).
+        readonly property real edgeSwipeZone: 56
+        property string dragZone: "none" // "top" | "bottom" | "none" — which edge (if any) the in-flight drag started in
         property bool powerDragging: false
         property real dragGrabY: 0
         property real powerRaw: 0 // raw downward drag distance (finger travel)
         property bool powerArmed: false
         readonly property real powerThreshold: 300
         readonly property real powerProgress: Math.min(1, powerRaw / powerThreshold)
-        // content shift lags the finger with increasing resistance
+        // content shift lags the finger with increasing resistance — same
+        // curve whether raw is coming straight off the finger (live drag)
+        // or being eased by the Behavior below (keybind / release rebound)
         readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / 260))
         Behavior on powerRaw {
             enabled: !win.powerDragging
@@ -2691,6 +2700,7 @@ ShellRoot {
         property bool rebootArmed: false
         readonly property real rebootThreshold: 300
         readonly property real rebootProgress: Math.min(1, rebootRaw / rebootThreshold)
+        // mirror of powerPull above — see the comment there
         readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / 260))
         Behavior on rebootRaw {
             enabled: !win.rebootDragging
@@ -2848,6 +2858,19 @@ ShellRoot {
             wallSelected = ((wallSelected + dir) % count + count) % count;
             wallCarouselStep += dir;
         }
+        // Swipe-to-scroll the carousel: dx is the total horizontal drag
+        // distance, vx its release velocity (px/s, signed). A slow short
+        // drag moves roughly one slot; a fast flick carries further, as if
+        // the released velocity kept translating the strip for another
+        // ~150ms — same feel as a native flick-scroll, without needing an
+        // actual Flickable underneath the strip's slot-snapped layout.
+        function carouselFlick(dx: real, vx: real) {
+            const carried = Math.abs(dx) + Math.abs(vx) * 0.15;
+            if (carried < 24)
+                return; // a stray jiggle, not a swipe
+            const steps = Math.max(1, Math.round(carried / wallCarousel.slotSpacing));
+            moveCarousel((dx < 0 ? 1 : -1) * steps);
+        }
 
         property var clipMatches: {
             const q = input.text.toLowerCase().trim();
@@ -2948,6 +2971,40 @@ ShellRoot {
         function pageStagger(size: int, before: int, after: int) {
             if (size > 0 && Math.floor(before / size) !== Math.floor(after / size))
                 beginStagger();
+        }
+        // Jumps a whole page at a time (dir: 1 next, -1 previous), keeping
+        // the same row/col within the new page where possible — same "next
+        // screenful" feel as a phone home screen, rather than landing on
+        // whatever cell vMove's row-by-row walk would stop at.
+        function pageJump(sel: int, count: int, pageSize: int, dir: int): int {
+            if (!count || pageSize <= 0)
+                return sel;
+            const pages = Math.ceil(count / pageSize);
+            if (pages <= 1)
+                return sel;
+            const w = sel % pageSize;
+            const curPage = Math.floor(sel / pageSize);
+            const nextPage = ((curPage + dir) % pages + pages) % pages;
+            return Math.min(count - 1, nextPage * pageSize + w);
+        }
+        // swipe-up/down: page through the current pane's grid. The windows
+        // wallpaper carousel has no grid pages (it's a spatial strip, see
+        // moveCarousel) so it's excluded upstream via onCarousel, and this
+        // only ever sees it as a no-op pane.
+        function pageMove(dir: int) {
+            if (pane === "apps") {
+                const next = pageJump(selected, matches.length, appPageSize, dir);
+                pageStagger(appPageSize, selected, next);
+                selected = next;
+            } else if (pane === "walls" && cfg.wallpaperStyle === "tiles") {
+                const next = pageJump(wallSelected, wallMatches.length, wallPageSize, dir);
+                pageStagger(wallPageSize, wallSelected, next);
+                wallSelected = next;
+            } else if (pane === "clips") {
+                const next = pageJump(clipSelected, clipMatches.length, clipPageSize, dir);
+                pageStagger(clipPageSize, clipSelected, next);
+                clipSelected = next;
+            }
         }
 
         // ---------- actions ----------
@@ -3434,19 +3491,42 @@ ShellRoot {
             // so the handler lives on a MouseArea, whose delivery is proven
             // by the click path.)
             MouseArea {
+                id: bgArea
                 anchors.fill: parent
                 property real wheelAcc: 0
-                // swipe-left/right to cycle panes (or, inside settings,
-                // settings tabs) — same cyclePane() the Tab/Shift+Tab
-                // keybinds drive. Tracked here (rather than with a second,
-                // orthogonal DragHandler alongside the power/reboot one
+                // swipe-left/right cycles panes — same cyclePane() the
+                // Tab/Shift+Tab keybinds drive. swipe-up/down instead
+                // pages through the current pane's grid (apps/clips/
+                // wallpaper tiles), one full page of tiles at a time — see
+                // win.pageMove(). Over the windows wallpaper carousel's own
+                // bounds specifically (background gaps between its cells —
+                // the cells' own swipe handling is on wcCell), left/right
+                // instead flicks the carousel (win.carouselFlick(), a
+                // distance carried by the drag scaled by release speed)
+                // and up/down is a no-op, since the carousel has no grid
+                // pages. Tracked here (rather than with a second, plain
+                // sibling DragHandler alongside the power/reboot one
                 // below) because PointerHandlers on this layer-shell
                 // surface aren't reliably delivered events — see the
                 // onWheel note above this MouseArea about the WheelHandler
                 // that never fired; MouseArea's own press/move/release is
-                // the path already proven to work here.
+                // the path already proven to work here. Presses starting
+                // inside an edge zone (edgePress) are left alone so the
+                // DragHandler below can arm power/reboot instead — and,
+                // critically, that DragHandler is disabled for anything
+                // but an edge press, or it would win the drag grab out
+                // from under every non-edge vertical swipe here (a plain
+                // "enabled" gate that ignores where the drag started, like
+                // it used to, always wins that race since it lives on this
+                // same Item) and pageMove would never fire.
+                readonly property bool onCarousel: win.pane === "walls" && cfg.wallpaperStyle !== "tiles"
                 property real pressX: 0
+                property real pressY: 0
+                property real pressTime: 0
                 property bool horizTracking: false
+                property bool vertTracking: false
+                property bool carouselTracking: false
+                property bool edgePress: false
                 onClicked: {
                     if (win.powerArmed)
                         win.disarmPower();
@@ -3461,12 +3541,37 @@ ShellRoot {
                 }
                 onPressed: mouse => {
                     pressX = mouse.x;
-                    horizTracking = root.gestureOn("panes");
+                    pressY = mouse.y;
+                    pressTime = Date.now();
+                    edgePress = mouse.y <= win.edgeSwipeZone || mouse.y >= height - win.edgeSwipeZone;
+                    // while a power/reboot prompt is armed, every gesture on
+                    // screen belongs to it (see the DragHandler below) —
+                    // pane/grid navigation and the carousel flick sit out
+                    // entirely so they can't fire alongside it
+                    const promptOpen = win.powerArmed || win.rebootArmed;
+                    const inCarousel = onCarousel
+                        && wallCarousel.contains(wallCarousel.mapFromItem(bgArea, mouse.x, mouse.y));
+                    carouselTracking = !promptOpen && inCarousel && root.gestureOn();
+                    horizTracking = !promptOpen && root.gestureOn() && !inCarousel;
+                    vertTracking = !promptOpen && root.gestureOn() && !onCarousel && !edgePress;
                 }
                 onReleased: mouse => {
-                    if (horizTracking && Math.abs(mouse.x - pressX) > 80)
-                        win.cyclePane(mouse.x - pressX < 0 ? 1 : -1);
+                    const dx = mouse.x - pressX;
+                    const dy = mouse.y - pressY;
+                    if (carouselTracking) {
+                        const elapsedMs = Math.max(1, Date.now() - pressTime);
+                        win.carouselFlick(dx, dx / elapsedMs * 1000);
+                    } else if (Math.abs(dx) >= Math.abs(dy)) {
+                        // dominant axis only, so a diagonal drag can't fire both
+                        if (horizTracking && Math.abs(dx) > 80)
+                            win.cyclePane(dx < 0 ? 1 : -1);
+                    } else {
+                        if (vertTracking && Math.abs(dy) > 80)
+                            win.pageMove(dy < 0 ? 1 : -1);
+                    }
                     horizTracking = false;
+                    vertTracking = false;
+                    carouselTracking = false;
                 }
                 onWheel: wheel => {
                     wheelAcc += wheel.angleDelta.y;
@@ -3480,22 +3585,45 @@ ShellRoot {
                     }
                 }
 
-                // swipe-to-power/reboot: a vertical drag that starts on empty
-                // space (tile MouseAreas grab their own presses). Same
-                // scene-coords pattern as the notification swipe: the content
-                // moving under the cursor must not feed back into the drag.
-                // One signed delta drives both gestures: downward feeds
-                // powerRaw, upward feeds rebootRaw, the other stays at 0.
+                // swipe-to-power/reboot: an Android-notification-shade-style
+                // edge drag — before a prompt is armed, it only starts once
+                // the press begins inside the top or bottom
+                // win.edgeSwipeZone strip (tile MouseAreas grab their own
+                // presses regardless); enabled requires bgArea.edgePress
+                // (set by that MouseArea's onPressed, before any drag motion
+                // happens) so this DragHandler never even attempts to grab a
+                // non-edge vertical drag — it lives on the same Item as
+                // bgArea, so if it were always enabled it would win that
+                // grab race every time and bgArea's own vertTracking
+                // pageMove gesture would never see a move/release. Once a
+                // prompt IS armed, the edge requirement is dropped (any
+                // vertical drag anywhere continues to drive it — see the
+                // dragZone pin below) since bgArea's own tracking has
+                // already stood down for the same state (see promptOpen in
+                // its onPressed) and the whole screen belongs to the prompt.
+                // Same scene-coords pattern as the notification swipe: the
+                // content moving under the cursor must not feed back into
+                // the drag. Gated behind "power" (the feature itself).
                 DragHandler {
                     target: null
-                    enabled: root.gestureOn("power")
+                    enabled: root.gestureOn() && (bgArea.edgePress || win.powerArmed || win.rebootArmed)
                     xAxis.enabled: false
                     yAxis.enabled: true
                     onActiveChanged: {
                         if (active) {
-                            win.powerDragging = true;
-                            win.rebootDragging = true;
-                            win.dragGrabY = centroid.scenePosition.y - win.powerRaw + win.rebootRaw;
+                            const y = centroid.scenePosition.y;
+                            // an armed prompt pins the zone to itself
+                            // regardless of where on screen this drag
+                            // started — only an unarmed edge press still
+                            // needs to look at the touch position to decide
+                            // which prompt (if either) it's arming
+                            win.dragZone = win.powerArmed ? "top"
+                                : win.rebootArmed ? "bottom"
+                                : y < win.edgeSwipeZone ? "top"
+                                : y > win.revH - win.edgeSwipeZone ? "bottom" : "none";
+                            win.powerDragging = win.dragZone === "top";
+                            win.rebootDragging = win.dragZone === "bottom";
+                            win.dragGrabY = y - win.powerRaw + win.rebootRaw;
                         } else {
                             win.powerDragging = false;
                             win.rebootDragging = false;
@@ -3512,13 +3640,16 @@ ShellRoot {
                             } else {
                                 win.disarmReboot();
                             }
+                            win.dragZone = "none";
                         }
                     }
                     onCentroidChanged: {
-                        if (active) {
+                        if (active && win.dragZone !== "none") {
                             const delta = centroid.scenePosition.y - win.dragGrabY;
-                            win.powerRaw = Math.max(0, delta);
-                            win.rebootRaw = Math.max(0, -delta);
+                            if (win.dragZone === "top")
+                                win.powerRaw = Math.max(0, delta);
+                            else
+                                win.rebootRaw = Math.max(0, -delta);
                         }
                     }
                 }
@@ -4385,14 +4516,34 @@ ShellRoot {
                                 // mode gives the selected cell's stroke
                                 border.color: Qt.alpha(root.accent, 0.33 + 0.67 * wcCell.selFade)
                             }
-                            MouseArea {
-                                anchors.fill: parent
+                            // TapHandler (not a plain MouseArea) so a
+                            // completed swipe below doesn't also register
+                            // as a click — same tap-vs-drag split the
+                            // pages list's swipe-to-delete row uses.
+                            TapHandler {
                                 enabled: wcCell.wall !== null
-                                onClicked: {
+                                onTapped: {
                                     if (wcCell.isCenter)
                                         win.applyWallpaper(wcCell.wall);
                                     else
                                         win.moveCarousel(Math.round(wcCell.rank));
+                                }
+                            }
+                            // swiping the image itself scrolls the
+                            // carousel — same win.carouselFlick() the
+                            // background's carouselTracking gesture uses,
+                            // just fed straight from the drag instead of
+                            // reconstructed from press/release timestamps
+                            DragHandler {
+                                target: null
+                                yAxis.enabled: false
+                                enabled: wcCell.wall !== null && root.gestureOn()
+                                property real grabX: 0
+                                onActiveChanged: {
+                                    if (active)
+                                        grabX = centroid.scenePosition.x;
+                                    else
+                                        win.carouselFlick(centroid.scenePosition.x - grabX, centroid.velocity.x);
                                 }
                             }
                         }
@@ -6600,41 +6751,10 @@ ShellRoot {
                         }
                     }
 
-                    Item {
-                        width: 780
-                        height: 34 + gestureSub.implicitHeight + 2
-
-                        Item {
-                            id: gestureMain
-                            width: parent.width
-                            height: 34
-
-                            SLabel {
-                                anchors.left: parent.left
-                                text: "Gestures"
-                            }
-                            SReset {
-                                key: "gestures"
-                                anchors.right: parent.right
-                            }
-                            ChipRow {
-                                anchors.right: parent.right
-                                anchors.rightMargin: 34 + 32
-                                anchors.verticalCenter: parent.verticalCenter
-                                items: [
-                                    { id: "power", label: "power/reboot" },
-                                    { id: "panes", label: "pages" }
-                                ]
-                                isOn: root.gestureOn
-                                toggle: win.toggleGesture
-                            }
-                        }
-                        SSub {
-                            id: gestureSub
-                            anchors.top: gestureMain.bottom
-                            anchors.topMargin: 2
-                            text: "power/reboot: swipe up/down to arm the prompt · pages: swipe left/right to cycle panes/settings tabs"
-                        }
+                    SettingRow {
+                        key: "gestures"
+                        label: "Navigation gestures"
+                        sub: "swipe from the top/bottom edge to arm the power/reboot prompt (swipe again to confirm or dismiss it) · swipe left/right to cycle panes/settings tabs · swipe up/down to page through the current grid"
                     }
                 }
 
@@ -6717,9 +6837,17 @@ ShellRoot {
                 id: powerRing
                 visible: win.powerRaw > 1
                 anchors.horizontalCenter: parent.horizontalCenter
-                // the -200 rides in with the pull so the ring still enters
-                // from the top edge, just landing higher than the stock spot
-                y: -height + win.powerPull * 2.6 - 200 * win.powerProgress
+                // "lands higher than the stock *2.6 spot" used to be a
+                // separate `- 150 * powerProgress` term, but powerProgress
+                // is linear-then-hard-capped-at-1 while powerPull is a
+                // smooth exponential — subtracting one from the other left
+                // a kink right at the threshold (progress's contribution to
+                // the rate stops instantly, pull's doesn't), which read as
+                // the ring slowing then suddenly speeding back up. Scaling
+                // powerPull itself instead keeps the whole expression a
+                // single multiple of one smooth curve, so the rate can only
+                // ever shrink (resistance) and never kinks or reverses
+                y: -height + win.powerPull * (2.6 - 150 / 170)
                 width: 36
                 height: 36
                 opacity: Math.min(1, win.powerRaw / 80)
@@ -6808,7 +6936,9 @@ ShellRoot {
                 visible: win.rebootRaw > 1
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: -height + win.rebootPull * 2.6 - 200 * win.rebootProgress
+                // scaled powerPull-style, not a separate capped term — see
+                // the comment on powerRing's y above
+                anchors.bottomMargin: -height + win.rebootPull * (2.6 - 150 / 170)
                 width: 36
                 height: 36
                 opacity: Math.min(1, win.rebootRaw / 80)
@@ -6884,8 +7014,9 @@ ShellRoot {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 // trails above the ring by the same gap powerText trails
-                // below powerRing, mirrored around the bottom edge
-                anchors.bottomMargin: win.rebootPull * 2.6 - 200 * win.rebootProgress + 12
+                // below powerRing, mirrored around the bottom edge (scaled
+                // powerPull-style — see the comment on powerRing's y above)
+                anchors.bottomMargin: win.rebootPull * (2.6 - 150 / 170) + 12
                 text: "reboot?"
                 color: root.fg
                 opacity: win.rebootProgress >= 0.85 ? 1 : 0
@@ -6960,6 +7091,7 @@ ShellRoot {
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "launchAnimation": return cfg.launchAnimation;
             case "bgBlur": return cfg.bgBlur ? "on" : "off";
+            case "gestures": return cfg.gestures ? "on" : "off";
             case "hiddenMenuAnimations": return cfg.hiddenMenuAnimations ? "on" : "off";
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
@@ -7013,6 +7145,9 @@ ShellRoot {
             }
             case "bgBlur":
                 cfg.bgBlur = !cfg.bgBlur;
+                break;
+            case "gestures":
+                cfg.gestures = !cfg.gestures;
                 break;
             case "hiddenMenuAnimations":
                 cfg.hiddenMenuAnimations = !cfg.hiddenMenuAnimations;
@@ -7076,13 +7211,6 @@ ShellRoot {
             root.saveSettings();
         }
 
-        function toggleGesture(g: string) {
-            const ges = Object.assign({ power: true, panes: true }, cfg.gestures);
-            ges[g] = ges[g] === false;
-            cfg.gestures = ges;
-            root.saveSettings();
-        }
-
         function togglePage(p: string) {
             const pages = Object.assign({ clock: true, apps: true, walls: true, clips: true }, cfg.pages);
             // keep at least one page enabled overall (built-in or custom)
@@ -7121,7 +7249,7 @@ ShellRoot {
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
             case "bgBlur": cfg.bgBlur = true; break;
             case "hiddenMenuAnimations": cfg.hiddenMenuAnimations = true; break;
-            case "gestures": cfg.gestures = ({ power: true, panes: true }); break;
+            case "gestures": cfg.gestures = true; break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
             case "theme": cfg.theme = "matugen"; break;
