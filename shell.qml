@@ -6524,7 +6524,7 @@ ShellRoot {
                         const finalGap = 1.1;
                         const tail = -Math.PI / 2 + (finalGap / 2) * p;
                         const head = tail + (Math.PI * 2 - finalGap) * p;
-                        ctx.lineWidth = 3.6;
+                        ctx.lineWidth = 3.3;
                         ctx.lineCap = "butt";
                         ctx.strokeStyle = root.accent;
                         ctx.beginPath();
@@ -6541,7 +6541,7 @@ ShellRoot {
                         if (p > 2 / 3) {
                             const dashAngle = head + finalGap / 2;
                             const dx = Math.cos(dashAngle), dy = Math.sin(dashAngle);
-                            const dcx = cx + r * dx, dcy = cy + r * dy;
+                            const dcx = cx + (r - 2) * dx, dcy = cy + (r - 2) * dy;
                             const halfLen = (0.05 + 4.55 * (p - 2 / 3) / (1 / 3));
                             ctx.beginPath();
                             ctx.moveTo(dcx - dx * halfLen, dcy - dy * halfLen);
@@ -6601,7 +6601,7 @@ ShellRoot {
                         const tailFrac = Math.max(0, headFrac - maxArc);
                         const start = -Math.PI / 2 + Math.PI * 2 * tailFrac;
                         const end = -Math.PI / 2 + Math.PI * 2 * headFrac;
-                        ctx.lineWidth = 3.6;
+                        ctx.lineWidth = 3.3;
                         ctx.lineCap = "butt";
                         ctx.strokeStyle = root.accent;
                         ctx.beginPath();
