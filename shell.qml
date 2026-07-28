@@ -1094,10 +1094,10 @@ ShellRoot {
             // other apps' notifications show
             property var flyouts: ({ volume: true, notifs: true })
             // gates notify-send calls pibble sends on its own behalf, split
-            // by kind: errors (missing tools, failed commands), system
-            // (copy confirmations, custom page discovery, page trashed),
-            // battery (low battery warning)
-            property var pibbleAlerts: ({ errors: true, system: true, battery: true })
+            // by kind: errors (missing tools, failed commands), actions
+            // (copy confirmations, custom page discovery, page trashed,
+            // wallpaper changed), battery (low battery warning)
+            property var pibbleAlerts: ({ errors: true, actions: true, battery: true })
             property real volWidth: 420
             property string volAnim: "pop"
             // volume OSD content style: pill (a level bar) or sine (equalizer)
@@ -1341,7 +1341,7 @@ ShellRoot {
         case "list-add": return root.ti.plus;
         case "user-trash": return root.ti.trash;
         case "battery-low": return root.ti.batteryLow;
-        case "preferences-desktop-wallpaper": return root.ti.wallpaper;
+        case "preferences-desktop-wallpaper": return root.ti.wallpaperSlideshow;
         case "system-software-install": return root.ti.download;
         }
         const sl = summary.toLowerCase();
@@ -1349,6 +1349,12 @@ ShellRoot {
             return root.ti.alertTriangle;
         if (sl.includes("copied"))
             return root.ti.copy;
+        // wallpaper-changed rides a real thumbnail in image-path (see
+        // applyWallpaper), which clobbers -i's icon name the same way an
+        // image clip's "Copied to clipboard" does above — same keyword
+        // fallback instead of the exact-name switch case
+        if (sl.includes("wallpaper"))
+            return root.ti.wallpaperSlideshow;
         return root.ti.bell;
     }
 
@@ -1454,7 +1460,7 @@ ShellRoot {
         cloudStorm: "\uebdb", snowflake: "\ued5b", bolt: "\uea0b", check: "\ue5ca",
         settings: "\ue8b8", refresh: "\ue5d5", copy: "\ue14d", bell: "\ue7f4",
         alertTriangle: "\ue002", cornerDownLeft: "\ue31b",
-        wallpaper: "\ue1bc", plus: "\uf710", trash: "\ue872",
+        wallpaperSlideshow: "\uf672", plus: "\uf710", trash: "\ue872",
         batteryLow: "\uf251", download: "\ue171"
     })
 
@@ -1480,7 +1486,7 @@ ShellRoot {
     readonly property string clipWatcherFixCommand: "wl-paste --type text --watch cliphist store\nwl-paste --type image --watch cliphist store"
     function copyToClipboard(text: string): void {
         Quickshell.clipboardText = text;
-        if (alertOn("system"))
+        if (alertOn("actions"))
             Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text]);
     }
 
@@ -1578,6 +1584,14 @@ ShellRoot {
             const fly = Object.assign({}, cfg.flyouts);
             delete fly.alerts;
             cfg.flyouts = fly;
+            saveSettings();
+        }
+        // pibbleAlerts' "system" category renamed "actions"
+        if (cfg.pibbleAlerts && Object.prototype.hasOwnProperty.call(cfg.pibbleAlerts, "system")) {
+            const al = Object.assign({}, cfg.pibbleAlerts);
+            al.actions = al.system;
+            delete al.system;
+            cfg.pibbleAlerts = al;
             saveSettings();
         }
         // the old power/panes per-category gesture toggles collapsed back
@@ -1695,7 +1709,7 @@ ShellRoot {
         stdout: StdioCollector {
             onStreamFinished: {
                 Quickshell.clipboardText = text;
-                if (root.alertOn("system"))
+                if (root.alertOn("actions"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "edit-copy", "Copied to clipboard", text.slice(0, 4000)]);
             }
         }
@@ -2069,7 +2083,7 @@ ShellRoot {
                     // still exist on every later rescan.
                     const goodAdded = added.filter(u => !u.broken);
                     const brokenAdded = added.filter(u => u.broken);
-                    if (goodAdded.length && root.alertOn("system")) {
+                    if (goodAdded.length && root.alertOn("actions")) {
                         const body = goodAdded.length === 1
                             ? goodAdded[0].label + " - enable it in Settings > Pages"
                             : goodAdded.length + " new custom pages - enable them in Settings > Pages";
@@ -3144,6 +3158,12 @@ ShellRoot {
             cfg.currentWallpaper = wall.path;
             root.saveSettings();
             root.runMatugen();
+            // rich-media alert: image-path hint carries the already-generated
+            // thumbnail (see wallScan) so the flyout can show the wallpaper
+            // itself, not just its name
+            if (root.alertOn("actions"))
+                Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "preferences-desktop-wallpaper",
+                    "-h", "string:image-path:" + wall.thumb, "Wallpaper changed", wall.path.split("/").pop()]);
             // Runs the configurable command with $WALL and $BLUR exported.
             // The blurred variant is only ensured when the command actually
             // references $BLUR, so non-blur setups skip that work entirely.
@@ -3262,7 +3282,7 @@ ShellRoot {
                     cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
                 fi
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir,
-                clip.preview.slice(0, 60), root.alertOn("errors") ? "1" : "0", root.alertOn("system") ? "1" : "0"];
+                clip.preview.slice(0, 60), root.alertOn("errors") ? "1" : "0", root.alertOn("actions") ? "1" : "0"];
             clipCopy.running = true;
         }
         property string infoClipId: ""
@@ -4532,6 +4552,12 @@ ShellRoot {
                         // of snapping — see wallCell's isSelected boolean
                         // toggle above for how the static tiles grid does it
                         readonly property real selFade: Math.max(0, 1 - Math.abs(rank) * 2)
+                        // the carousel is already a horizontal strip, so
+                        // every style's entrance drift (win.animFromY) runs
+                        // along x here instead of the grids' vertical y —
+                        // same magnitude, just the other axis
+                        readonly property int springFromX: win.animFromY
+                        readonly property int springFromY: 0
                         // left-to-right visual slot, for the same wave/slide
                         // stagger the tile grids use (see win.animDelay)
                         readonly property int visSlot: Math.max(0, Math.min(wallCarousel.halfVisible * 2,
@@ -4602,6 +4628,7 @@ ShellRoot {
                                         // resting state, no animation
                                         wcWrap.opacity = 1;
                                         wcWrap.scale = 1;
+                                        wcWrap.x = 0;
                                         wcWrap.y = 0;
                                     } else {
                                         wcSpringIn.restart();
@@ -4616,7 +4643,14 @@ ShellRoot {
 
                         Item {
                             id: wcWrap
-                            anchors.fill: parent
+                            // fixed size matching the parent, not
+                            // anchors.fill: an anchor continuously
+                            // re-asserts x/y against the parent, silently
+                            // overriding the spring's writes below — same
+                            // reason wallWrap/clipTile size themselves this
+                            // way instead of anchoring
+                            width: parent.width
+                            height: parent.height
                             opacity: 0
 
                             // selected-tile ring from the tiles grid (see
@@ -4768,11 +4802,17 @@ ShellRoot {
                             id: wcSpringIn
                             PropertyAction { target: wcWrap; property: "opacity"; value: 0 }
                             PropertyAction { target: wcWrap; property: "scale"; value: win.animFromScale }
-                            PropertyAction { target: wcWrap; property: "y"; value: win.animFromY }
-                            PauseAnimation { duration: win.animDelay(wcCell.visSlot, wallCarousel.halfVisible * 2 + 1) }
+                            PropertyAction { target: wcWrap; property: "x"; value: wcCell.springFromX }
+                            PropertyAction { target: wcWrap; property: "y"; value: wcCell.springFromY }
+                            // cols: 1 — the carousel is a single strip, so
+                            // "slide"'s row-based stagger (Math.floor(slot /
+                            // cols) * 60) should treat each tile as its own
+                            // row instead of collapsing them all into row 0
+                            PauseAnimation { duration: win.animDelay(wcCell.visSlot, 1) }
                             ParallelAnimation {
                                 NumberAnimation { target: wcWrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                                 NumberAnimation { target: wcWrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
+                                NumberAnimation { target: wcWrap; property: "x"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
                                 NumberAnimation { target: wcWrap; property: "y"; to: 0; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
                             }
                         }
@@ -4797,7 +4837,14 @@ ShellRoot {
                     text: {
                         if (win.wallCarouselEmpty)
                             return "";
-                        const w = win.wallMatches[win.wallSelected];
+                        const count = win.wallMatches.length;
+                        if (count === 0)
+                            return "";
+                        // tracks the live drag position (wallCarouselAnim),
+                        // not just the last-committed wallSelected, so the
+                        // caption updates continuously while dragging
+                        const idx = ((Math.round(win.wallCarouselAnim) % count) + count) % count;
+                        const w = win.wallMatches[idx];
                         return w ? win.wallName(w) : "";
                     }
                     elide: Text.ElideRight
@@ -5887,7 +5934,7 @@ ShellRoot {
                             anchors.verticalCenter: parent.verticalCenter
                             items: [
                                 { id: "errors", label: "errors" },
-                                { id: "system", label: "system" },
+                                { id: "actions", label: "actions" },
                                 { id: "battery", label: "battery" }
                             ]
                             isOn: root.alertOn
@@ -6096,7 +6143,7 @@ ShellRoot {
                                     cfg.customPageData = all;
                                 }
                                 root.rescanUploadedPages();
-                                if (root.alertOn("system"))
+                                if (root.alertOn("actions"))
                                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "Page moved to trash", trashedLabel]);
                             }
                         }
@@ -7532,7 +7579,7 @@ ShellRoot {
         }
 
         function toggleAlert(a: string) {
-            const al = Object.assign({ errors: true, system: true, battery: true }, cfg.pibbleAlerts);
+            const al = Object.assign({ errors: true, actions: true, battery: true }, cfg.pibbleAlerts);
             al[a] = al[a] === false;
             cfg.pibbleAlerts = al;
             root.saveSettings();
@@ -7593,7 +7640,7 @@ ShellRoot {
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 420; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
-            case "pibbleAlerts": cfg.pibbleAlerts = ({ errors: true, system: true, battery: true }); break;
+            case "pibbleAlerts": cfg.pibbleAlerts = ({ errors: true, actions: true, battery: true }); break;
             case "volAnim": cfg.volAnim = "pop"; break;
             case "volStyle": cfg.volStyle = "sine"; break;
             case "volPercent": cfg.volShowPercent = true; break;
@@ -7621,10 +7668,22 @@ ShellRoot {
             opacity: 0
             focus: true
 
-            // typing from the clock jumps straight into the app search
+            // typing from the clock jumps into whatever's next in the cycle
+            // order; if that's a custom page (which has no search of its
+            // own), skip past it to the next built-in page instead
             onTextChanged: {
-                if (text.length > 0 && win.pane === "clock" && win.activePanes.includes("apps"))
-                    win.pane = "apps";
+                if (text.length > 0 && win.pane === "clock") {
+                    const core = ["clock", "apps", "walls", "clips"];
+                    const panes = win.activePanes;
+                    const i = panes.indexOf("clock");
+                    for (let step = 1; i >= 0 && step <= panes.length; step++) {
+                        const candidate = panes[(i + step) % panes.length];
+                        if (core.includes(candidate)) {
+                            win.pane = candidate;
+                            break;
+                        }
+                    }
+                }
                 if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
                     win.jumpWallCarousel();
             }
