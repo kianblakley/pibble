@@ -2919,7 +2919,12 @@ ShellRoot {
         // isCenter alone starts the (unpanned, fixed-crop) AnimatedImage
         // mid-slide, while the still frame beside it is still panning,
         // which reads as a jump. Wait for the slide to fully stop first.
-        readonly property bool wallCarouselSettled: !wallCarouselAnimAnim.running
+        // Also exclude an active drag: the Behavior above is disabled while
+        // dragging (so wallCarouselAnimAnim.running is false throughout),
+        // but the strip is still moving frame-to-frame with the finger, so
+        // without this the gif would start/stop every time a back-and-forth
+        // drag crossed center.
+        readonly property bool wallCarouselSettled: !wallCarouselAnimAnim.running && !wallCarouselDragging
         function moveCarousel(dir: int) {
             const count = wallMatches.length;
             if (!count)
