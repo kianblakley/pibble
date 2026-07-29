@@ -1060,6 +1060,10 @@ ShellRoot {
             // the horizontal carousel (see wallCarousel), the latter with
             // the backdrop parallax pan disabled
             property string wallpaperStyle: "tiles"
+            // gap between carousel tiles, added on top of barWidth to get
+            // wallCarousel.slotSpacing — user adjustable via the slider on
+            // the walls page itself
+            property int wallTileGap: 35
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -1574,6 +1578,10 @@ ShellRoot {
         }
         if (!["tiles", "carousel", "carousel-flat"].includes(cfg.wallpaperStyle)) {
             cfg.wallpaperStyle = "tiles";
+            saveSettings();
+        }
+        if (cfg.wallTileGap < 0 || cfg.wallTileGap > 120) {
+            cfg.wallTileGap = Math.max(0, Math.min(120, cfg.wallTileGap));
             saveSettings();
         }
         // the single "alerts" flyout checkbox split into per-category
@@ -4509,7 +4517,7 @@ ShellRoot {
                 })
                 readonly property int barWidth: 220
                 readonly property int barHeight: 440
-                readonly property int slotSpacing: 255
+                readonly property int slotSpacing: barWidth + cfg.wallTileGap
                 readonly property real parallaxPx: cfg.wallpaperStyle === "carousel-flat" ? 0 : 75
                 readonly property int captionGap: 14
                 // wcCell's per-rank shrink (see its scale property): floor
@@ -4901,6 +4909,86 @@ ShellRoot {
                     horizontalAlignment: Text.AlignHCenter
                     color: root.fg
                     font { family: root.mono; pixelSize: root.fs(13) }
+                }
+            }
+
+            // Carousel tile gap control — a slider so the spacing between
+            // tiles can be dialed in by eye against the carousel right above
+            // it. Mirrors wallCarousel's own visibility/fade rather than
+            // animating independently, so it appears/disappears in lockstep
+            // with it.
+            Row {
+                id: wallGapControl
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 64
+                spacing: 12
+                transform: panePull
+                opacity: wallCarousel.opacity
+                visible: wallCarousel.visible
+
+                Item {
+                    id: gapSlider
+                    width: 220
+                    height: 40
+                    readonly property real frac: Math.max(0, Math.min(1, cfg.wallTileGap / 120))
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        text: "Tile gap  " + cfg.wallTileGap + " px"
+                        color: root.fg
+                        font { family: root.mono; pixelSize: root.fs(12) }
+                    }
+
+                    Item {
+                        id: gapTrack
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 18
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width
+                            height: 4
+                            radius: 2
+                            color: Qt.alpha(root.muted, 0.25)
+                        }
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            width: parent.width * gapSlider.frac
+                            height: 4
+                            radius: 2
+                            color: root.accent
+                        }
+                        Rectangle {
+                            width: 14
+                            height: 14
+                            radius: 7
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: parent.width * gapSlider.frac - width / 2
+                            color: root.accent
+                            border.width: 2
+                            border.color: "#ffffff"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            preventStealing: true
+                            function apply(mx: real) {
+                                const f = Math.max(0, Math.min(1, mx / width));
+                                cfg.wallTileGap = Math.round(f * 120);
+                            }
+                            onPressed: mouse => apply(mouse.x)
+                            onPositionChanged: mouse => { if (pressed) apply(mouse.x); }
+                            onReleased: root.saveSettings()
+                        }
+                    }
+                }
+                SReset {
+                    key: "wallTileGap"
                 }
             }
 
@@ -7700,6 +7788,7 @@ ShellRoot {
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
             case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
+            case "wallTileGap": cfg.wallTileGap = 35; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
