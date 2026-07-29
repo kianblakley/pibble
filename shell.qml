@@ -4512,7 +4512,41 @@ ShellRoot {
                 readonly property int slotSpacing: 255
                 readonly property real parallaxPx: cfg.wallpaperStyle === "carousel-flat" ? 0 : 75
                 readonly property int captionGap: 14
-                width: (2 * halfVisible + 1) * slotSpacing
+                // wcCell's per-rank shrink (see its scale property): floor
+                // is the minimum scale a cell can shrink to, rate is the
+                // falloff per step of |rank|.
+                readonly property real edgeFloor: 0.7
+                readonly property real edgeRate: 0.07
+                // |rank| at which the falloff above hits edgeFloor and goes
+                // constant — the boundary between the two edgeOffset
+                // branches below.
+                readonly property real edgeBreak: (1 - edgeFloor) / edgeRate
+                // constant per-step position delta once cells are past
+                // edgeBreak (both neighbors' scale stuck at the same floor,
+                // so the compensation needed per step stops changing)
+                readonly property real edgeClampedStep: slotSpacing - barWidth * (1 - edgeFloor)
+                // Magnitude of a cell's x offset from center, as a function
+                // of |rank| (m). Plain `m * slotSpacing` (rank-linear
+                // spacing) is what scale shrinking around each cell's own
+                // center visibly opens up into growing gaps — every step a
+                // cell's near edge retreats by half its own shrink *and*
+                // its neighbor's, while the two centers stay slotSpacing
+                // apart regardless of scale. This is the closed form of
+                // "each step's cell-to-cell gap stays exactly slotSpacing -
+                // barWidth, the scale=1 gap" — solved by requiring
+                // edgeOffset(m+1) - edgeOffset(m) == slotSpacing -
+                // barWidth*(scale(m) + scale(m+1))/1 for every real m (not
+                // just integers, since a slide's rank is continuous and
+                // neighboring cells are always exactly 1 apart). That's a
+                // quadratic in the unclamped region (scale linear in m) and
+                // linear beyond edgeBreak (scale pinned to edgeFloor).
+                function edgeOffset(m: real): real {
+                    if (m <= edgeBreak)
+                        return slotSpacing * m - (barWidth * edgeRate / 2) * m * m;
+                    const atBreak = slotSpacing * edgeBreak - (barWidth * edgeRate / 2) * edgeBreak * edgeBreak;
+                    return atBreak + edgeClampedStep * (m - edgeBreak);
+                }
+                width: 2 * edgeOffset(halfVisible) + barWidth
                 height: barHeight + captionGap + 22
                 transform: panePull
                 opacity: 0.004
@@ -4594,7 +4628,15 @@ ShellRoot {
                             }
                         }
 
-                        x: parent.width / 2 - width / 2 + rank * wallCarousel.slotSpacing
+                        // sign-aware, not rank*slotSpacing: a plain linear
+                        // step is what the scale shrink below visibly opens
+                        // into growing gaps (each cell shrinks around its
+                        // own center while consecutive centers stay a fixed
+                        // slotSpacing apart). edgeOffset's magnitude is
+                        // solved so cell-to-cell gaps stay exactly
+                        // slotSpacing - barWidth (the scale=1 gap) at every
+                        // rank, not just growing ones.
+                        x: parent.width / 2 - width / 2 + Math.sign(rank) * wallCarousel.edgeOffset(Math.abs(rank))
                         y: 0
                         width: wallCarousel.barWidth
                         height: wallCarousel.barHeight
@@ -4604,13 +4646,8 @@ ShellRoot {
                         // the moment rank crosses 0.5. Uniform (not a
                         // separate x/y scale): scaling width and height
                         // unevenly would stretch/squash the already-cropped
-                        // image inside, not just resize its frame. 0.06 is
-                        // the original 0.05 falloff plus a 1% edge-narrow on
-                        // top, folded into one rate. Floor lowered from the
-                        // original 0.82 to 0.7 so the two outermost visible
-                        // cells (rank 3 and 4, at wallsVisible's default of
-                        // 9) don't both clamp to the same size.
-                        scale: Math.max(0.7, 1 - Math.abs(rank) * 0.06)
+                        // image inside, not just resize its frame.
+                        scale: Math.max(wallCarousel.edgeFloor, 1 - Math.abs(rank) * wallCarousel.edgeRate)
                         // No wall===null cut here (unlike the plain
                         // opacity/rank cull below): a cell losing its wall
                         // (query no longer matches, list emptied) still needs
