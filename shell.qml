@@ -1140,15 +1140,15 @@ ShellRoot {
             // the backdrop parallax pan disabled
             property string wallpaperStyle: "tiles"
             // carousel tile size (see wallCarousel.barWidth/barHeight), user
-            // adjustable via the sliders on the walls page itself
+            // adjustable via the size presets on the walls page itself
             property int wallTileWidth: 205
             property int wallTileHeight: 440
-            // scales the carousel's images within their tile — 1.0 is the
-            // normal fully-cropped fit, higher zooms in, lower shrinks the
-            // image away from the tile edges (revealing the tile's
-            // background fill, since there's no extra source image to
-            // reveal by zooming out past a full crop)
-            property real wallZoom: 1.0
+            // extra height-only squeeze applied to carousel cells as they
+            // near the edges, on top of the fixed width/height shrink every
+            // cell already gets from |rank| (see wcCell's baseScale) — 0 is
+            // that existing look unchanged, higher tapers side cells shorter
+            // without also narrowing them
+            property real wallEdgeNarrow: 0
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -1673,8 +1673,8 @@ ShellRoot {
             cfg.wallTileHeight = Math.max(240, Math.min(560, cfg.wallTileHeight));
             saveSettings();
         }
-        if (cfg.wallZoom < 0.5 || cfg.wallZoom > 2) {
-            cfg.wallZoom = Math.max(0.5, Math.min(2, cfg.wallZoom));
+        if (cfg.wallEdgeNarrow < 0 || cfg.wallEdgeNarrow > 0.6) {
+            cfg.wallEdgeNarrow = Math.max(0, Math.min(0.6, cfg.wallEdgeNarrow));
             saveSettings();
         }
         // the single "alerts" flyout checkbox split into per-category
@@ -4706,7 +4706,19 @@ ShellRoot {
                         // continuous in rank (exactly 1 at rank 0) — an
                         // isCenter branch here would snap scale mid-slide
                         // the moment rank crosses 0.5
-                        scale: Math.max(0.82, 1 - Math.abs(rank) * 0.05)
+                        readonly property real baseScale: Math.max(0.82, 1 - Math.abs(rank) * 0.05)
+                        // split into an explicit x/y Scale (rather than the
+                        // plain uniform `scale` property) so wallEdgeNarrow
+                        // can squeeze height harder than width near the
+                        // edges instead of shrinking the whole cell equally;
+                        // at 0 (the default) yScale === xScale, identical to
+                        // the old uniform behavior
+                        transform: Scale {
+                            origin.x: wcCell.width / 2
+                            origin.y: wcCell.height / 2
+                            xScale: wcCell.baseScale
+                            yScale: wcCell.baseScale * Math.max(0.4, 1 - Math.abs(wcCell.rank) * cfg.wallEdgeNarrow)
+                        }
                         // No wall===null cut here (unlike the plain
                         // opacity/rank cull below): a cell losing its wall
                         // (query no longer matches, list emptied) still needs
@@ -4809,10 +4821,6 @@ ShellRoot {
                                     height: parent.height
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: (parent.width - width) / 2 - wcCell.rank * wallCarousel.parallaxPx
-                                    // zooms in place around the item's own center
-                                    // (the default transformOrigin); wcThumb's
-                                    // ClippingRectangle crops the overscan
-                                    scale: cfg.wallZoom
                                     // hidden once the centered gif takes over below,
                                     // so its still frame doesn't show through at
                                     // slightly different crop/pan geometry
@@ -4822,22 +4830,19 @@ ShellRoot {
                                     // decode at the box's actual rendered size
                                     // (not just barHeight): this box is wider
                                     // than the tile for the pan buffer, and
-                                    // scale above enlarges it further at zoom
-                                    // >1 — sizing the decode to only barHeight
-                                    // left PreserveAspectCrop upscaling a
-                                    // too-small pixmap to cover the rest,
-                                    // which read as blur/pixelation once tiles
-                                    // got bigger or zoom went up
-                                    sourceSize: Qt.size(wcStill.width * cfg.wallZoom, wcStill.height * cfg.wallZoom)
+                                    // sizing the decode to only barHeight left
+                                    // PreserveAspectCrop upscaling a too-small
+                                    // pixmap to cover the rest, which read as
+                                    // blur/pixelation once tiles got bigger
+                                    sourceSize: Qt.size(wcStill.width, wcStill.height)
                                     // full-res source, not the 480x270 grid
                                     // thumb: that's cropped tight to a
                                     // landscape frame with no spare width to
-                                    // pan through and nowhere near enough
-                                    // resolution once zoomed in — the
-                                    // sourceSize hint above already keeps the
-                                    // decode itself bounded to what this box
-                                    // actually needs, so there's no separate
-                                    // cache to generate/invalidate.
+                                    // pan through — the sourceSize hint above
+                                    // already keeps the decode itself bounded
+                                    // to what this box actually needs, so
+                                    // there's no separate cache to
+                                    // generate/invalidate.
                                     // shownWall, not wall: wall goes null the instant
                                     // the cell is filtered/emptied out, but the exit
                                     // spring below still needs something to fade —
@@ -4862,7 +4867,6 @@ ShellRoot {
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
                                     anchors.centerIn: parent
-                                    scale: cfg.wallZoom
                                     visible: wcThumb.animating
                                     playing: wcThumb.animating
                                     asynchronous: true
@@ -4982,11 +4986,11 @@ ShellRoot {
                 }
             }
 
-            // Carousel tile size controls — a handful of presets picked by
-            // eye against the carousel right above them, rather than a
-            // continuous slider. Mirrors wallCarousel's own visibility/fade
-            // rather than animating independently, so it appears/disappears
-            // in lockstep with it.
+            // Carousel appearance controls — tile size presets and the edge
+            // taper slider, dialed in by eye against the carousel right
+            // above them. Mirrors wallCarousel's own visibility/fade rather
+            // than animating independently, so it appears/disappears in
+            // lockstep with it.
             Row {
                 id: wallSizeControls
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -5033,17 +5037,17 @@ ShellRoot {
                     }
                 }
                 TileSizeSlider {
-                    label: "Zoom"
-                    value: cfg.wallZoom
-                    min: 0.5
-                    max: 2
-                    step: 0.05
+                    label: "Edge narrow"
+                    value: cfg.wallEdgeNarrow
+                    min: 0
+                    max: 0.6
+                    step: 0.02
                     displayScale: 100
                     unit: "%"
-                    onMoved: v => cfg.wallZoom = v
+                    onMoved: v => cfg.wallEdgeNarrow = v
                 }
                 SReset {
-                    key: "wallZoom"
+                    key: "wallEdgeNarrow"
                 }
             }
 
@@ -7843,7 +7847,7 @@ ShellRoot {
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
             case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
-            case "wallZoom": cfg.wallZoom = 1.0; break;
+            case "wallEdgeNarrow": cfg.wallEdgeNarrow = 0; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
