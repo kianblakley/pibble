@@ -2000,13 +2000,12 @@ ShellRoot {
                 # blurred; the source itself is still played back untouched
                 oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                 key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
-                thumb="$PWD/$f" carousel="$PWD/$f" blur=""
+                thumb="$PWD/$f" blur=""
                 # only trust caches newer than the source image
                 [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$oext"
-                [ "$cachedir/carousel/$key.$oext" -nt "$f" ] && carousel="$cachedir/carousel/$key.$oext"
                 [ "$cachedir/blurred/$key.$oext" -nt "$f" ] && blur="$cachedir/blurred/$key.$oext"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
-                printf '%s|%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur" "$carousel"
+                printf '%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur"
             done | sort`, "_", root.wallDir, root.wallCacheDir]
         stdout: StdioCollector {
             onStreamFinished: {
@@ -2021,7 +2020,7 @@ ShellRoot {
                 root.lastMissingDir = "";
                 const walls = text.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
-                    return { path: p[0], thumb: p[1], blur: p[2] || "", carousel: p[3] || p[0], gif: /\.gif$/i.test(p[0]) };
+                    return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]) };
                 });
                 root.wallpapers = walls;
                 // Generate missing thumbnails (a full 5K image standing in as
@@ -2034,7 +2033,7 @@ ShellRoot {
                 const wantBlur = cfg.wallCommand.includes("$BLUR");
                 Quickshell.execDetached(["bash", "-c", `
                     walldir="$1" cachedir="$2" gb="$3" alerts="$4"; shift 4
-                    mkdir -p "$cachedir/thumbnails" "$cachedir/blurred" "$cachedir/carousel"
+                    mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
                     warned=0
                     live=""
                     for f in "$@"; do
@@ -2044,13 +2043,12 @@ ShellRoot {
                         oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                         key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
                         live="$live $key"
-                        needthumb=0 needcarousel=0 needblur=0
+                        needthumb=0 needblur=0
                         [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] || needthumb=1
-                        [ "$cachedir/carousel/$key.$oext" -nt "$f" ] || needcarousel=1
                         if [ "$gb" = "1" ]; then
                             [ "$cachedir/blurred/$key.$oext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
-                        if [ "$needthumb" = "1" ] || [ "$needcarousel" = "1" ] || [ "$needblur" = "1" ]; then
+                        if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
                             if ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
@@ -2059,24 +2057,14 @@ ShellRoot {
                             else
                                 # "$f[0]": first frame only, so an animated
                                 # .gif source still yields a static
-                                # thumbnail/blur/carousel frame (only the
-                                # selected/centered tile/window plays the
-                                # source file itself)
+                                # thumbnail/blur (only the selected/centered
+                                # tile/window plays the source file itself)
                                 [ "$needthumb" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$oext"
-                                # bounding box, not a hard crop: the carousel's
-                                # tile aspect is user-adjustable (width/height/
-                                # zoom sliders), so this just needs to stay
-                                # ahead of the largest on-screen render without
-                                # hardcoding one aspect — PreserveAspectCrop at
-                                # display time does the actual framing. ">"
-                                # skips upscaling sources already smaller than
-                                # the cap.
-                                [ "$needcarousel" = "1" ] && magick "$f[0]" -resize '1600x1600>' "$cachedir/carousel/$key.$oext"
                                 [ "$needblur" = "1" ] && magick "$f[0]" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$oext"
                             fi
                         fi
                     done
-                    for d in "$cachedir/thumbnails" "$cachedir/blurred" "$cachedir/carousel"; do
+                    for d in "$cachedir/thumbnails" "$cachedir/blurred"; do
                         for c in "$d"/*; do
                             [ -e "$c" ] || continue
                             k=$(basename "$c"); k="\${k%.*}"
@@ -4841,23 +4829,21 @@ ShellRoot {
                                     // which read as blur/pixelation once tiles
                                     // got bigger or zoom went up
                                     sourceSize: Qt.size(wcStill.width * cfg.wallZoom, wcStill.height * cfg.wallZoom)
-                                    // the carousel field is a dedicated cache
-                                    // (see wallScan/rescanWallpapers), sized
-                                    // generously for this box across the tile
-                                    // size/zoom ranges but far smaller than an
-                                    // original file might be — falls back to
-                                    // the raw path until the background scan
-                                    // generates it. Not the 480x270 grid
+                                    // full-res source, not the 480x270 grid
                                     // thumb: that's cropped tight to a
                                     // landscape frame with no spare width to
                                     // pan through and nowhere near enough
-                                    // resolution once zoomed in.
+                                    // resolution once zoomed in — the
+                                    // sourceSize hint above already keeps the
+                                    // decode itself bounded to what this box
+                                    // actually needs, so there's no separate
+                                    // cache to generate/invalidate.
                                     // shownWall, not wall: wall goes null the instant
                                     // the cell is filtered/emptied out, but the exit
                                     // spring below still needs something to fade —
                                     // shownWall keeps the last-rendered wallpaper
                                     // until a new one replaces it (see onWallChanged)
-                                    source: wcCell.shownWall ? "file://" + wcCell.shownWall.carousel : ""
+                                    source: wcCell.shownWall ? "file://" + wcCell.shownWall.path : ""
                                 }
                                 // Only the centered window plays its .gif from the
                                 // source file; side windows keep the still Image
@@ -4996,34 +4982,55 @@ ShellRoot {
                 }
             }
 
-            // Carousel tile size controls — live sliders so the width/height
-            // can be dialed in by eye against the carousel right above them,
-            // rather than guessing numbers in the settings pane. Mirrors
-            // wallCarousel's own visibility/fade rather than animating
-            // independently, so it appears/disappears in lockstep with it.
+            // Carousel tile size controls — a handful of presets picked by
+            // eye against the carousel right above them, rather than a
+            // continuous slider. Mirrors wallCarousel's own visibility/fade
+            // rather than animating independently, so it appears/disappears
+            // in lockstep with it.
             Row {
-                id: wallSizeSliders
+                id: wallSizeControls
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 64
-                spacing: 40
+                spacing: 12
                 transform: panePull
                 opacity: wallCarousel.opacity
                 visible: wallCarousel.visible
 
-                TileSizeSlider {
-                    label: "Tile width"
-                    value: cfg.wallTileWidth
-                    min: 120
-                    max: 320
-                    onMoved: v => cfg.wallTileWidth = v
-                }
-                TileSizeSlider {
-                    label: "Tile height"
-                    value: cfg.wallTileHeight
-                    min: 240
-                    max: 560
-                    onMoved: v => cfg.wallTileHeight = v
+                Repeater {
+                    model: [
+                        { w: 200, h: 400, label: "200 × 400" },
+                        { w: 220, h: 440, label: "220 × 440" },
+                        { w: 205, h: 440, label: "Default" }
+                    ]
+
+                    Rectangle {
+                        id: sizeBtn
+                        required property var modelData
+                        readonly property bool active: cfg.wallTileWidth === modelData.w && cfg.wallTileHeight === modelData.h
+                        width: 100
+                        height: 34
+                        radius: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Qt.alpha(root.accent, sizeBtn.active ? 0.22 : 0.08)
+                        border.width: sizeBtn.active ? 2 : 1
+                        border.color: sizeBtn.active ? root.accent : Qt.alpha(root.accent, 0.3)
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: sizeBtn.modelData.label
+                            color: sizeBtn.active ? root.fg : root.muted
+                            font { family: root.mono; pixelSize: root.fs(12) }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                cfg.wallTileWidth = sizeBtn.modelData.w;
+                                cfg.wallTileHeight = sizeBtn.modelData.h;
+                                root.saveSettings();
+                            }
+                        }
+                    }
                 }
                 TileSizeSlider {
                     label: "Zoom"
@@ -5036,7 +5043,7 @@ ShellRoot {
                     onMoved: v => cfg.wallZoom = v
                 }
                 SReset {
-                    key: "wallTileSize"
+                    key: "wallZoom"
                 }
             }
 
@@ -7836,7 +7843,7 @@ ShellRoot {
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
             case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
-            case "wallTileSize": cfg.wallTileWidth = 205; cfg.wallTileHeight = 440; cfg.wallZoom = 1.0; break;
+            case "wallZoom": cfg.wallZoom = 1.0; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
