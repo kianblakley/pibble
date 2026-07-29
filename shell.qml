@@ -980,85 +980,6 @@ ShellRoot {
         }
     }
 
-    // drag-to-set slider, e.g. the carousel tile size controls on the walls
-    // page itself (see wallSizeSliders) — value/min/max in the same units
-    // moved(v) reports back
-    component TileSizeSlider: Item {
-        id: tss
-        property string label: ""
-        property real value: 0
-        property real min: 0
-        property real max: 1
-        // granularity moved(v) snaps to, in value's own units (e.g. 1 for
-        // whole pixels, 0.05 for 5%-of-scale steps)
-        property real step: 1
-        // display-only: value is multiplied by this and suffixed with unit,
-        // so a 1.0-2.0 zoom factor can read as "100%"-"200%" while the
-        // underlying value/min/max/step stay in plain scale units
-        property real displayScale: 1
-        property string unit: " px"
-        signal moved(real v)
-        width: 220
-        height: 40
-        readonly property real frac: tss.max > tss.min
-            ? Math.max(0, Math.min(1, (tss.value - tss.min) / (tss.max - tss.min))) : 0
-
-        Text {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            text: tss.label + "  " + Math.round(tss.value * tss.displayScale) + tss.unit
-            color: root.fg
-            font { family: root.mono; pixelSize: root.fs(12) }
-        }
-
-        Item {
-            id: tssTrack
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 18
-
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width
-                height: 4
-                radius: 2
-                color: Qt.alpha(root.muted, 0.25)
-            }
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                width: parent.width * tss.frac
-                height: 4
-                radius: 2
-                color: root.accent
-            }
-            Rectangle {
-                width: 14
-                height: 14
-                radius: 7
-                anchors.verticalCenter: parent.verticalCenter
-                x: parent.width * tss.frac - width / 2
-                color: root.accent
-                border.width: 2
-                border.color: "#ffffff"
-            }
-            MouseArea {
-                anchors.fill: parent
-                preventStealing: true
-                function apply(mx: real) {
-                    const f = Math.max(0, Math.min(1, mx / width));
-                    const raw = tss.min + f * (tss.max - tss.min);
-                    tss.moved(Math.round(raw / tss.step) * tss.step);
-                }
-                onPressed: mouse => apply(mouse.x)
-                onPositionChanged: mouse => { if (pressed) apply(mouse.x); }
-                onReleased: root.saveSettings()
-            }
-        }
-    }
-
     // ---------- settings ----------
     FileView {
         id: settingsStore
@@ -1139,16 +1060,6 @@ ShellRoot {
             // the horizontal carousel (see wallCarousel), the latter with
             // the backdrop parallax pan disabled
             property string wallpaperStyle: "tiles"
-            // carousel tile size (see wallCarousel.barWidth/barHeight), user
-            // adjustable via the size presets on the walls page itself
-            property int wallTileWidth: 205
-            property int wallTileHeight: 440
-            // extra height-only squeeze applied to carousel cells as they
-            // near the edges, on top of the fixed width/height shrink every
-            // cell already gets from |rank| (see wcCell's baseScale) — 0 is
-            // that existing look unchanged, higher tapers side cells shorter
-            // without also narrowing them
-            property real wallEdgeNarrow: 0
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -1663,18 +1574,6 @@ ShellRoot {
         }
         if (!["tiles", "carousel", "carousel-flat"].includes(cfg.wallpaperStyle)) {
             cfg.wallpaperStyle = "tiles";
-            saveSettings();
-        }
-        if (cfg.wallTileWidth < 120 || cfg.wallTileWidth > 320) {
-            cfg.wallTileWidth = Math.max(120, Math.min(320, cfg.wallTileWidth));
-            saveSettings();
-        }
-        if (cfg.wallTileHeight < 240 || cfg.wallTileHeight > 560) {
-            cfg.wallTileHeight = Math.max(240, Math.min(560, cfg.wallTileHeight));
-            saveSettings();
-        }
-        if (cfg.wallEdgeNarrow < 0 || cfg.wallEdgeNarrow > 0.6) {
-            cfg.wallEdgeNarrow = Math.max(0, Math.min(0.6, cfg.wallEdgeNarrow));
             saveSettings();
         }
         // the single "alerts" flyout checkbox split into per-category
@@ -4608,12 +4507,9 @@ ShellRoot {
                             c.absStep = win.wallSelected + i - restSpan;
                     }
                 })
-                readonly property int barWidth: cfg.wallTileWidth
-                readonly property int barHeight: cfg.wallTileHeight
-                // gap between tiles stays constant as barWidth changes, so
-                // widening/narrowing the slider doesn't also crowd or
-                // over-space the strip
-                readonly property int slotSpacing: barWidth + 35
+                readonly property int barWidth: 220
+                readonly property int barHeight: 440
+                readonly property int slotSpacing: 255
                 readonly property real parallaxPx: cfg.wallpaperStyle === "carousel-flat" ? 0 : 75
                 readonly property int captionGap: 14
                 width: (2 * halfVisible + 1) * slotSpacing
@@ -4705,20 +4601,16 @@ ShellRoot {
                         z: -Math.abs(rank)
                         // continuous in rank (exactly 1 at rank 0) — an
                         // isCenter branch here would snap scale mid-slide
-                        // the moment rank crosses 0.5
-                        readonly property real baseScale: Math.max(0.82, 1 - Math.abs(rank) * 0.05)
-                        // split into an explicit x/y Scale (rather than the
-                        // plain uniform `scale` property) so wallEdgeNarrow
-                        // can squeeze height harder than width near the
-                        // edges instead of shrinking the whole cell equally;
-                        // at 0 (the default) yScale === xScale, identical to
-                        // the old uniform behavior
-                        transform: Scale {
-                            origin.x: wcCell.width / 2
-                            origin.y: wcCell.height / 2
-                            xScale: wcCell.baseScale
-                            yScale: wcCell.baseScale * Math.max(0.4, 1 - Math.abs(wcCell.rank) * cfg.wallEdgeNarrow)
-                        }
+                        // the moment rank crosses 0.5. Uniform (not a
+                        // separate x/y scale): scaling width and height
+                        // unevenly would stretch/squash the already-cropped
+                        // image inside, not just resize its frame. 0.06 is
+                        // the original 0.05 falloff plus a 1% edge-narrow on
+                        // top, folded into one rate. Floor lowered from the
+                        // original 0.82 to 0.7 so the two outermost visible
+                        // cells (rank 3 and 4, at wallsVisible's default of
+                        // 9) don't both clamp to the same size.
+                        scale: Math.max(0.7, 1 - Math.abs(rank) * 0.06)
                         // No wall===null cut here (unlike the plain
                         // opacity/rank cull below): a cell losing its wall
                         // (query no longer matches, list emptied) still needs
@@ -4804,7 +4696,6 @@ ShellRoot {
                                 color: Qt.alpha(root.accent, 0.08 + 0.08 * wcCell.selFade)
 
                                 Image {
-                                    id: wcStill
                                     // wider than the bar and panned opposite the
                                     // scroll direction, so each window reads as
                                     // a fixed frame onto a slowly-drifting
@@ -4816,7 +4707,12 @@ ShellRoot {
                                     // wide enough to cover the whole fade range
                                     // (|rank| <= halfVisible + 1; past that the
                                     // cell is fully transparent, so further
-                                    // overshoot is invisible).
+                                    // overshoot is invisible). The full-res
+                                    // source (not the 480x270 tile thumbnail,
+                                    // which is already cropped tight to a
+                                    // landscape frame and has no spare width to
+                                    // pan through) decoded at bar height keeps
+                                    // the pan free of seams.
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
                                     anchors.verticalCenter: parent.verticalCenter
@@ -4827,22 +4723,7 @@ ShellRoot {
                                     visible: !wcThumb.animating
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
-                                    // decode at the box's actual rendered size
-                                    // (not just barHeight): this box is wider
-                                    // than the tile for the pan buffer, and
-                                    // sizing the decode to only barHeight left
-                                    // PreserveAspectCrop upscaling a too-small
-                                    // pixmap to cover the rest, which read as
-                                    // blur/pixelation once tiles got bigger
-                                    sourceSize: Qt.size(wcStill.width, wcStill.height)
-                                    // full-res source, not the 480x270 grid
-                                    // thumb: that's cropped tight to a
-                                    // landscape frame with no spare width to
-                                    // pan through — the sourceSize hint above
-                                    // already keeps the decode itself bounded
-                                    // to what this box actually needs, so
-                                    // there's no separate cache to
-                                    // generate/invalidate.
+                                    sourceSize: Qt.size(0, wallCarousel.barHeight)
                                     // shownWall, not wall: wall goes null the instant
                                     // the cell is filtered/emptied out, but the exit
                                     // spring below still needs something to fade —
@@ -4983,71 +4864,6 @@ ShellRoot {
                     horizontalAlignment: Text.AlignHCenter
                     color: root.fg
                     font { family: root.mono; pixelSize: root.fs(13) }
-                }
-            }
-
-            // Carousel appearance controls — tile size presets and the edge
-            // taper slider, dialed in by eye against the carousel right
-            // above them. Mirrors wallCarousel's own visibility/fade rather
-            // than animating independently, so it appears/disappears in
-            // lockstep with it.
-            Row {
-                id: wallSizeControls
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 64
-                spacing: 12
-                transform: panePull
-                opacity: wallCarousel.opacity
-                visible: wallCarousel.visible
-
-                Repeater {
-                    model: [
-                        { w: 200, h: 400, label: "200 × 400" },
-                        { w: 220, h: 440, label: "220 × 440" },
-                        { w: 205, h: 440, label: "Default" }
-                    ]
-
-                    Rectangle {
-                        id: sizeBtn
-                        required property var modelData
-                        readonly property bool active: cfg.wallTileWidth === modelData.w && cfg.wallTileHeight === modelData.h
-                        width: 100
-                        height: 34
-                        radius: 8
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.alpha(root.accent, sizeBtn.active ? 0.22 : 0.08)
-                        border.width: sizeBtn.active ? 2 : 1
-                        border.color: sizeBtn.active ? root.accent : Qt.alpha(root.accent, 0.3)
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: sizeBtn.modelData.label
-                            color: sizeBtn.active ? root.fg : root.muted
-                            font { family: root.mono; pixelSize: root.fs(12) }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                cfg.wallTileWidth = sizeBtn.modelData.w;
-                                cfg.wallTileHeight = sizeBtn.modelData.h;
-                                root.saveSettings();
-                            }
-                        }
-                    }
-                }
-                TileSizeSlider {
-                    label: "Edge narrow"
-                    value: cfg.wallEdgeNarrow
-                    min: 0
-                    max: 0.6
-                    step: 0.02
-                    displayScale: 100
-                    unit: "%"
-                    onMoved: v => cfg.wallEdgeNarrow = v
-                }
-                SReset {
-                    key: "wallEdgeNarrow"
                 }
             }
 
@@ -7847,7 +7663,6 @@ ShellRoot {
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
             case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
-            case "wallEdgeNarrow": cfg.wallEdgeNarrow = 0; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
