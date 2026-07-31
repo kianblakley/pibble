@@ -678,6 +678,29 @@ ShellRoot {
         // in the "Custom pages" render block below.
         readonly property bool active: win.pane === pageId
         readonly property bool shown: win.shown
+        // Live text from pibble's own hidden search field (see win's
+        // TextInput, id: input) — the same source the built-in Apps/Walls/
+        // Clips grids filter their own `matches` off. Read-only: a page
+        // can watch what the user's typing to filter its own content the
+        // same way the built-ins do, without ever taking keyboard focus
+        // itself. Cleared on every pane switch and launcher (re)open (see
+        // win.setPane/resetState), same as it is for the built-ins.
+        readonly property string searchText: input.text
+        // Hands keyboard focus back to pibble's hidden search field. Only
+        // needed if this page put its own focusable item (a TextInput,
+        // typically) in front of it — win.input is otherwise always
+        // focused, which is what lets Tab/Escape/etc keep working from any
+        // page and lets searchText above stay live. A page that grabs
+        // focus (e.g. a TextInput's own MouseArea/TapHandler calling
+        // forceActiveFocus()) and never calls this back can leave the
+        // user stuck: pibble's own keybinds (Escape included) are handled
+        // inside win.input's Keys.onPressed, which only fires while it's
+        // focused. Call this from whatever signals "done editing" for your
+        // field — typically Keys.onEscapePressed, same as the Settings
+        // pane's own text fields do internally.
+        function releaseFocus(): void {
+            input.forceActiveFocus();
+        }
         // One call gives an item the built-in grids' own tile-entrance
         // rhythm (see cfg.animStyle, "Transitions" in Settings > Grids):
         // pop in from a smaller/lower/transparent starting state, staggered
@@ -4594,8 +4617,14 @@ ShellRoot {
                         // the carousel is already a horizontal strip, so
                         // every style's entrance drift (win.animFromY) runs
                         // along x here instead of the grids' vertical y —
-                        // same magnitude, just the other axis
-                        readonly property int springFromX: win.animFromY
+                        // same magnitude, just the other axis. "slide"
+                        // flips the sign: the grid version reads as rows
+                        // rising up from below, and cells sliding in from
+                        // the left (negative) reads as the same "coming up
+                        // the reading order" motion here, rather than
+                        // reusing the plain positive-x direction the other
+                        // styles share.
+                        readonly property int springFromX: win.animStyle === "slide" ? -win.animFromY : win.animFromY
                         readonly property int springFromY: 0
                         // left-to-right visual slot, for the same wave/slide
                         // stagger the tile grids use (see win.animDelay)
@@ -7719,20 +7748,19 @@ ShellRoot {
             focus: true
 
             // typing from the clock jumps into whatever's next in the cycle
-            // order; if that's a custom page (which has no search of its
-            // own), skip past it to the next built-in page instead
+            // order — custom pages included, not just the built-in three:
+            // now that a page can read pibble.searchText (see PageContext)
+            // there's no reason to skip past one looking for a built-in.
+            // The text itself isn't touched here; it's already sitting in
+            // this same field, which every page (built-in or custom) reads
+            // live off, so the switch alone is enough to carry the query
+            // over onto whatever pane it lands on.
             onTextChanged: {
                 if (text.length > 0 && win.pane === "clock") {
-                    const core = ["clock", "apps", "walls", "clips"];
                     const panes = win.activePanes;
                     const i = panes.indexOf("clock");
-                    for (let step = 1; i >= 0 && step <= panes.length; step++) {
-                        const candidate = panes[(i + step) % panes.length];
-                        if (core.includes(candidate)) {
-                            win.pane = candidate;
-                            break;
-                        }
-                    }
+                    if (i >= 0 && panes.length > 1)
+                        win.pane = panes[(i + 1) % panes.length];
                 }
                 if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
                     win.jumpWallCarousel();
