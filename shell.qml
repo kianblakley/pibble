@@ -753,7 +753,7 @@ ShellRoot {
                 PropertyAction { target: spring.pibbleItem; property: "opacity"; value: 0 }
                 PropertyAction { target: spring.pibbleItem; property: "scale"; value: win.animFromScale }
                 PropertyAction { target: spring.pibbleOffset; property: "y"; value: win.animFromY }
-                PauseAnimation { duration: win.animDelay(spring.pibbleSlot, spring.pibbleCols) }
+                PauseAnimation { duration: win.animDelay(spring.pibbleSlot, spring.pibbleCols, 60) }
                 ParallelAnimation {
                     NumberAnimation { target: spring.pibbleItem; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                     NumberAnimation { target: spring.pibbleItem; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
@@ -4571,7 +4571,7 @@ ShellRoot {
                                 PropertyAction { target: wrap; property: "opacity"; value: 0 }
                                 PropertyAction { target: wrap; property: "scale"; value: win.animFromScale }
                                 PropertyAction { target: wrap; property: "y"; value: win.animFromY }
-                                PauseAnimation { duration: win.animDelay(cell.index, cfg.appsCols) }
+                                PauseAnimation { duration: win.animDelay(cell.index, cfg.appsCols, 60) }
                                 ParallelAnimation {
                                     NumberAnimation { target: wrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                                     NumberAnimation { target: wrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
@@ -4819,7 +4819,7 @@ ShellRoot {
                                 PropertyAction { target: wallWrap; property: "opacity"; value: 0 }
                                 PropertyAction { target: wallWrap; property: "scale"; value: win.animFromScale }
                                 PropertyAction { target: wallWrap; property: "y"; value: win.animFromY }
-                                PauseAnimation { duration: win.animDelay(wallCell.index, cfg.wallsCols) }
+                                PauseAnimation { duration: win.animDelay(wallCell.index, cfg.wallsCols, 60) }
                                 ParallelAnimation {
                                     NumberAnimation { target: wallWrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                                     NumberAnimation { target: wallWrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
@@ -5227,9 +5227,13 @@ ShellRoot {
                             PropertyAction { target: wcWrap; property: "y"; value: wcCell.springFromY }
                             // cols: 1 — the carousel is a single strip, so
                             // "slide"'s row-based stagger (Math.floor(slot /
-                            // cols) * 60) should treat each tile as its own
-                            // row instead of collapsing them all into row 0
-                            PauseAnimation { duration: win.animDelay(wcCell.visSlot, 1) }
+                            // cols) * step) should treat each tile as its own
+                            // row instead of collapsing them all into row 0.
+                            // 35ms step (not the grid's 60ms) since with
+                            // cols:1 every bar staggers individually and 60ms
+                            // makes the carousel noticeably slower to settle
+                            // than bloom/cascade.
+                            PauseAnimation { duration: win.animDelay(wcCell.visSlot, 1, 35) }
                             ParallelAnimation {
                                 NumberAnimation { target: wcWrap; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                                 NumberAnimation { target: wcWrap; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 2.2 }
@@ -5620,7 +5624,7 @@ ShellRoot {
                                         PropertyAction { target: clipTile; property: "opacity"; value: 0 }
                                         PropertyAction { target: clipTile; property: "scale"; value: win.animFromScale }
                                         PropertyAction { target: clipTile; property: "y"; value: win.animFromY }
-                                        PauseAnimation { duration: win.animDelay(clipCell.slot, cfg.clipsCols) }
+                                        PauseAnimation { duration: win.animDelay(clipCell.slot, cfg.clipsCols, 60) }
                                         ParallelAnimation {
                                             NumberAnimation { target: clipTile; property: "opacity"; to: 1; duration: win.animFadeDur; easing.type: Easing.OutCubic }
                                             NumberAnimation { target: clipTile; property: "scale"; to: 1; duration: win.animDur; easing.type: win.animEase; easing.overshoot: 1.6 }
@@ -8461,12 +8465,12 @@ ShellRoot {
         function had(ms: int): int {
             return cfg.hiddenMenuAnimations ? ms : 0;
         }
-        function animDelay(slot: int, cols: int): int {
+        function animDelay(slot: int, cols: int, slideStep: int): int {
             if (!staggering)
                 return 0;
             switch (animStyle) {
             case "bloom": case "cascade": return slot * 35;
-            case "slide": return Math.floor(slot / cols) * 60;
+            case "slide": return Math.floor(slot / cols) * slideStep;
             }
             return 0;
         }
