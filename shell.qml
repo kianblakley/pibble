@@ -4013,11 +4013,41 @@ ShellRoot {
                     horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel && !rightEdgePress;
                     vertTracking = !win.promptOpen && root.gestureOn() && !onCarousel && !edgePress;
                 }
+                // Lets a drag that started out here (bgArea always sits
+                // underneath settingsHover, so it only ever sees drags that
+                // began outside that corner zone) still reveal/activate the
+                // settings button once it wanders in — settingsHover itself
+                // never gets a press to grab in that case, so it can't
+                // notice on its own. A HoverHandler alongside settingsHover
+                // was tried first, on the theory that (like edgeCursor
+                // above) it'd keep tracking the point regardless of who
+                // holds the grab — but per the note on this MouseArea's own
+                // onWheel, PointerHandlers on this layer-shell surface just
+                // aren't reliably delivered events once another Item (this
+                // one) already owns the grab, so it never fired. bgArea's
+                // own onPositionChanged, by contrast, is the proven-reliable
+                // path (same reasoning as the wheel path), so the zone/
+                // button check lives here instead, mapped into
+                // settingsHover's own coordinate space.
+                property bool overSettingsZone: false
+                property bool overSettingsButton: false
                 onPositionChanged: mouse => {
                     if (carouselTracking)
                         win.carouselDragTo(mouse.x - pressX);
+                    const sp = settingsHover.mapFromItem(bgArea, mouse.x, mouse.y);
+                    overSettingsZone = sp.x >= 0 && sp.x <= settingsHover.width && sp.y >= 0 && sp.y <= settingsHover.height;
+                    overSettingsButton = settingsHover.inButtonRect(sp.x, sp.y);
                 }
                 onReleased: mouse => {
+                    if (overSettingsButton) {
+                        win.toggleSettings();
+                        overSettingsZone = false;
+                        overSettingsButton = false;
+                        horizTracking = false;
+                        vertTracking = false;
+                        carouselTracking = false;
+                        return;
+                    }
                     const dx = mouse.x - pressX;
                     const dy = mouse.y - pressY;
                     if (carouselTracking) {
@@ -4034,6 +4064,8 @@ ShellRoot {
                     horizTracking = false;
                     vertTracking = false;
                     carouselTracking = false;
+                    overSettingsZone = false;
+                    overSettingsButton = false;
                 }
                 onWheel: wheel => {
                     // while a clip is expanded, wheel scrolls its text
@@ -4069,27 +4101,10 @@ ShellRoot {
                 // only current one gesture late (e.g. right after arming
                 // then dismissing a prompt from off-edge, which leaves
                 // edgePress stuck false) can silently swallow the very next
-                // edge swipe. A HoverHandler used to sit here instead: it
-                // never grabs, so on a mouse it keeps reporting the live
-                // position through presses and drags alike, with no such
-                // lag — but "hover" only exists for a mouse in the first
-                // place because the cursor is already sitting somewhere
-                // before the button goes down. A touch has no such leadup:
-                // the press *is* the first sample, and nothing refreshes a
-                // HoverHandler's position between two separate touches with
-                // no real pointer motion in between (Wayland only sends a
-                // pointer-enter/motion once, not per touch-down) — so on a
-                // touch-only device it tends to stay frozen whereever the
-                // previous gesture's drag ended, usually well off-edge,
-                // silently failing every edge swipe after the first. A
-                // TapHandler tracks its point's position from the moment of
-                // press itself (that's how it can tell a tap from a drag in
-                // the first place), so it stays fresh for touch the same
-                // way HoverHandler stays fresh for a mouse; its default
-                // DragThreshold gesturePolicy releases the point the moment
-                // it turns into a real drag, so it never competes for the
-                // grab either.
-                TapHandler {
+                // edge swipe. HoverHandler never grabs, so it keeps
+                // reporting the live position through presses and drags
+                // alike, with no such lag.
+                HoverHandler {
                     id: edgeCursor
                     property bool nearEdge: point.position.y <= win.edgeSwipeZone
                         || point.position.y >= bgArea.height - win.edgeSwipeZone
@@ -4189,11 +4204,11 @@ ShellRoot {
                 }
 
                 // live read of "pointer is currently within the right edge
-                // strip", same reasoning as edgeCursor above — a TapHandler
-                // rather than a HoverHandler, since its point.position is
-                // fresh from the moment of press itself, which is what a
-                // touch needs (see the comment on edgeCursor above)
-                TapHandler {
+                // strip", same reasoning as edgeCursor above (a fresh
+                // edge-swipe's press and this DragHandler's own grab check
+                // race on the same press, so this needs to already be
+                // current rather than only refreshed in onPressed)
+                HoverHandler {
                     id: backEdgeCursor
                     property bool nearEdge: point.position.x >= bgArea.width - win.edgeSwipeZone
                 }
@@ -8019,8 +8034,11 @@ ShellRoot {
                 }
             }
 
-            // Corner settings button: pops up when hovering the bottom-right
-            // corner, or while the settings pane is open
+            // Corner settings button: pops up when hovering (or, on a
+            // touchscreen, dragging into) the bottom-right corner, or while
+            // the settings pane is open, and activates on release over it —
+            // a finger can do the whole thing as a single press-drag-release
+            // motion, from anywhere on screen, no real hover required.
             MouseArea {
                 id: settingsHover
                 anchors.right: parent.right
@@ -8028,22 +8046,28 @@ ShellRoot {
                 width: 260
                 height: 180
                 hoverEnabled: true
-                // touchscreens have no real hover — containsMouse only
-                // tracks true for the instant a finger is actually down, so
-                // a tap that misses the (still-invisible) 56px button reveals
-                // it and immediately hides it again on release, with no
-                // window to land a follow-up tap. touchRevealed makes that
-                // first miss stick: any press anywhere in this zone reveals
-                // the button and holds it up for a few seconds so a second,
-                // aimed tap has something to land on.
-                property bool touchRevealed: false
-                readonly property bool revealed: containsMouse || touchRevealed || win.pane === "settings"
-                onPressed: touchRevealed = true
-                Timer {
-                    interval: 3000
-                    running: settingsHover.touchRevealed && !settingsHover.containsMouse
-                    onTriggered: settingsHover.touchRevealed = false
+                // revealed while genuinely hovering (mouse), while a press
+                // that started right here is down (touch tapping directly
+                // in), while bgArea reports an in-flight drag that started
+                // elsewhere has wandered into this zone (see bgArea.
+                // overSettingsZone — that's the touch case: drag in from
+                // outside, reveal, release on the button to activate, all
+                // one motion, handled over there since bgArea is the one
+                // actually holding the grab), or while settings is already open
+                readonly property bool revealed: containsMouse || pressed || bgArea.overSettingsZone || win.pane === "settings"
+                // the button's hit rect in this Item's own coordinate space
+                // — mirrors cornerBtn's anchors below (right/bottom, 32
+                // margin, 56 size) — deliberately independent of cornerBtn's
+                // reveal opacity/scale animation so a release lands on it
+                // even mid pop-in, not just once it's fully grown. Exposed
+                // as a function (not just the overButton property below) so
+                // bgArea can reuse the exact same rect for drags it owns.
+                function inButtonRect(x: real, y: real): bool {
+                    return x >= width - 88 && x <= width - 32 && y >= height - 88 && y <= height - 32;
                 }
+                readonly property bool overButton: inButtonRect(mouseX, mouseY) || bgArea.overSettingsButton
+                onClicked: if (overButton)
+                    win.toggleSettings()
 
                 Rectangle {
                     id: cornerBtn
@@ -8054,7 +8078,7 @@ ShellRoot {
                     height: 56
                     radius: 28
                     antialiasing: true
-                    color: Qt.alpha(root.accent, cornerBtnArea.containsMouse ? 0.2 : 0.11)
+                    color: Qt.alpha(root.accent, settingsHover.overButton ? 0.2 : 0.11)
                     border.width: 1
                     border.color: Qt.alpha(root.accent, 0.33)
                     opacity: settingsHover.revealed ? 1 : 0
@@ -8071,12 +8095,6 @@ ShellRoot {
                         text: root.ti.settings
                         color: root.fg
                         font { family: root.iconFont; pixelSize: root.fs(22) }
-                    }
-                    MouseArea {
-                        id: cornerBtnArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: win.toggleSettings()
                     }
                 }
             }
