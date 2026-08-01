@@ -1101,8 +1101,9 @@ ShellRoot {
             // swipe-up/swipe-down power-off/reboot drag (and, once that
             // prompt is armed, the screen-wide swipe that confirms/dismisses
             // it), swipe-left/swipe-right to cycle panes/tabs (or scroll the
-            // windows wallpaper carousel), and swipe-up/swipe-down to page
-            // through the current pane's grid. The keybind/Enter-confirm
+            // windows wallpaper carousel), swipe-up/swipe-down to page
+            // through the current pane's grid, and the right-edge
+            // swipe-to-go-back drag (win.goBack()). The keybind/Enter-confirm
             // flow the power gesture feeds into stays available either way.
             property bool gestures: true
             // when on, clicking an app/wall/clip tile that isn't already
@@ -1484,7 +1485,7 @@ ShellRoot {
         settings: "\ue8b8", refresh: "\ue5d5", copy: "\ue14d", bell: "\ue7f4",
         alertTriangle: "\ue002", cornerDownLeft: "\ue31b",
         wallpaperSlideshow: "\uf672", plus: "\uf710", trash: "\ue872",
-        batteryLow: "\uf251", download: "\ue171"
+        batteryLow: "\uf251", download: "\ue171", chevronLeft: "\ue5cb"
     })
 
     function fs(px: int): int {
@@ -2884,7 +2885,9 @@ ShellRoot {
         // "reboot?" prompt instead — same physics, opposite sign, mirrored
         // geometry. Outside either zone the vertical drag belongs to pane
         // navigation instead (see the MouseArea above).
-        readonly property real edgeSwipeZone: 56
+        // shared with the right-edge swipe-to-go-back drag too (see
+        // backEdgeCursor/rightEdgePress below)
+        readonly property real edgeSwipeZone: 80
         // true while either prompt is armed — every navigation gesture on
         // screen (pane cycling, page paging, carousel scrolling) stands down
         // for it, see bgArea.onPressed and wcCell's handlers below
@@ -2979,6 +2982,49 @@ ShellRoot {
             Quickshell.execDetached(["systemctl", "reboot"]);
             exit();
         }
+
+        // ---------- swipe-to-go-back ----------
+        // Android-edge-gesture style: dragging left from inside the right
+        // edgeSwipeZone strip pulls a small pill in from the edge (see
+        // backPill, near powerRing/rebootRing below, for how it's drawn;
+        // bgArea's backDragHandler for the drag itself). Unlike
+        // swipe-to-power/reboot above there's no separate arm/confirm step —
+        // releasing past backThreshold fires goBack() immediately, same as
+        // Android's own edge-back gesture, since going back is cheap and
+        // reversible (worst case you just reopen whatever you left).
+        // Releasing short of the threshold just lets it spring back.
+        property bool backDragging: false
+        property real backRaw: 0 // raw leftward drag distance from the right edge (finger travel)
+        // scene Y the drag actually started at (set once per drag, in
+        // bgArea's backDragHandler) — backPill spawns there instead of
+        // always centering vertically, same as Android's edge-back pill
+        property real backGrabY: 0
+        readonly property real backThreshold: 70
+        readonly property real backProgress: Math.min(1, backRaw / backThreshold)
+        // backPill (see below, near powerRing/rebootRing) is a fixed 56px
+        // circle — same size as the corner settings button it copies — so
+        // the resistance curve tracks the finger 1:1 up to that, then
+        // resists further travel once fully out, same diminishing-returns
+        // curve as powerPull/rebootPull above, applied only to the overshoot
+        readonly property real backExtra: Math.max(0, backRaw - 56)
+        readonly property real backPull: Math.min(backRaw, 56) + 24 * (1 - Math.exp(-backExtra / 200))
+        Behavior on backRaw {
+            enabled: !win.backDragging
+            NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic }
+        }
+        // same layered order the Escape keybind used to inline directly —
+        // it now just calls this: collapse an expanded clip, else back out
+        // of settings to whatever pane opened it, else close the launcher
+        // outright.
+        function goBack() {
+            if (win.expandedClip)
+                win.collapseClip();
+            else if (win.pane === "settings")
+                win.setPane(win.paneBeforeSettings);
+            else
+                win.exit();
+        }
+
         function cyclePane(dir: int) {
             // inside settings the cycle keybinds walk the settings tabs
             if (pane === "settings") {
@@ -3893,6 +3939,11 @@ ShellRoot {
                 property bool vertTracking: false
                 property bool carouselTracking: false
                 property bool edgePress: false
+                // same idea as edgePress, but the right edge specifically —
+                // left alone here so backDragHandler below can pull the
+                // swipe-to-go-back pill out instead of this MouseArea
+                // grabbing it as a pane-cycle swipe
+                property bool rightEdgePress: false
                 onClicked: mouse => {
                     if (win.powerArmed || win.rebootArmed) {
                         // MouseArea's clicked doesn't care how far the
@@ -3920,14 +3971,15 @@ ShellRoot {
                     pressY = mouse.y;
                     pressTime = Date.now();
                     edgePress = mouse.y <= win.edgeSwipeZone || mouse.y >= height - win.edgeSwipeZone;
+                    rightEdgePress = mouse.x >= width - win.edgeSwipeZone;
                     // while a power/reboot prompt is armed, every gesture on
                     // screen belongs to it (see the DragHandler below) —
                     // pane/grid navigation and the carousel flick sit out
                     // entirely so they can't fire alongside it
                     const inCarousel = onCarousel
                         && wallCarousel.contains(wallCarousel.mapFromItem(bgArea, mouse.x, mouse.y));
-                    carouselTracking = !win.promptOpen && inCarousel && root.gestureOn();
-                    horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel;
+                    carouselTracking = !win.promptOpen && inCarousel && root.gestureOn() && !rightEdgePress;
+                    horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel && !rightEdgePress;
                     vertTracking = !win.promptOpen && root.gestureOn() && !onCarousel && !edgePress;
                 }
                 onPositionChanged: mouse => {
@@ -4085,6 +4137,51 @@ ShellRoot {
                             else
                                 win.rebootRaw = Math.max(0, -delta);
                         }
+                    }
+                }
+
+                // live read of "pointer is currently within the right edge
+                // strip", same reasoning as edgeCursor above (a fresh
+                // edge-swipe's press and this DragHandler's own grab check
+                // race on the same press, so this needs to already be
+                // current rather than only refreshed in onPressed)
+                HoverHandler {
+                    id: backEdgeCursor
+                    property bool nearEdge: point.position.x >= bgArea.width - win.edgeSwipeZone
+                }
+                // swipe-to-go-back — see win.goBack() for the layered
+                // behavior it triggers and the property block above it for
+                // the resistance curve. Simpler than the power/reboot
+                // DragHandler above: no separate arm/confirm step, so
+                // release just commits (past backThreshold) or springs back
+                // (short of it) outright. armEligible freezes the edge
+                // check the same way armEligible does above, so the drag
+                // keeps tracking once it's well past the edge strip instead
+                // of Qt cancelling it the moment the pointer leaves nearEdge.
+                DragHandler {
+                    id: backDragHandler
+                    target: null
+                    property bool armEligible: false
+                    property real grabX: 0
+                    enabled: root.gestureOn() && !win.promptOpen && (active ? armEligible : backEdgeCursor.nearEdge)
+                    xAxis.enabled: true
+                    yAxis.enabled: false
+                    onActiveChanged: {
+                        if (active) {
+                            armEligible = backEdgeCursor.nearEdge;
+                            grabX = centroid.scenePosition.x;
+                            win.backGrabY = centroid.scenePosition.y;
+                            win.backDragging = true;
+                        } else {
+                            win.backDragging = false;
+                            if (win.backProgress >= 1)
+                                win.goBack();
+                            win.backRaw = 0; // springs back (no-op if goBack() just changed pane/closed)
+                        }
+                    }
+                    onCentroidChanged: {
+                        if (active)
+                            win.backRaw = Math.max(0, grabX - centroid.scenePosition.x);
                     }
                 }
             }
@@ -7536,7 +7633,7 @@ ShellRoot {
                     SettingRow {
                         key: "gestures"
                         label: "Navigation gestures"
-                        sub: "swipe from the top/bottom edge to arm the power/reboot prompt (swipe again to confirm or dismiss it) · swipe left/right to cycle panes/settings tabs · swipe up/down to page through the current grid"
+                        sub: "swipe from the top/bottom edge to arm the power/reboot prompt (swipe again to confirm or dismiss it) · swipe left/right to cycle panes/settings tabs · swipe up/down to page through the current grid · swipe left from the right edge to go back"
                     }
                     SettingRow {
                         key: "clickToSelect"
@@ -7817,6 +7914,47 @@ ShellRoot {
                     NumberAnimation { duration: win.had(160); easing.type: Easing.OutCubic }
                 }
                 font { family: root.mono; pixelSize: root.fs(18); letterSpacing: 2 }
+            }
+
+            // Swipe-to-go-back pill: rides in from the right edge as
+            // win.backRaw grows, tracking win.backPull's resistance curve
+            // (see the property block on win for the math). A byte-for-byte
+            // copy of cornerBtn below — same fixed size, same
+            // color/border/hover-alpha formula, same icon color — just
+            // substituting the completed-drag state for its hover state.
+            // The drag/release-to-go-back behavior itself is bgArea's
+            // backDragHandler.
+            Item {
+                id: backPill
+                visible: win.backRaw > 1
+                anchors.right: parent.right
+                // spawns at the height the drag actually started from
+                // (win.backGrabY, set once per drag by backDragHandler)
+                // rather than always centering vertically — clamped so it
+                // can't render partly off the top/bottom edge for a drag
+                // that started near a screen corner
+                y: Math.max(0, Math.min(parent.height - height, win.backGrabY - height / 2))
+                // -width at rest (fully off-screen), sliding to flush with
+                // the edge once backPull reaches its own width, then a
+                // little further on overshoot — see win.backPull
+                anchors.rightMargin: win.backPull - width
+                width: 56
+                height: 56
+                opacity: Math.min(1, win.backRaw / 30)
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 28
+                    color: Qt.alpha(root.accent, win.backProgress >= 1 ? 0.2 : 0.11)
+                    border.width: 1
+                    border.color: Qt.alpha(root.accent, 0.33)
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: root.ti.chevronLeft
+                    color: root.fg
+                    font { family: root.iconFont; pixelSize: root.fs(22) }
+                }
             }
 
             // Corner settings button: pops up when hovering the bottom-right
@@ -8161,13 +8299,9 @@ ShellRoot {
                     return;
                 }
                 if (ks === (kb.exit ?? "Escape")) {
-                    // layered: expanded clip -> settings -> whole app
-                    if (win.expandedClip)
-                        win.collapseClip();
-                    else if (win.pane === "settings")
-                        win.setPane(win.paneBeforeSettings);
-                    else
-                        win.exit();
+                    // layered: expanded clip -> settings -> whole app — see
+                    // win.goBack(), also used by the right-edge swipe gesture
+                    win.goBack();
                     event.accepted = true;
                 } else if (ks === (kb.settings ?? "Ctrl+S")) {
                     win.toggleSettings();
