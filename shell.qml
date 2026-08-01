@@ -1811,6 +1811,157 @@ ShellRoot {
         return score - lname.length * 0.1;
     }
 
+    // ---------- clipboard full-text search ----------
+    // Clip content is free text, not a short identifier, so the fzf-style
+    // subsequence match above (fuzzyScore) is a poor fit: applied to a
+    // whole clip body (can run thousands of characters) rather than a
+    // short name, "characters somewhere in order" stops being a meaningful
+    // filter - almost anything matches - and the scattered hits it does
+    // produce have no coherent span to highlight. Clips instead get plain
+    // literal substring matching per space-separated term (case
+    // insensitive, AND across terms) - simple and predictable: if you can
+    // see it in the text, it matches.
+
+    // AND-matches every term as a literal substring somewhere in `text`
+    // (every occurrence is collected, not just the first), then slides a
+    // window over the merged, position-sorted hits to find the tightest
+    // span that still covers every term at least once - the classic
+    // two-pointer "minimum window substring" technique. Without this, a
+    // multi-word query would either have to appear as one exact contiguous
+    // phrase (too strict - "database migration" wouldn't find "migration
+    // of the database") or fall back to just highlighting each term's
+    // first occurrence wherever it happens to be, even if that's two
+    // unrelated corners of a long clip. The window instead finds where the
+    // terms actually cluster together, and that span anchors both the
+    // preview snippet and the highlight ranges.
+    function clipSearchMatch(text: string, terms: var): var {
+        const lower = text.toLowerCase();
+        const perTerm = [];
+        for (let ti = 0; ti < terms.length; ti++) {
+            const term = terms[ti];
+            const hits = [];
+            let from = 0;
+            let idx;
+            while ((idx = lower.indexOf(term, from)) !== -1) {
+                hits.push({ start: idx, end: idx + term.length, ti });
+                from = idx + 1;
+            }
+            if (hits.length === 0)
+                return null; // this term matched nothing - no AND match
+            perTerm.push(hits);
+        }
+
+        const flat = [].concat(...perTerm).sort((a, b) => a.start - b.start);
+        const need = terms.length;
+        const have = new Array(need).fill(0);
+        let filled = 0;
+        let lo = 0;
+        let best = null;
+        for (let hi = 0; hi < flat.length; hi++) {
+            if (have[flat[hi].ti]++ === 0)
+                filled++;
+            while (filled === need) {
+                const width = flat[hi].end - flat[lo].start;
+                if (!best || width < best.width)
+                    best = { lo, hi, width, start: flat[lo].start, end: flat[hi].end };
+                if (--have[flat[lo].ti] === 0)
+                    filled--;
+                lo++;
+            }
+        }
+        if (!best)
+            return null;
+
+        const winHits = flat.slice(best.lo, best.hi + 1).sort((a, b) => a.start - b.start);
+        const hi = [];
+        for (const h of winHits) {
+            const last = hi[hi.length - 1];
+            if (last && h.start <= last.end)
+                last.end = Math.max(last.end, h.end);
+            else
+                hi.push({ start: h.start, end: h.end });
+        }
+
+        const score = winHits.length * 4 - best.width * 0.05 - best.start * 0.01;
+        return { score, anchor: { start: best.start, end: best.end }, hi };
+    }
+
+    // builds the tile's preview text around the matched span: the anchor
+    // window plus padding on each side. Deliberately doesn't snap to word
+    // boundaries - the offset bookkeeping that'd require isn't worth it for
+    // a compact preview, and cutting mid-word at the edges of a snippet is
+    // a well-worn convention (search-result snippets do the same).
+    function clipSnippet(text: string, match: var, radius: int): var {
+        const start = Math.max(0, match.anchor.start - radius);
+        const end = Math.min(text.length, match.anchor.end + radius);
+        const prefix = start > 0 ? "… " : "";
+        const suffix = end < text.length ? " …" : "";
+        const shift = prefix.length - start;
+        const hi = match.hi
+            .map(h => ({ start: h.start + shift, end: h.end + shift }))
+            .filter(h => h.start >= 0 && h.end <= prefix.length + (end - start));
+        return { text: prefix + text.slice(start, end) + suffix, hi };
+    }
+
+    // solid #rrggbb blend of a toward b (t=0 -> a, t=1 -> b). Qt's rich-text
+    // CSS subset doesn't reliably support the rgba()/alpha-channel color
+    // syntax, so translucency for the highlight background below is faked
+    // by blending toward the panel's dark surface color instead of an
+    // actual alpha channel - this always renders as a flat, well-supported
+    // #rrggbb value.
+    function colorMix(a: color, b: color, t: real): string {
+        const v = (x, y) => Math.round(Math.max(0, Math.min(1, x + (y - x) * t)) * 255).toString(16).padStart(2, "0");
+        return "#" + v(a.r, b.r) + v(a.g, b.g) + v(a.b, b.b);
+    }
+
+    function clipEscapeHtml(s: string): string {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+    }
+
+    // renders a snippet with its matched spans wrapped in a highlighter-
+    // style background box, escaping everything else. Spans are assumed
+    // sorted/non-overlapping, which is how clipSearchMatch/clipSnippet
+    // produce them. Text color is left alone - only the background marks
+    // the match, so the highlight reads as a marker over the text rather
+    // than recoloring it.
+    function clipHighlightMarkup(text: string, hi: var): string {
+        let out = "";
+        let pos = 0;
+        const bg = root.colorMix(root.surface, root.accent, 0.8);
+        for (const h of hi) {
+            if (h.start > pos)
+                out += root.clipEscapeHtml(text.slice(pos, h.start));
+            out += `<span style="background-color:${bg}">${root.clipEscapeHtml(text.slice(h.start, h.end))}</span>`;
+            pos = h.end;
+        }
+        out += root.clipEscapeHtml(text.slice(pos));
+        return out;
+    }
+
+    // reverses the \\ \t \n escaping clipScan applies (in bash) to a clip's
+    // full-text field before folding it into the tab/newline delimited
+    // scan output - see clipScan's command
+    function unescapeClipField(s: string): string {
+        let out = "";
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (c === "\\" && i + 1 < s.length) {
+                const n = s[++i];
+                if (n === "n")
+                    out += "\n";
+                else if (n === "t")
+                    out += "\t";
+                else if (n === "\\")
+                    out += "\\";
+                else
+                    out += n;
+            } else {
+                out += c;
+            }
+        }
+        return out;
+    }
+
     // The shell runs as a persistent daemon; the launcher window is toggled
     // over IPC: qs -p <repo> ipc call launcher toggle
     IpcHandler {
@@ -2151,7 +2302,23 @@ ShellRoot {
             pgrep -x wl-paste >/dev/null 2>&1 && echo WATCH:1 || echo WATCH:0
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
                 n=$(cliphist decode "$id" 2>/dev/null | wc -c)
-                printf '%s\t%s\t%s\n' "$id" "$n" "$preview"
+                full=""
+                case "$preview" in
+                    '[[ binary data'*) ;;
+                    *)
+                        # full text for search, capped well past any
+                        # realistic clip so scanning ~200 of these stays
+                        # cheap; backslashes, tabs and newlines are escaped
+                        # (reversed by unescapeClipField) since they'd
+                        # otherwise corrupt this tab/newline-delimited
+                        # record format
+                        content=$(cliphist decode "$id" 2>/dev/null | head -c 20000)
+                        full=\${content//\\/\\\\}
+                        full=\${full//$'\t'/\\t}
+                        full=\${full//$'\n'/\\n}
+                        ;;
+                esac
+                printf '%s\t%s\t%s\t%s\n' "$id" "$n" "$full" "$preview"
             done`, "_", String(cfg.clipsMax)]
         stdout: StdioCollector {
             onStreamFinished: {
@@ -2167,13 +2334,15 @@ ShellRoot {
                 root.clips = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
+                    const t3 = l.indexOf("\t", t2 + 1);
                     const id = l.slice(0, t1);
                     const bytes = parseInt(l.slice(t1 + 1, t2)) || 0;
-                    const preview = l.slice(t2 + 1);
+                    const fullEsc = l.slice(t2 + 1, t3);
+                    const preview = l.slice(t3 + 1);
                     const m = preview.match(/^\[\[ binary data ([0-9.]+ \w+) (\w+) (\d+x\d+)/);
                     return m
                         ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: "" }
-                        : { id, bytes, image: false, preview: preview.trim() };
+                        : { id, bytes, image: false, preview: preview.trim(), full: root.unescapeClipField(fullEsc) };
                 });
                 // Sweep cached thumbs (and on-demand full-res decodes) for
                 // ids that fell out of the current clipsMax window — runs
@@ -2984,15 +3153,35 @@ ShellRoot {
             wallCarouselAnim = Qt.binding(() => win.wallCarouselStep);
         }
 
+        // text clips are matched word-by-word against their full decoded
+        // text (see clipSearchMatch) rather than fuzzyScore's character
+        // subsequence match, since that's what makes highlightable spans
+        // possible; image clips have no real text to search, so they keep
+        // matching against their synthetic "png image 1920x1080 ..." label
+        // the old way. Matched clips are shallow-cloned with hiText/hiSpans
+        // attached (rather than wrapped) so every other lookup elsewhere
+        // (expandClip, clipCopy, ...) keeps working against plain clip
+        // fields unchanged.
         property var clipMatches: {
-            const q = input.text.toLowerCase().trim();
-            if (!q)
+            const raw = input.text.trim();
+            if (!raw)
                 return root.clips;
+            const q = raw.toLowerCase();
+            const terms = q.split(/\s+/).filter(t => t.length > 0);
             const scored = [];
             for (const c of root.clips) {
-                const s = root.fuzzyScore(c.preview.toLowerCase(), q);
-                if (s !== null)
-                    scored.push({ c, s });
+                if (c.image) {
+                    const s = root.fuzzyScore(c.preview.toLowerCase(), q);
+                    if (s !== null)
+                        scored.push({ c, s });
+                    continue;
+                }
+                const text = c.full || c.preview;
+                const m = root.clipSearchMatch(text, terms);
+                if (m === null)
+                    continue;
+                const snip = root.clipSnippet(text, m, 90);
+                scored.push({ c: Object.assign({}, c, { hiText: snip.text, hiSpans: snip.hi }), s: m.score });
             }
             scored.sort((x, y) => y.s - x.s);
             return scored.map(x => x.c);
@@ -3271,7 +3460,11 @@ ShellRoot {
             clipInfo.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 cliphist decode "$1" | wc -c
-                [ "$2" = "txt" ] && cliphist decode "$1" | head -c 4000
+                # this is a single on-demand decode (not the ~200-entry scan
+                # pass), so a much larger cap than the scan's is affordable;
+                # the expand view scrolls past its viewport rather than
+                # truncating, so this only needs to be generous, not exact
+                [ "$2" = "txt" ] && cliphist decode "$1" | head -c 200000
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt"];
             clipInfo.running = true;
             // Slow path: copy (which re-stores the entry under a new id via
@@ -3345,7 +3538,26 @@ ShellRoot {
                             const upd = Object.assign({}, c, { id: nid });
                             if (c.image && c.thumb)
                                 upd.thumb = root.clipThumbDir + "/" + nid + ".png";
-                            root.clips = [upd].concat(root.clips.filter(x => x.id !== win.infoClipId));
+                            // patched in place (not moved to the front): expanding a
+                            // clip re-copies it, which is what forces this id patch
+                            // (cliphist assigns a fresh id on every copy, and the
+                            // cache is keyed by id) - but expanding is also just
+                            // "look at this", not "move it", so the clip stays put
+                            // instead of jumping to index 0 out from under you
+                            const next = root.clips.slice();
+                            next[idx] = upd;
+                            root.clips = next;
+                            // reassigning root.clips gives clipMatches a new array
+                            // reference, and onClipMatchesChanged unconditionally
+                            // resets clipSelected to 0 on any such change (it's
+                            // meant for "you typed a new query", not "an id got
+                            // patched") - restore the selection to wherever this
+                            // clip landed once that reset has already run
+                            Qt.callLater(() => {
+                                const newIdx = win.clipMatches.findIndex(c2 => c2.id === nid);
+                                if (newIdx >= 0)
+                                    win.clipSelected = newIdx;
+                            });
                         }
                     }
                 }
@@ -3741,6 +3953,18 @@ ShellRoot {
                     carouselTracking = false;
                 }
                 onWheel: wheel => {
+                    // while a clip is expanded, wheel scrolls its text
+                    // instead of the grid underneath - unconditionally
+                    // consumed here (even a no-op when the text doesn't
+                    // overflow) so it never falls through to pageMove/
+                    // navigate and shifts the hidden grid behind the card
+                    if (win.expandedClip !== null) {
+                        if (expandTextWrap.overflow) {
+                            const maxContentY = Math.max(0, expandTextFlick.contentHeight - expandTextFlick.height);
+                            expandTextFlick.contentY = Math.max(0, Math.min(maxContentY, expandTextFlick.contentY - wheel.angleDelta.y));
+                        }
+                        return;
+                    }
                     wheelAcc += wheel.angleDelta.y;
                     while (wheelAcc >= 120) {
                         win.navigate(0, -1);
@@ -5202,15 +5426,44 @@ ShellRoot {
                                                 }
                                             }
                                         }
+                                        // plain (non-searching) preview: elide is only reliable on the
+                                        // lightweight Text item, so this stays a plain Text and only
+                                        // shows when there's no highlight to render
                                         Text {
-                                            visible: clipCell.shownClip !== null && clipCell.shownClip.image !== true
+                                            visible: clipCell.shownClip !== null && clipCell.shownClip.image !== true && !clipCell.shownClip.hiSpans
                                             anchors.fill: parent
                                             anchors.margins: 13
-                                            text: clipCell.shownClip ? clipCell.shownClip.preview : ""
-                                            textFormat: Text.PlainText
+                                            text: clipCell.shownClip ? root.clipEscapeHtml(clipCell.shownClip.preview) : ""
+                                            textFormat: Text.StyledText
                                             wrapMode: Text.Wrap
                                             elide: Text.ElideRight
                                             maximumLineCount: Math.max(1, Math.floor((clipCell.tileH - 26) / Math.max(1, clipCell.lineHpx)))
+                                            color: root.fg
+                                            font { family: root.mono; pixelSize: root.fs(13) }
+                                        }
+                                        // highlighted snippet: QML's plain Text only paints rich-text
+                                        // foreground formatting (color/bold/etc), not span background
+                                        // colors, so the highlight box needs TextEdit's fuller rich-text
+                                        // support instead - readOnly/non-interactive/disabled so it's
+                                        // purely a display element and taps still reach the TapHandler/
+                                        // DragHandler below. No elide here (TextEdit doesn't support it),
+                                        // but clip:true plus the fixed tileH still guarantees the tile
+                                        // itself never grows - overflow is just clipped, not "…"-truncated
+                                        TextEdit {
+                                            visible: clipCell.shownClip !== null && clipCell.shownClip.image !== true && !!clipCell.shownClip.hiSpans
+                                            anchors.fill: parent
+                                            anchors.margins: 13
+                                            clip: true
+                                            enabled: false
+                                            readOnly: true
+                                            selectByMouse: false
+                                            persistentSelection: false
+                                            text: {
+                                                const c = clipCell.shownClip;
+                                                return c && c.hiSpans ? root.clipHighlightMarkup(c.hiText, c.hiSpans) : "";
+                                            }
+                                            textFormat: TextEdit.RichText
+                                            wrapMode: TextEdit.Wrap
                                             color: root.fg
                                             font { family: root.mono; pixelSize: root.fs(13) }
                                         }
@@ -5317,7 +5570,14 @@ ShellRoot {
                     transform: Translate { id: expandTx }
 
                     // swallow clicks so they don't fall through to the
-                    // background (which collapses the expansion)
+                    // background (which collapses the expansion). Wheel
+                    // scrolling isn't handled here - it's handled centrally
+                    // by bgArea below, since a plain MouseArea without
+                    // onWheel doesn't intercept wheel events on this layer-
+                    // shell surface (see bgArea's note), so they already
+                    // pass straight through this to reach it regardless of
+                    // whether the pointer is over the card or the
+                    // surrounding faded grid
                     MouseArea {
                         anchors.fill: parent
                     }
@@ -5399,26 +5659,41 @@ ShellRoot {
                             }
                         }
                         // the full text reveals gradually as the container
-                        // grows, instead of jumping when the decode lands
+                        // grows, instead of jumping when the decode lands -
+                        // but only up to textMaxH: past that, the container
+                        // stops growing and the text scrolls instead, since
+                        // clipInfo's decode cap is now generous (200000
+                        // bytes) rather than a hard 4000-byte truncation
                         Item {
+                            id: expandTextWrap
                             visible: win.expandedClip !== null && win.expandedClip.image !== true
+                            readonly property real textMaxH: win.revH * 0.42
+                            readonly property bool overflow: expandBody.paintedHeight > textMaxH
                             width: parent.width
-                            height: expandBody.paintedHeight
+                            height: Math.min(expandBody.paintedHeight, textMaxH)
                             clip: true
                             Behavior on height {
                                 NumberAnimation { duration: win.ad(380); easing.type: Easing.OutCubic }
                             }
 
-                            Text {
-                                id: expandBody
-                                width: parent.width
-                                text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
-                                textFormat: Text.PlainText
-                                wrapMode: Text.Wrap
-                                elide: Text.ElideRight
-                                maximumLineCount: 30
-                                color: root.fg
-                                font { family: root.mono; pixelSize: root.fs(13) }
+                            Flickable {
+                                id: expandTextFlick
+                                anchors.fill: parent
+                                contentWidth: width
+                                contentHeight: expandBody.paintedHeight
+                                clip: true
+                                interactive: expandTextWrap.overflow
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                Text {
+                                    id: expandBody
+                                    width: parent.width
+                                    text: win.expandedText || (win.expandedClip ? win.expandedClip.preview : "")
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                    color: root.fg
+                                    font { family: root.mono; pixelSize: root.fs(13) }
+                                }
                             }
                         }
 
@@ -5448,6 +5723,74 @@ ShellRoot {
                                     color: root.fg
                                     font { family: root.mono; pixelSize: root.fs(13) }
                                 }
+                            }
+                        }
+                    }
+
+                    // expanded text's scrollbar: sits outside the card's own
+                    // right edge entirely (a sibling of expandCol, not a
+                    // child squeezed into its width) so the text column
+                    // never loses width to make room for it - only its
+                    // height tracks the scrollable text viewport
+                    // (expandTextWrap), styled to match the Pages list
+                    // scrollbar in settings (pagesScrollTrack/Thumb)
+                    Item {
+                        id: expandScrollHit
+                        // expandCol (the text column) is centered with a
+                        // 24px gutter to the card's own edge on each side -
+                        // anchoring to parent.right (the card edge) left
+                        // that whole gutter as dead space before the
+                        // scrollbar even started. Anchor to the text
+                        // column's actual edge instead so it sits right
+                        // next to the text, still outside expandCol itself.
+                        anchors.left: expandCol.right
+                        anchors.leftMargin: 5
+                        y: expandCol.y + expandTextWrap.y
+                        height: expandTextWrap.height
+                        width: 10
+                        visible: expandTextWrap.overflow
+
+                        Rectangle {
+                            id: expandScrollTrack
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 6
+                            height: parent.height
+                            radius: 3
+                            color: Qt.alpha(root.muted, 0.15)
+
+                            Rectangle {
+                                id: expandScrollThumb
+                                width: parent.width
+                                radius: 3
+                                color: Qt.alpha(root.accent, expandScrollArea.pressed ? 0.85 : 0.6)
+                                height: Math.min(expandScrollTrack.height, Math.max(12, expandTextFlick.visibleArea.heightRatio * expandScrollTrack.height))
+                                y: {
+                                    const range = 1 - expandTextFlick.visibleArea.heightRatio;
+                                    const progress = range > 0 ? expandTextFlick.visibleArea.yPosition / range : 0;
+                                    return progress * (expandScrollTrack.height - height);
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            id: expandScrollArea
+                            anchors.fill: parent
+                            enabled: expandTextWrap.overflow
+                            preventStealing: true
+                            property real pressY: 0
+                            property real pressThumbY: 0
+                            onPressed: mouse => {
+                                pressY = mouse.y;
+                                pressThumbY = expandScrollThumb.y;
+                            }
+                            onPositionChanged: mouse => {
+                                if (!pressed)
+                                    return;
+                                const usable = Math.max(1, expandScrollTrack.height - expandScrollThumb.height);
+                                const newY = Math.max(0, Math.min(usable, pressThumbY + (mouse.y - pressY)));
+                                const maxContentY = Math.max(0, expandTextFlick.contentHeight - expandTextFlick.height);
+                                expandTextFlick.contentY = (newY / usable) * maxContentY;
                             }
                         }
                     }
