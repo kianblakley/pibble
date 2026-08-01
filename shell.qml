@@ -2518,7 +2518,13 @@ ShellRoot {
         const d = root.battDevice;
         return !!d && d.ready && d.isLaptopBattery;
     }
-    readonly property bool batteryCharging: root.batteryPresent && root.battDevice.state === UPowerDeviceState.Charging
+    // PendingCharge covers charge-limited/topping-off devices (e.g. a
+    // threshold-charging laptop sitting at its cap while plugged in) —
+    // still "plugged in and not draining" for every purpose this drives
+    // (accent color, the charging glyph, suppressing low-battery alerts),
+    // even though UPower won't call it "Charging"
+    readonly property bool batteryCharging: root.batteryPresent
+        && (root.battDevice.state === UPowerDeviceState.Charging || root.battDevice.state === UPowerDeviceState.PendingCharge)
     // always icon + percentage, charging or not
     readonly property string batteryText: root.batteryPresent ? Math.round(root.battDevice.percentage * 100) + "%" : ""
 
@@ -4269,7 +4275,7 @@ ShellRoot {
 
                                     Text {
                                         visible: !seg.isFirstVisible
-                                        text: "·"
+                                        text: "|"
                                         color: root.muted
                                         anchors.verticalCenter: parent.verticalCenter
                                         font { family: root.mono; pixelSize: root.fs(14) }
