@@ -848,7 +848,7 @@ ShellRoot {
         id: gp
         property string target: "apps"
         readonly property var spec: root.gridTargets[gp.target]
-        readonly property bool wallsBars: gp.target === "walls" && cfg.wallpaperStyle !== "tiles"
+        readonly property bool wallsBars: gp.target === "walls" && cfg.wallpaperStyle !== "grid"
         readonly property int curCols: cfg[gp.spec.colsProp]
         readonly property int curRows: cfg[gp.spec.rowsProp]
         readonly property int curVisible: cfg.wallsVisible
@@ -1064,7 +1064,7 @@ ShellRoot {
             // page id (see PageContext.getSetting/setSetting) — never read
             // or written to directly by pibble itself otherwise
             property var customPageData: ({})
-            property string animStyle: "wave"
+            property string animStyle: "bloom"
             // independent of animStyle: gates the settings pane's entrance
             // spring and the power-off/reboot pull-back animation, neither
             // of which is a "grid" (see win.had())
@@ -1079,10 +1079,16 @@ ShellRoot {
             property string customAccent: "#cfcfcf"
             property string customFg: "#f0f0f0"
             property string customMuted: "#8a8a8a"
-            // "tiles" is the grid picker; "carousel" and "carousel-flat" are
+            // "grid" is the grid picker; "carousel" and "carousel-flat" are
             // the horizontal carousel (see wallCarousel), the latter with
-            // the backdrop parallax pan disabled
-            property string wallpaperStyle: "tiles"
+            // the backdrop parallax pan disabled — shown to the user as
+            // "carousel" and "parallax carousel" respectively (see
+            // win.settingValue's wallpaperStyle case); the internal ids stay
+            // as-is because "carousel"/"carousel-flat" already once meant
+            // something else (the pre-rename windows/windows-flat styles)
+            // and reusing "carousel" as the flat variant's new id would
+            // collide with old saved configs mid-migration
+            property string wallpaperStyle: "grid"
             property string wallpaperDir: "~/Pictures/wallpapers"
             // command run when a wallpaper is chosen; $WALL is the image,
             // $BLUR the blurred variant (only generated if referenced)
@@ -1573,6 +1579,16 @@ ShellRoot {
             cfg.theme = "matugen"; // renamed
             saveSettings();
         }
+        // the "wave" tile animation was renamed "bloom"
+        if (cfg.animStyle === "wave") {
+            cfg.animStyle = "bloom";
+            saveSettings();
+        }
+        // the "reveal" tile animation was renamed "cascade"
+        if (cfg.animStyle === "reveal") {
+            cfg.animStyle = "cascade";
+            saveSettings();
+        }
         // the retired equalizer visualizers collapse into the sine wave
         if (["mirror", "spectrum", "flicker"].includes(cfg.volStyle)) {
             cfg.volStyle = "sine";
@@ -1596,8 +1612,13 @@ ShellRoot {
             cfg.wallpaperStyle = cfg.wallpaperStyle === "windows-flat" ? "carousel-flat" : "carousel";
             saveSettings();
         }
-        if (!["tiles", "carousel", "carousel-flat"].includes(cfg.wallpaperStyle)) {
-            cfg.wallpaperStyle = "tiles";
+        // "tiles" (the grid picker) renamed "grid"
+        if (cfg.wallpaperStyle === "tiles") {
+            cfg.wallpaperStyle = "grid";
+            saveSettings();
+        }
+        if (!["grid", "carousel", "carousel-flat"].includes(cfg.wallpaperStyle)) {
+            cfg.wallpaperStyle = "grid";
             saveSettings();
         }
         // the single "alerts" flyout checkbox split into per-category
@@ -3073,7 +3094,7 @@ ShellRoot {
             // It keeps root.wallpapers's natural order/contents always, and
             // typing instead jumps the selection to the best match — see
             // jumpWallCarousel(), driven from input.onTextChanged.
-            if (cfg.wallpaperStyle !== "tiles")
+            if (cfg.wallpaperStyle !== "grid")
                 return root.wallpapers;
             const q = input.text.toLowerCase().trim();
             if (!q)
@@ -3296,7 +3317,7 @@ ShellRoot {
                 pageStagger(appPageSize, selected, next);
                 selected = next;
             } else if (pane === "walls") {
-                if (cfg.wallpaperStyle !== "tiles") {
+                if (cfg.wallpaperStyle !== "grid") {
                     moveCarousel(dy !== 0 ? dy : dx);
                 } else {
                     const next = dy !== 0
@@ -3343,7 +3364,7 @@ ShellRoot {
                 const next = pageJump(selected, matches.length, appPageSize, dir);
                 pageStagger(appPageSize, selected, next);
                 selected = next;
-            } else if (pane === "walls" && cfg.wallpaperStyle === "tiles") {
+            } else if (pane === "walls" && cfg.wallpaperStyle === "grid") {
                 const next = pageJump(wallSelected, wallMatches.length, wallPageSize, dir);
                 pageStagger(wallPageSize, wallSelected, next);
                 wallSelected = next;
@@ -3931,7 +3952,7 @@ ShellRoot {
                 // "enabled" gate that ignores where the drag started, like
                 // it used to, always wins that race since it lives on this
                 // same Item) and pageMove would never fire.
-                readonly property bool onCarousel: win.pane === "walls" && cfg.wallpaperStyle !== "tiles"
+                readonly property bool onCarousel: win.pane === "walls" && cfg.wallpaperStyle !== "grid"
                 property real pressX: 0
                 property real pressY: 0
                 property real pressTime: 0
@@ -4618,12 +4639,12 @@ ShellRoot {
                 opacity: 0.004
                 // during warm-up, show the pane only after all thumbnail
                 // textures are uploaded, so its first frame reuses them
-                visible: cfg.wallpaperStyle === "tiles"
+                visible: cfg.wallpaperStyle === "grid"
                     && (win.pane === "walls" || (win.warmingWalls && win.wallWarmTick > root.wallpapers.length))
                 Connections {
                     target: win
                     function onPaneChanged() {
-                        if (win.pane === "walls" && cfg.wallpaperStyle === "tiles")
+                        if (win.pane === "walls" && cfg.wallpaperStyle === "grid")
                             wallIn.restart();
                     }
                 }
@@ -4894,12 +4915,12 @@ ShellRoot {
                 height: barHeight + captionGap + 22
                 transform: panePull
                 opacity: 0.004
-                visible: cfg.wallpaperStyle !== "tiles" && win.pane === "walls"
+                visible: cfg.wallpaperStyle !== "grid" && win.pane === "walls"
 
                 Connections {
                     target: win
                     function onPaneChanged() {
-                        if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles") {
+                        if (win.pane === "walls" && cfg.wallpaperStyle !== "grid") {
                             win.jumpWallCarousel();
                             carouselIn.restart();
                         }
@@ -4947,7 +4968,7 @@ ShellRoot {
                         // styles share.
                         readonly property int springFromX: win.animStyle === "slide" ? -win.animFromY : win.animFromY
                         readonly property int springFromY: 0
-                        // left-to-right visual slot, for the same wave/slide
+                        // left-to-right visual slot, for the same bloom/reveal/slide
                         // stagger the tile grids use (see win.animDelay)
                         readonly property int visSlot: Math.max(0, Math.min(wallCarousel.halfVisible * 2,
                             Math.round(rank) + wallCarousel.halfVisible))
@@ -4971,9 +4992,9 @@ ShellRoot {
                             // replay the spring when the selector opens: the
                             // cell was already filled while it was hidden, so
                             // onWallChanged alone won't fire (see wallCell's
-                            // identical hook for the "tiles" style)
+                            // identical hook for the "grid" style)
                             function onPaneChanged() {
-                                if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles" && wcCell.filled)
+                                if (win.pane === "walls" && cfg.wallpaperStyle !== "grid" && wcCell.filled)
                                     wcSpringIn.restart();
                             }
                         }
@@ -5010,8 +5031,8 @@ ShellRoot {
 
                         // entrance/exit spring for this window's content,
                         // replayed whenever filtering changes which wallpaper
-                        // it shows — same wave/pop/fade/slide/none language
-                        // (cfg.animStyle) and stagger the tile grids use
+                        // it shows — same bloom/pop/fade/reveal/slide/none
+                        // language (cfg.animStyle) and stagger the tile grids use
                         property var shownWall: null
                         property bool filled: false
                         onWallChanged: {
@@ -8035,7 +8056,7 @@ ShellRoot {
             case "replayCount": return "" + cfg.replayCount;
             case "notifStyle": return cfg.notifStyle;
             case "notifAnim": return cfg.notifAnim;
-            case "wallpaperStyle": return cfg.wallpaperStyle === "carousel-flat" ? "carousel no parallax" : cfg.wallpaperStyle;
+            case "wallpaperStyle": return cfg.wallpaperStyle === "carousel-flat" ? "carousel" : cfg.wallpaperStyle === "carousel" ? "parallax carousel" : cfg.wallpaperStyle;
             }
             return "";
         }
@@ -8054,7 +8075,7 @@ ShellRoot {
                 clipScan.running = true;
                 break;
             case "animStyle": {
-                const styles = ["wave", "pop", "fade", "slide", "none"];
+                const styles = ["bloom", "pop", "fade", "cascade", "slide", "none"];
                 let i = styles.indexOf(cfg.animStyle);
                 if (i < 0)
                     i = 0;
@@ -8125,7 +8146,7 @@ ShellRoot {
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
             case "wallpaperStyle":
-                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["tiles", "carousel", "carousel-flat"], dir);
+                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["grid", "carousel", "carousel-flat"], dir);
                 break;
             }
             root.saveSettings();
@@ -8177,7 +8198,7 @@ ShellRoot {
                 clipScan.running = false;
                 clipScan.running = true;
                 break;
-            case "animStyle": cfg.animStyle = "wave"; break;
+            case "animStyle": cfg.animStyle = "bloom"; break;
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
@@ -8209,7 +8230,7 @@ ShellRoot {
             case "replayCount": cfg.replayCount = 1; break;
             case "notifStyle": cfg.notifStyle = "bubble"; break;
             case "notifAnim": cfg.notifAnim = "pop"; break;
-            case "wallpaperStyle": cfg.wallpaperStyle = "tiles"; break;
+            case "wallpaperStyle": cfg.wallpaperStyle = "grid"; break;
             default:
                 if (key.startsWith("bind:")) {
                     const a = key.slice(5);
@@ -8243,7 +8264,7 @@ ShellRoot {
                     if (i >= 0 && panes.length > 1)
                         win.pane = panes[(i + 1) % panes.length];
                 }
-                if (win.pane === "walls" && cfg.wallpaperStyle !== "tiles")
+                if (win.pane === "walls" && cfg.wallpaperStyle !== "grid")
                     win.jumpWallCarousel();
             }
 
@@ -8407,20 +8428,21 @@ ShellRoot {
         }
 
         // ---------- tile entry animation styles ----------
-        // wave: staggered spring cascade (default). pop: all tiles spring at
-        // once. fade: soft staggered fade. slide: rows slide up. none: instant.
+        // bloom: staggered spring cascade (default). pop: all tiles spring at
+        // once. fade: soft fade, all at once. cascade: fade's soft fade, but
+        // staggered like bloom. slide: rows slide up. none: instant.
         readonly property string animStyle: cfg.animStyle
-        readonly property real animFromScale: animStyle === "wave" || animStyle === "pop" ? 0.4 : 1
-        readonly property int animFromY: animStyle === "slide" ? 46 : animStyle === "fade" ? 6 : animStyle === "none" ? 0 : 14
-        readonly property int animDur: animStyle === "fade" ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
+        readonly property real animFromScale: animStyle === "bloom" || animStyle === "pop" ? 0.4 : 1
+        readonly property int animFromY: animStyle === "slide" ? 46 : (animStyle === "fade" || animStyle === "cascade") ? 6 : animStyle === "none" ? 0 : 14
+        readonly property int animDur: (animStyle === "fade" || animStyle === "cascade") ? 220 : animStyle === "slide" ? 320 : animStyle === "none" ? 0 : 400
         readonly property int animFadeDur: animStyle === "none" ? 0 : 180
-        readonly property int animEase: animStyle === "wave" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
+        readonly property int animEase: animStyle === "bloom" || animStyle === "pop" ? Easing.OutBack : Easing.OutCubic
         // Exit mirrors entrance: tiles spring back out toward the same
         // from-state (animFromScale/animFromY) they sprang in from, so
-        // "wave"/"pop" (bounce) read as the reverse of their entrance
+        // "bloom"/"pop" (bounce) read as the reverse of their entrance
         // instead of all sharing one bounce-then-shrink shape.
-        readonly property bool animOutBounce: animStyle === "wave" || animStyle === "pop"
-        readonly property int animOutSettleDur: animStyle === "fade" ? 180 : animStyle === "slide" ? 260 : 320
+        readonly property bool animOutBounce: animStyle === "bloom" || animStyle === "pop"
+        readonly property int animOutSettleDur: (animStyle === "fade" || animStyle === "cascade") ? 180 : animStyle === "slide" ? 260 : 320
         readonly property int animOutEase: animOutBounce ? Easing.InQuad : Easing.InCubic
         // "none" (tile animation) zeroes tile/pane-entrance durations only —
         // the launch reveal has its own independent "none" (see lad below),
@@ -8443,7 +8465,7 @@ ShellRoot {
             if (!staggering)
                 return 0;
             switch (animStyle) {
-            case "wave": return slot * 35;
+            case "bloom": case "cascade": return slot * 35;
             case "slide": return Math.floor(slot / cols) * 60;
             }
             return 0;
