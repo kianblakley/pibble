@@ -2907,13 +2907,13 @@ ShellRoot {
         // geometry. Outside either zone the vertical drag belongs to pane
         // navigation instead (see the MouseArea above).
         // shared with the right-edge swipe-to-go-back drag too (see
-        // backEdgeCursor/rightEdgePress below)
+        // rightEdgePress below)
         readonly property real edgeSwipeZone: 80
         // true while either prompt is armed — every navigation gesture on
         // screen (pane cycling, page paging, carousel scrolling) stands down
         // for it, see bgArea.onPressed and wcCell's handlers below — except
         // the edge-swipe-back gesture, which stays live on purpose so it can
-        // dismiss the prompt (see backDragHandler and win.goBack())
+        // dismiss the prompt (see bgArea.backTracking and win.goBack())
         readonly property bool promptOpen: powerArmed || rebootArmed
         property string dragZone: "none" // "top" | "bottom" | "none" — which edge (if any) the in-flight drag started in
         property bool powerDragging: false
@@ -3010,7 +3010,7 @@ ShellRoot {
         // Android-edge-gesture style: dragging left from inside the right
         // edgeSwipeZone strip pulls a small pill in from the edge (see
         // backPill, near powerRing/rebootRing below, for how it's drawn;
-        // bgArea's backDragHandler for the drag itself). Unlike
+        // bgArea's backTracking for the drag itself). Unlike
         // swipe-to-power/reboot above there's no separate arm/confirm step —
         // releasing past backThreshold fires goBack() immediately, same as
         // Android's own edge-back gesture, since going back is cheap and
@@ -3019,7 +3019,7 @@ ShellRoot {
         property bool backDragging: false
         property real backRaw: 0 // raw leftward drag distance from the right edge (finger travel)
         // scene Y the drag actually started at (set once per drag, in
-        // bgArea's backDragHandler) — backPill spawns there instead of
+        // bgArea's onPressed) — backPill spawns there instead of
         // always centering vertically, same as Android's edge-back pill
         property real backGrabY: 0
         readonly property real backThreshold: 70
@@ -3947,21 +3947,23 @@ ShellRoot {
                 // commits whole slots on release (win.carouselDragEnd(), a
                 // distance carried by the drag scaled by release speed)
                 // and up/down is a no-op, since the carousel has no grid
-                // pages. Tracked here (rather than with a second, plain
-                // sibling DragHandler alongside the power/reboot one
-                // below) because PointerHandlers on this layer-shell
-                // surface aren't reliably delivered events — see the
-                // onWheel note above this MouseArea about the WheelHandler
-                // that never fired; MouseArea's own press/move/release is
-                // the path already proven to work here. Presses starting
-                // inside an edge zone (edgePress) are left alone so the
-                // DragHandler below can arm power/reboot instead — and,
-                // critically, that DragHandler is disabled for anything
-                // but an edge press, or it would win the drag grab out
-                // from under every non-edge vertical swipe here (a plain
-                // "enabled" gate that ignores where the drag started, like
-                // it used to, always wins that race since it lives on this
-                // same Item) and pageMove would never fire.
+                // pages.
+                //
+                // The edge swipes (power/reboot shade, swipe-to-go-back)
+                // below are tracked the exact same way, in this same
+                // MouseArea, instead of with sibling DragHandlers — a
+                // DragHandler tried that first, but it competes with this
+                // MouseArea for the same touch grab, and on a layer-shell
+                // surface that race is genuinely unreliable: logged
+                // touch traces showed identical, correctly-detected edge
+                // presses sometimes never reaching the DragHandler's
+                // active state at all, silently swallowing the gesture,
+                // for no reason visible at the QML level. Mouse input
+                // never showed this because it doesn't go through the
+                // same touch grab arbitration. Routing everything through
+                // this MouseArea's own press/move/release — already
+                // proven reliable for pane-cycle/page-move/carousel above
+                // — removes the race entirely instead of trying to win it.
                 readonly property bool onCarousel: win.pane === "walls" && cfg.wallpaperStyle !== "grid"
                 property real pressX: 0
                 property real pressY: 0
@@ -3971,10 +3973,29 @@ ShellRoot {
                 property bool carouselTracking: false
                 property bool edgePress: false
                 // same idea as edgePress, but the right edge specifically —
-                // left alone here so backDragHandler below can pull the
-                // swipe-to-go-back pill out instead of this MouseArea
-                // grabbing it as a pane-cycle swipe
+                // left alone here so backTracking below can pull the
+                // swipe-to-go-back pill out instead of this being treated
+                // as a pane-cycle swipe
                 property bool rightEdgePress: false
+                // power/reboot notification-shade-style edge drag: starts
+                // once a press begins inside the top/bottom edgeSwipeZone
+                // strip, same as edgePress above, or — once a prompt is
+                // already armed — from anywhere, since at that point the
+                // whole screen belongs to it (dragZone gets pinned to
+                // whichever prompt is armed, ignoring where this press
+                // landed; see onPressed below)
+                property bool powerRebootTracking: false
+                // Android-edge-back-gesture-style drag from the right edge.
+                // Deliberately NOT gated on !win.promptOpen (see horizTracking/
+                // vertTracking/carouselTracking above, which are): it needs to
+                // keep working while a power/reboot prompt is armed so
+                // there's always a touch-reachable way to let go of it (a
+                // tap already works via onClicked below, but the edge-back
+                // swipe is the gesture people reach for instinctively) —
+                // win.goBack() checks powerArmed/rebootArmed first, so a
+                // completed swipe here disarms instead of navigating.
+                property bool backTracking: false
+                property real backGrabX: 0
                 onClicked: mouse => {
                     if (win.powerArmed || win.rebootArmed) {
                         // MouseArea's clicked doesn't care how far the
@@ -4004,7 +4025,7 @@ ShellRoot {
                     edgePress = mouse.y <= win.edgeSwipeZone || mouse.y >= height - win.edgeSwipeZone;
                     rightEdgePress = mouse.x >= width - win.edgeSwipeZone;
                     // while a power/reboot prompt is armed, every gesture on
-                    // screen belongs to it (see the DragHandler below) —
+                    // screen belongs to it (see powerRebootTracking below) —
                     // pane/grid navigation and the carousel flick sit out
                     // entirely so they can't fire alongside it
                     const inCarousel = onCarousel
@@ -4012,42 +4033,56 @@ ShellRoot {
                     carouselTracking = !win.promptOpen && inCarousel && root.gestureOn() && !rightEdgePress;
                     horizTracking = !win.promptOpen && root.gestureOn() && !inCarousel && !rightEdgePress;
                     vertTracking = !win.promptOpen && root.gestureOn() && !onCarousel && !edgePress;
+
+                    powerRebootTracking = root.gestureOn() && (win.promptOpen || edgePress);
+                    if (powerRebootTracking) {
+                        // an armed prompt pins the zone to itself regardless
+                        // of where on screen this press landed — only a
+                        // fresh, unarmed edge press still needs to look at
+                        // the touch position to decide which prompt (if
+                        // either) it's arming
+                        win.dragZone = win.powerArmed ? "top"
+                            : win.rebootArmed ? "bottom"
+                            : mouse.y < win.edgeSwipeZone ? "top"
+                            : mouse.y > height - win.edgeSwipeZone ? "bottom" : "none";
+                        win.powerDragging = win.dragZone === "top";
+                        win.rebootDragging = win.dragZone === "bottom";
+                        // only fold in the live raw values when actually
+                        // continuing an already-armed prompt's drag — a
+                        // fresh, unarmed edge press must start from a clean
+                        // baseline. powerRaw/rebootRaw spring back to 0 over
+                        // win.had(320)ms on disarm (Behavior enabled once
+                        // *Dragging above is false), so a re-swipe from the
+                        // edge started before that finishes would otherwise
+                        // bake the still-animating leftover value into this
+                        // drag's reference point, corrupting it until the
+                        // old animation happens to finish on its own.
+                        win.dragGrabY = win.promptOpen
+                            ? mouse.y - win.powerRaw + win.rebootRaw
+                            : mouse.y;
+                    }
+
+                    backTracking = root.gestureOn() && rightEdgePress;
+                    if (backTracking) {
+                        backGrabX = mouse.x;
+                        win.backGrabY = mouse.y;
+                        win.backDragging = true;
+                    }
                 }
-                // Lets a drag that started out here (bgArea always sits
-                // underneath settingsHover, so it only ever sees drags that
-                // began outside that corner zone) still reveal/activate the
-                // settings button once it wanders in — settingsHover itself
-                // never gets a press to grab in that case, so it can't
-                // notice on its own. A HoverHandler alongside settingsHover
-                // was tried first, on the theory that (like edgeCursor
-                // above) it'd keep tracking the point regardless of who
-                // holds the grab — but per the note on this MouseArea's own
-                // onWheel, PointerHandlers on this layer-shell surface just
-                // aren't reliably delivered events once another Item (this
-                // one) already owns the grab, so it never fired. bgArea's
-                // own onPositionChanged, by contrast, is the proven-reliable
-                // path (same reasoning as the wheel path), so the zone/
-                // button check lives here instead, mapped into
-                // settingsHover's own coordinate space.
-                property bool overSettingsZone: false
-                property bool overSettingsButton: false
                 onPositionChanged: mouse => {
                     if (carouselTracking)
                         win.carouselDragTo(mouse.x - pressX);
-                    const sp = settingsHover.mapFromItem(bgArea, mouse.x, mouse.y);
-                    overSettingsZone = sp.x >= 0 && sp.x <= settingsHover.width && sp.y >= 0 && sp.y <= settingsHover.height;
-                    overSettingsButton = settingsHover.inButtonRect(sp.x, sp.y);
+                    if (powerRebootTracking && win.dragZone !== "none") {
+                        const delta = mouse.y - win.dragGrabY;
+                        if (win.dragZone === "top")
+                            win.powerRaw = Math.max(0, delta);
+                        else
+                            win.rebootRaw = Math.max(0, -delta);
+                    }
+                    if (backTracking)
+                        win.backRaw = Math.max(0, backGrabX - mouse.x);
                 }
                 onReleased: mouse => {
-                    if (overSettingsButton) {
-                        win.toggleSettings();
-                        overSettingsZone = false;
-                        overSettingsButton = false;
-                        horizTracking = false;
-                        vertTracking = false;
-                        carouselTracking = false;
-                        return;
-                    }
                     const dx = mouse.x - pressX;
                     const dy = mouse.y - pressY;
                     if (carouselTracking) {
@@ -4064,8 +4099,33 @@ ShellRoot {
                     horizTracking = false;
                     vertTracking = false;
                     carouselTracking = false;
-                    overSettingsZone = false;
-                    overSettingsButton = false;
+
+                    if (powerRebootTracking) {
+                        win.powerDragging = false;
+                        win.rebootDragging = false;
+                        if (win.powerProgress >= 1) {
+                            // hold the completed pose and wait for Enter
+                            win.powerArmed = true;
+                            win.powerRaw = win.powerThreshold;
+                        } else {
+                            win.disarmPower(); // springs back up
+                        }
+                        if (win.rebootProgress >= 1) {
+                            win.rebootArmed = true;
+                            win.rebootRaw = win.rebootThreshold;
+                        } else {
+                            win.disarmReboot();
+                        }
+                        win.dragZone = "none";
+                        powerRebootTracking = false;
+                    }
+                    if (backTracking) {
+                        win.backDragging = false;
+                        if (win.backProgress >= 1)
+                            win.goBack();
+                        win.backRaw = 0; // springs back (no-op if goBack() just changed pane/closed)
+                        backTracking = false;
+                    }
                 }
                 onWheel: wheel => {
                     // while a clip is expanded, wheel scrolls its text
@@ -4091,172 +4151,6 @@ ShellRoot {
                     }
                 }
 
-                // Continuously up to date read of "is the pointer currently
-                // within the top/bottom edge strip" for the DragHandler's
-                // enabled below — deliberately NOT bgArea.edgePress (which
-                // only refreshes inside bgArea's onPressed, a JS signal
-                // handler). A fresh edge-swipe's press event and this
-                // DragHandler's own grab-eligibility check race against
-                // that handler on the very same press, so a value that's
-                // only current one gesture late (e.g. right after arming
-                // then dismissing a prompt from off-edge, which leaves
-                // edgePress stuck false) can silently swallow the very next
-                // edge swipe. HoverHandler never grabs, so it keeps
-                // reporting the live position through presses and drags
-                // alike, with no such lag.
-                HoverHandler {
-                    id: edgeCursor
-                    property bool nearEdge: point.position.y <= win.edgeSwipeZone
-                        || point.position.y >= bgArea.height - win.edgeSwipeZone
-                }
-                // swipe-to-power/reboot: an Android-notification-shade-style
-                // edge drag — before a prompt is armed, it only starts once
-                // the press begins inside the top or bottom
-                // win.edgeSwipeZone strip (tile MouseAreas grab their own
-                // presses regardless); enabled requires edgeCursor.nearEdge
-                // so this DragHandler never even attempts to grab a non-edge
-                // vertical drag — it lives on the same Item as bgArea, so if
-                // it were always enabled it would win that grab race every
-                // time and bgArea's own vertTracking pageMove gesture would
-                // never see a move/release. Once a prompt IS armed, the edge
-                // requirement is dropped (any vertical drag anywhere
-                // continues to drive it — see the dragZone pin below) since
-                // bgArea's own tracking has already stood down for the same
-                // state (see promptOpen in its onPressed) and the whole
-                // screen belongs to the prompt.
-                // Same scene-coords pattern as the notification swipe: the
-                // content moving under the cursor must not feed back into
-                // the drag. Gated behind "power" (the feature itself).
-                DragHandler {
-                    target: null
-                    // armEligible freezes edgeCursor.nearEdge's reading from
-                    // the instant this grab starts (see onActiveChanged):
-                    // enabled must go on being true for the rest of an
-                    // in-progress drag regardless of where the pointer
-                    // wanders — Qt cancels an active handler outright the
-                    // moment its enabled goes false — but the whole point of
-                    // this drag is to pull the pointer well past the edge
-                    // strip, so a live edgeCursor.nearEdge read here would
-                    // cancel every real pull partway down. Only a *fresh*
-                    // (not yet active) press needs the live read, to decide
-                    // whether it's eligible to grab at all.
-                    property bool armEligible: false
-                    enabled: root.gestureOn() && (win.powerArmed || win.rebootArmed || (active ? armEligible : edgeCursor.nearEdge))
-                    xAxis.enabled: false
-                    yAxis.enabled: true
-                    onActiveChanged: {
-                        if (active) {
-                            armEligible = edgeCursor.nearEdge;
-                            const y = centroid.scenePosition.y;
-                            // an armed prompt pins the zone to itself
-                            // regardless of where on screen this drag
-                            // started — only an unarmed edge press still
-                            // needs to look at the touch position to decide
-                            // which prompt (if either) it's arming
-                            win.dragZone = win.powerArmed ? "top"
-                                : win.rebootArmed ? "bottom"
-                                : y < win.edgeSwipeZone ? "top"
-                                : y > win.revH - win.edgeSwipeZone ? "bottom" : "none";
-                            win.powerDragging = win.dragZone === "top";
-                            win.rebootDragging = win.dragZone === "bottom";
-                            // only fold in the live raw values when actually
-                            // continuing an already-armed prompt's drag — a
-                            // fresh, unarmed edge press must start from a
-                            // clean baseline. powerRaw/rebootRaw spring back
-                            // to 0 over win.had(320)ms on disarm (Behavior
-                            // enabled once *Dragging above is false), so a
-                            // re-swipe from the edge started before that
-                            // finishes would otherwise bake the still-
-                            // animating leftover value into this drag's
-                            // reference point, corrupting it until the old
-                            // animation happens to finish on its own.
-                            win.dragGrabY = (win.powerArmed || win.rebootArmed)
-                                ? y - win.powerRaw + win.rebootRaw
-                                : y;
-                        } else {
-                            win.powerDragging = false;
-                            win.rebootDragging = false;
-                            if (win.powerProgress >= 1) {
-                                // hold the completed pose and wait for Enter
-                                win.powerArmed = true;
-                                win.powerRaw = win.powerThreshold;
-                            } else {
-                                win.disarmPower(); // springs back up
-                            }
-                            if (win.rebootProgress >= 1) {
-                                win.rebootArmed = true;
-                                win.rebootRaw = win.rebootThreshold;
-                            } else {
-                                win.disarmReboot();
-                            }
-                            win.dragZone = "none";
-                        }
-                    }
-                    onCentroidChanged: {
-                        if (active && win.dragZone !== "none") {
-                            const delta = centroid.scenePosition.y - win.dragGrabY;
-                            if (win.dragZone === "top")
-                                win.powerRaw = Math.max(0, delta);
-                            else
-                                win.rebootRaw = Math.max(0, -delta);
-                        }
-                    }
-                }
-
-                // live read of "pointer is currently within the right edge
-                // strip", same reasoning as edgeCursor above (a fresh
-                // edge-swipe's press and this DragHandler's own grab check
-                // race on the same press, so this needs to already be
-                // current rather than only refreshed in onPressed)
-                HoverHandler {
-                    id: backEdgeCursor
-                    property bool nearEdge: point.position.x >= bgArea.width - win.edgeSwipeZone
-                }
-                // swipe-to-go-back — see win.goBack() for the layered
-                // behavior it triggers and the property block above it for
-                // the resistance curve. Simpler than the power/reboot
-                // DragHandler above: no separate arm/confirm step, so
-                // release just commits (past backThreshold) or springs back
-                // (short of it) outright. armEligible freezes the edge
-                // check the same way armEligible does above, so the drag
-                // keeps tracking once it's well past the edge strip instead
-                // of Qt cancelling it the moment the pointer leaves nearEdge.
-                // Deliberately NOT gated on !win.promptOpen: it needs to
-                // keep working while a power/reboot prompt is armed so
-                // there's always a touch-reachable way to let go of it (a
-                // tap already works, via bgArea.onClicked, but the edge-back
-                // swipe is the gesture people reach for instinctively) —
-                // win.goBack() checks powerArmed/rebootArmed first, so a
-                // completed swipe here disarms instead of navigating.
-                // Right-edge (x-axis) and top/bottom-edge (y-axis) drags are
-                // axis-disjoint, so this never competes with the power/
-                // reboot DragHandler for the same gesture.
-                DragHandler {
-                    id: backDragHandler
-                    target: null
-                    property bool armEligible: false
-                    property real grabX: 0
-                    enabled: root.gestureOn() && (active ? armEligible : backEdgeCursor.nearEdge)
-                    xAxis.enabled: true
-                    yAxis.enabled: false
-                    onActiveChanged: {
-                        if (active) {
-                            armEligible = backEdgeCursor.nearEdge;
-                            grabX = centroid.scenePosition.x;
-                            win.backGrabY = centroid.scenePosition.y;
-                            win.backDragging = true;
-                        } else {
-                            win.backDragging = false;
-                            if (win.backProgress >= 1)
-                                win.goBack();
-                            win.backRaw = 0; // springs back (no-op if goBack() just changed pane/closed)
-                        }
-                    }
-                    onCentroidChanged: {
-                        if (active)
-                            win.backRaw = Math.max(0, grabX - centroid.scenePosition.x);
-                    }
-                }
             }
 
             // Idle state: big clock + date. The outer gate holds the clock
@@ -8000,13 +7894,13 @@ ShellRoot {
             // color/border/hover-alpha formula, same icon color — just
             // substituting the completed-drag state for its hover state.
             // The drag/release-to-go-back behavior itself is bgArea's
-            // backDragHandler.
+            // backTracking.
             Item {
                 id: backPill
                 visible: win.backRaw > 1
                 anchors.right: parent.right
                 // spawns at the height the drag actually started from
-                // (win.backGrabY, set once per drag by backDragHandler)
+                // (win.backGrabY, set once per drag in bgArea's onPressed)
                 // rather than always centering vertically — clamped so it
                 // can't render partly off the top/bottom edge for a drag
                 // that started near a screen corner
@@ -8034,11 +7928,9 @@ ShellRoot {
                 }
             }
 
-            // Corner settings button: pops up when hovering (or, on a
-            // touchscreen, dragging into) the bottom-right corner, or while
-            // the settings pane is open, and activates on release over it —
-            // a finger can do the whole thing as a single press-drag-release
-            // motion, from anywhere on screen, no real hover required.
+            // Corner settings button: pops up when hovering the
+            // bottom-right corner, or while the settings pane is open, and
+            // activates on click.
             MouseArea {
                 id: settingsHover
                 anchors.right: parent.right
@@ -8046,26 +7938,16 @@ ShellRoot {
                 width: 260
                 height: 180
                 hoverEnabled: true
-                // revealed while genuinely hovering (mouse), while a press
-                // that started right here is down (touch tapping directly
-                // in), while bgArea reports an in-flight drag that started
-                // elsewhere has wandered into this zone (see bgArea.
-                // overSettingsZone — that's the touch case: drag in from
-                // outside, reveal, release on the button to activate, all
-                // one motion, handled over there since bgArea is the one
-                // actually holding the grab), or while settings is already open
-                readonly property bool revealed: containsMouse || pressed || bgArea.overSettingsZone || win.pane === "settings"
+                readonly property bool revealed: containsMouse || pressed || win.pane === "settings"
                 // the button's hit rect in this Item's own coordinate space
                 // — mirrors cornerBtn's anchors below (right/bottom, 32
                 // margin, 56 size) — deliberately independent of cornerBtn's
-                // reveal opacity/scale animation so a release lands on it
-                // even mid pop-in, not just once it's fully grown. Exposed
-                // as a function (not just the overButton property below) so
-                // bgArea can reuse the exact same rect for drags it owns.
+                // reveal opacity/scale animation so a click lands on it
+                // even mid pop-in, not just once it's fully grown.
                 function inButtonRect(x: real, y: real): bool {
                     return x >= width - 88 && x <= width - 32 && y >= height - 88 && y <= height - 32;
                 }
-                readonly property bool overButton: inButtonRect(mouseX, mouseY) || bgArea.overSettingsButton
+                readonly property bool overButton: inButtonRect(mouseX, mouseY)
                 onClicked: if (overButton)
                     win.toggleSettings()
 
