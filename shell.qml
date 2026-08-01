@@ -2911,7 +2911,9 @@ ShellRoot {
         readonly property real edgeSwipeZone: 80
         // true while either prompt is armed — every navigation gesture on
         // screen (pane cycling, page paging, carousel scrolling) stands down
-        // for it, see bgArea.onPressed and wcCell's handlers below
+        // for it, see bgArea.onPressed and wcCell's handlers below — except
+        // the edge-swipe-back gesture, which stays live on purpose so it can
+        // dismiss the prompt (see backDragHandler and win.goBack())
         readonly property bool promptOpen: powerArmed || rebootArmed
         property string dragZone: "none" // "top" | "bottom" | "none" — which edge (if any) the in-flight drag started in
         property bool powerDragging: false
@@ -3034,11 +3036,19 @@ ShellRoot {
             NumberAnimation { duration: win.had(240); easing.type: Easing.OutCubic }
         }
         // same layered order the Escape keybind used to inline directly —
-        // it now just calls this: collapse an expanded clip, else back out
-        // of settings to whatever pane opened it, else close the launcher
-        // outright.
+        // it now just calls this: let go of an armed power/reboot prompt,
+        // else collapse an expanded clip, else back out of settings to
+        // whatever pane opened it, else close the launcher outright. The
+        // Escape keybind never actually reaches this branch (promptOpen is
+        // intercepted earlier in the key handler), but the edge-swipe-back
+        // gesture calls this directly and has no such earlier interception,
+        // so the prompt check has to live here too.
         function goBack() {
-            if (win.expandedClip)
+            if (win.powerArmed)
+                win.disarmPower();
+            else if (win.rebootArmed)
+                win.disarmReboot();
+            else if (win.expandedClip)
                 win.collapseClip();
             else if (win.pane === "settings")
                 win.setPane(win.paneBeforeSettings);
@@ -4059,10 +4069,27 @@ ShellRoot {
                 // only current one gesture late (e.g. right after arming
                 // then dismissing a prompt from off-edge, which leaves
                 // edgePress stuck false) can silently swallow the very next
-                // edge swipe. HoverHandler never grabs, so it keeps
-                // reporting the live position through presses and drags
-                // alike, with no such lag.
-                HoverHandler {
+                // edge swipe. A HoverHandler used to sit here instead: it
+                // never grabs, so on a mouse it keeps reporting the live
+                // position through presses and drags alike, with no such
+                // lag — but "hover" only exists for a mouse in the first
+                // place because the cursor is already sitting somewhere
+                // before the button goes down. A touch has no such leadup:
+                // the press *is* the first sample, and nothing refreshes a
+                // HoverHandler's position between two separate touches with
+                // no real pointer motion in between (Wayland only sends a
+                // pointer-enter/motion once, not per touch-down) — so on a
+                // touch-only device it tends to stay frozen whereever the
+                // previous gesture's drag ended, usually well off-edge,
+                // silently failing every edge swipe after the first. A
+                // TapHandler tracks its point's position from the moment of
+                // press itself (that's how it can tell a tap from a drag in
+                // the first place), so it stays fresh for touch the same
+                // way HoverHandler stays fresh for a mouse; its default
+                // DragThreshold gesturePolicy releases the point the moment
+                // it turns into a real drag, so it never competes for the
+                // grab either.
+                TapHandler {
                     id: edgeCursor
                     property bool nearEdge: point.position.y <= win.edgeSwipeZone
                         || point.position.y >= bgArea.height - win.edgeSwipeZone
@@ -4162,11 +4189,11 @@ ShellRoot {
                 }
 
                 // live read of "pointer is currently within the right edge
-                // strip", same reasoning as edgeCursor above (a fresh
-                // edge-swipe's press and this DragHandler's own grab check
-                // race on the same press, so this needs to already be
-                // current rather than only refreshed in onPressed)
-                HoverHandler {
+                // strip", same reasoning as edgeCursor above — a TapHandler
+                // rather than a HoverHandler, since its point.position is
+                // fresh from the moment of press itself, which is what a
+                // touch needs (see the comment on edgeCursor above)
+                TapHandler {
                     id: backEdgeCursor
                     property bool nearEdge: point.position.x >= bgArea.width - win.edgeSwipeZone
                 }
@@ -4179,12 +4206,22 @@ ShellRoot {
                 // check the same way armEligible does above, so the drag
                 // keeps tracking once it's well past the edge strip instead
                 // of Qt cancelling it the moment the pointer leaves nearEdge.
+                // Deliberately NOT gated on !win.promptOpen: it needs to
+                // keep working while a power/reboot prompt is armed so
+                // there's always a touch-reachable way to let go of it (a
+                // tap already works, via bgArea.onClicked, but the edge-back
+                // swipe is the gesture people reach for instinctively) —
+                // win.goBack() checks powerArmed/rebootArmed first, so a
+                // completed swipe here disarms instead of navigating.
+                // Right-edge (x-axis) and top/bottom-edge (y-axis) drags are
+                // axis-disjoint, so this never competes with the power/
+                // reboot DragHandler for the same gesture.
                 DragHandler {
                     id: backDragHandler
                     target: null
                     property bool armEligible: false
                     property real grabX: 0
-                    enabled: root.gestureOn() && !win.promptOpen && (active ? armEligible : backEdgeCursor.nearEdge)
+                    enabled: root.gestureOn() && (active ? armEligible : backEdgeCursor.nearEdge)
                     xAxis.enabled: true
                     yAxis.enabled: false
                     onActiveChanged: {
@@ -7991,7 +8028,22 @@ ShellRoot {
                 width: 260
                 height: 180
                 hoverEnabled: true
-                readonly property bool revealed: containsMouse || win.pane === "settings"
+                // touchscreens have no real hover — containsMouse only
+                // tracks true for the instant a finger is actually down, so
+                // a tap that misses the (still-invisible) 56px button reveals
+                // it and immediately hides it again on release, with no
+                // window to land a follow-up tap. touchRevealed makes that
+                // first miss stick: any press anywhere in this zone reveals
+                // the button and holds it up for a few seconds so a second,
+                // aimed tap has something to land on.
+                property bool touchRevealed: false
+                readonly property bool revealed: containsMouse || touchRevealed || win.pane === "settings"
+                onPressed: touchRevealed = true
+                Timer {
+                    interval: 3000
+                    running: settingsHover.touchRevealed && !settingsHover.containsMouse
+                    onTriggered: settingsHover.touchRevealed = false
+                }
 
                 Rectangle {
                     id: cornerBtn
