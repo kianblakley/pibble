@@ -1106,9 +1106,12 @@ ShellRoot {
             property string currentWallpaper: ""
             property real dimOpacity: 0.4
             property string launchAnimation: "grow-top-left"
-            // whether the launcher asks the compositor to blur behind it at
-            // all; independent of launchAnimation (see BackgroundEffect.blurRegion)
-            property bool bgBlur: true
+            // how the launcher blurs whatever's behind it — "off", real
+            // compositor blur ("compositor", see BackgroundEffect.blurRegion),
+            // or the client-side fake ("xray", a blurred wallpaper — see the
+            // background layer inside `content`); independent of
+            // launchAnimation
+            property string bgBlur: "compositor"
             // gates every navigation gesture as one switch: the edge
             // swipe-up/swipe-down power-off/reboot drag (and, once that
             // prompt is armed, the screen-wide swipe that confirms/dismisses
@@ -1650,6 +1653,26 @@ ShellRoot {
         // gestures at once — on only if both halves were
         if (cfg.gestures && typeof cfg.gestures === "object") {
             cfg.gestures = cfg.gestures.power !== false && cfg.gestures.panes !== false;
+            saveSettings();
+        }
+        // bgBlur was a plain bool toggle for compositor blur; it grew a
+        // client-side fake-blur mode alongside it. The property is
+        // declared `string` now, so JsonAdapter coerces an old on-disk
+        // `true`/`false` into the strings "true"/"false" on load rather
+        // than leaving it a JS boolean — check for those, not typeof.
+        if (cfg.bgBlur === "true" || cfg.bgBlur === "false") {
+            cfg.bgBlur = cfg.bgBlur === "true" ? "compositor" : "off";
+            saveSettings();
+        }
+        // there was briefly a second fake-blur mode that blurred a capture of
+        // the screen instead of the wallpaper. It's gone: taking that capture
+        // means a screencopy session, and attaching/detaching one segfaults
+        // Qt's Wayland client in its own screen tracking, reliably enough to
+        // kill the daemon within a handful of opens (reproducible in a few
+        // lines of Quickshell with no shell around it). "xray" is the
+        // surviving client-side blur.
+        if (cfg.bgBlur === "snapshot") {
+            cfg.bgBlur = "xray";
             saveSettings();
         }
     }
@@ -2731,9 +2754,21 @@ ShellRoot {
         // "none" have no circle, so they just get the whole surface,
         // statically, for as long as the window is open. Requesting a
         // region at all is what flips background-effect into "on request"
-        // on niri, which then defaults xray on too — so with the
-        // "Background blur" setting off, don't ask at all.
-        BackgroundEffect.blurRegion: !cfg.bgBlur ? null : (win.growMode ? growRegion : fadeBlurRegion)
+        // on niri, which then defaults its own xray-through-other-windows
+        // behavior on too — so only ask when "Background blur" is actually
+        // set to "compositor" ("xray", the non-protocol mode, draws a
+        // blurred wallpaper as a plain layer inside `content` instead — see
+        // xrayBg below).
+        //
+        // The other modes ask for a 1px region rather than for nothing at
+        // all, which is not the same thing: a compositor-side rule that
+        // turns blur on for this surface (niri layer-rule background-effect,
+        // for one) applies to the whole surface when the client never speaks
+        // the protocol, and then blurs behind the client-side fake as well —
+        // the wasted work is invisible under an opaque fake, but it does
+        // show wherever the surface is still transparent (outside the grow
+        // circle, mid-animation). A region confines it to one pixel.
+        BackgroundEffect.blurRegion: cfg.bgBlur !== "compositor" ? noBlurRegion : (win.growMode ? growRegion : fadeBlurRegion)
         Region {
             id: growRegion
             shape: RegionShape.Ellipse
@@ -2746,6 +2781,11 @@ ShellRoot {
             id: fadeBlurRegion
             width: win.revW
             height: win.revH
+        }
+        Region {
+            id: noBlurRegion
+            width: 1
+            height: 1
         }
 
         // ---------- pane state ----------
@@ -3972,9 +4012,67 @@ ShellRoot {
                 y: win.powerPull - win.rebootPull
             }
 
+            // client-side fake blur ("xray") for compositors without
+            // ext-background-effect-v1: the wallpaper, blurred, sitting
+            // exactly where the real compositor blur would show through — at
+            // exactly screen geometry, since any oversizing here reads as a
+            // zoomed-in backdrop (PreserveAspectCrop scales the wallpaper to
+            // cover the item, so a larger item is a larger wallpaper).
+            //
+            // A one-time render: layer caching, so the blur is paint cost,
+            // not per-frame cost.
+            //
+            // The parameters are matched against niri's own blur, measured off
+            // screenshots of it: the radius from the 10-90% spread of a hard
+            // edge in the compositor-blurred backdrop (~17px at output scale
+            // — and note blurMax is nothing like linear, 32 lands at ~8 and 64
+            // at ~21), the saturation from mean HSL saturation over the same
+            // region. Without that lift the result reads visibly washed out
+            // next to the compositor: MultiEffect blurs in non-linear sRGB,
+            // which drags saturated colour toward grey as it smears, where the
+            // compositor's linear-light blur keeps it.
+            readonly property real bgBlurAmount: 1.0
+            readonly property int bgBlurMax: 48
+            readonly property real bgBlurSaturation: 0.5
+            Image {
+                id: xrayBg
+                anchors.fill: parent
+                visible: cfg.bgBlur === "xray"
+                fillMode: Image.PreserveAspectCrop
+                source: cfg.bgBlur === "xray" ? root.matugenSource : ""
+                asynchronous: true
+                cache: false
+                layer.enabled: visible
+                layer.effect: MultiEffect {
+                    blurEnabled: true
+                    blur: content.bgBlurAmount
+                    blurMax: content.bgBlurMax
+                    saturation: content.bgBlurSaturation
+                }
+            }
+
             Rectangle {
                 anchors.fill: parent
                 color: Qt.alpha(root.surface, cfg.dimOpacity)
+            }
+
+            // Dither. A wide blur of a smooth gradient quantizes into visible
+            // bands once it lands in an 8-bit framebuffer — measured against
+            // niri's own blurred backdrop, which never holds a value for more
+            // than a few pixels because the compositor dithers, where ours
+            // held single values for runs of 100+ pixels. This is a tile of
+            // uniform noise at an amplitude of about one 8-bit level, which
+            // is enough to break the bands up; nearest-neighbour sampling
+            // (smooth: false) keeps it from being averaged back into a flat
+            // tint by the output scale. Only the client-side blur needs it —
+            // in "compositor" mode niri is already dithering its own.
+            Image {
+                anchors.fill: parent
+                visible: cfg.bgBlur === "xray"
+                source: Qt.resolvedUrl("assets/noise.png")
+                fillMode: Image.Tile
+                smooth: false
+                opacity: 0.015
             }
 
             // Background click-catcher; also the scroll-wheel path. Wheel
@@ -6478,6 +6576,14 @@ ShellRoot {
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
                     CustomColorRow {}
+                    SettingRow { key: "dimOpacity"; label: "Background opacity" }
+                    SettingRow {
+                        key: "bgBlur"
+                        label: "Background blur"
+                        sub: cfg.bgBlur === "compositor" ? "real blur — needs a compositor that implements ext-background-effect-v1"
+                            : cfg.bgBlur === "xray" ? "blurs the wallpaper behind the launcher"
+                            : "no background effect"
+                    }
 
                     // bundles version/build info, this run's recent log, and
                     // the latest crash report (if any) for pasting into a
@@ -7440,10 +7546,6 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "dimOpacity"; label: "Background opacity" }
-
-                    SettingRow { key: "bgBlur"; label: "Background blur"; sub: "only supported by compositors that implement the ext-background-effect-v1 protocol" }
-
                     // clock-page layout: three stationary tickboxes (date,
                     // battery, weather). The grouping itself is fixed, not
                     // user-arranged: the clock always sits on its own line up
@@ -8250,7 +8352,7 @@ ShellRoot {
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "launchAnimation": return cfg.launchAnimation;
-            case "bgBlur": return cfg.bgBlur ? "on" : "off";
+            case "bgBlur": return cfg.bgBlur;
             case "gestures": return cfg.gestures ? "on" : "off";
             case "clickToSelect": return cfg.clickToSelect ? "on" : "off";
             case "hiddenMenuAnimations": return cfg.hiddenMenuAnimations ? "on" : "off";
@@ -8305,7 +8407,7 @@ ShellRoot {
                 break;
             }
             case "bgBlur":
-                cfg.bgBlur = !cfg.bgBlur;
+                cfg.bgBlur = cycleChoice(cfg.bgBlur, ["off", "compositor", "xray"], dir);
                 break;
             case "gestures":
                 cfg.gestures = !cfg.gestures;
@@ -8411,7 +8513,7 @@ ShellRoot {
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
-            case "bgBlur": cfg.bgBlur = true; break;
+            case "bgBlur": cfg.bgBlur = "compositor"; break;
             case "hiddenMenuAnimations": cfg.hiddenMenuAnimations = true; break;
             case "gestures": cfg.gestures = true; break;
             case "fontFamily": cfg.fontFamily = ""; break;
