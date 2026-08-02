@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Dialogs
+import QtMultimedia
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -1090,8 +1091,13 @@ ShellRoot {
             // collide with old saved configs mid-migration
             property string wallpaperStyle: "grid"
             property string wallpaperDir: "~/Pictures/wallpapers"
-            // command run when a wallpaper is chosen; $WALL is the image,
-            // $BLUR the blurred variant (only generated if referenced)
+            // command run when a wallpaper is chosen; $WALL is the image (or
+            // video — pibble stays backend-agnostic, so a command that wants
+            // to handle .mp4 differently, e.g. via mpvpaper instead of an
+            // image-only tool like the default awww, has to branch on
+            // $WALL's extension and tear down/start the right backend
+            // itself), $BLUR the blurred variant (only generated if
+            // referenced)
             property string wallCommand: root.defaultWallCommand
             // path of the last wallpaper applied through the launcher; the
             // Dynamic theme samples this directly instead of asking the
@@ -2067,13 +2073,14 @@ ShellRoot {
     // the source is still honored as a user-supplied override.
     property var wallpapers: []
     property string lastMissingDir: ""
-    // matugen chokes on/slow-decodes an animated source; sample the cached
-    // static thumbnail instead when the current wallpaper is a .gif (see
-    // matugenProc). Falls back to the raw path before the background scan
-    // has generated a thumbnail for it yet.
+    // matugen chokes on/slow-decodes an animated source (and can't read
+    // video at all); sample the cached static thumbnail instead when the
+    // current wallpaper is a .gif or .mp4 (see matugenProc). Falls back to
+    // the raw path before the background scan has generated a thumbnail for
+    // it yet.
     readonly property string matugenSource: {
         const w = root.wallpapers.find(x => x.path === cfg.currentWallpaper);
-        return (w && w.gif && w.thumb) ? w.thumb : cfg.currentWallpaper;
+        return (w && (w.gif || w.video) && w.thumb) ? w.thumb : cfg.currentWallpaper;
     }
     function rescanWallpapers() {
         wallScan.running = false;
@@ -2086,16 +2093,23 @@ ShellRoot {
             cd "$1" || { echo NODIR; exit 0; }
             cachedir="$2"
             shopt -s nullglob nocaseglob
-            for f in *.png *.jpg *.jpeg *.webp *.gif; do
+            for f in *.png *.jpg *.jpeg *.webp *.gif *.mp4; do
                 case "$f" in *blurred.*) continue ;; esac
                 stem="\${f%.*}" ext="\${f##*.}"
                 # generated thumb/blur are always true-color (png), even for a
-                # .gif source: writing a single decoded frame back out as .gif
-                # would quantize it to a 256-color palette, banding badly once
-                # blurred; the source itself is still played back untouched
-                oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
+                # .gif/.mp4 source: writing a single decoded frame back out as
+                # .gif would quantize it to a 256-color palette, banding badly
+                # once blurred, and a video obviously can't round-trip as its
+                # own thumbnail at all; the source itself is still played
+                # back untouched
+                oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                 key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
+                # a video source can't stand in as its own thumbnail (unlike
+                # a fresh image/gif, which the Image element can decode
+                # directly) — leave thumb blank until the async pass below
+                # generates a real frame
                 thumb="$PWD/$f" blur=""
+                case "\${ext,,}" in mp4) thumb="" ;; esac
                 # only trust caches newer than the source image
                 [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$oext"
                 [ "$cachedir/blurred/$key.$oext" -nt "$f" ] && blur="$cachedir/blurred/$key.$oext"
@@ -2115,7 +2129,7 @@ ShellRoot {
                 root.lastMissingDir = "";
                 const walls = text.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
-                    return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]) };
+                    return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
                 root.wallpapers = walls;
                 // Generate missing thumbnails (a full 5K image standing in as
@@ -2129,13 +2143,15 @@ ShellRoot {
                 Quickshell.execDetached(["bash", "-c", `
                     walldir="$1" cachedir="$2" gb="$3" alerts="$4"; shift 4
                     mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
-                    warned=0
+                    warnedMagick=0
+                    warnedFfmpeg=0
                     live=""
                     for f in "$@"; do
                         b=$(basename "$f")
                         stem="\${b%.*}" ext="\${b##*.}"
+                        isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
-                        oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
+                        oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                         key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
                         live="$live $key"
                         needthumb=0 needblur=0
@@ -2144,9 +2160,30 @@ ShellRoot {
                             [ "$cachedir/blurred/$key.$oext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
                         if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
-                            if ! command -v magick >/dev/null 2>&1; then
-                                if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
-                                    warned=1
+                            if [ "$isvid" = "1" ]; then
+                                if ! command -v ffmpeg >/dev/null 2>&1; then
+                                    if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
+                                        warnedFfmpeg=1
+                                        notify-send -a pibble -i dialog-error "ffmpeg not found" "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    fi
+                                else
+                                    # not cropped to 480x270 like the image
+                                    # thumbnails below: this frame is what the
+                                    # picker paints while the live video isn't
+                                    # playing, and PreserveAspectCrop derives
+                                    # its scale from the source aspect, so a
+                                    # 16:9 still standing in for a video that
+                                    # isn't 16:9 lands at a different crop than
+                                    # the video itself - a visible zoom the
+                                    # instant playback starts. Keeping the
+                                    # source aspect makes the two identical in
+                                    # any box.
+                                    [ "$needthumb" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale=480:-1" "$cachedir/thumbnails/$key.$oext"
+                                    [ "$needblur" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale=1024:-1,gblur=sigma=20" "$cachedir/blurred/$key.$oext"
+                                fi
+                            elif ! command -v magick >/dev/null 2>&1; then
+                                if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
+                                    warnedMagick=1
                                     notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
@@ -3474,12 +3511,21 @@ ShellRoot {
                 if [ "$5" = "1" ] && [ -z "$BLUR" ]; then
                     mkdir -p "$3/blurred"
                     b=$(basename "$1"); stem="\${b%.*}" ext="\${b##*.}"
-                    # gif source blurs to png, not gif: a single decoded frame
-                    # re-quantized to a 256-color gif palette bands badly
-                    case "\${ext,,}" in gif) ext="png" ;; esac
+                    # gif/mp4 sources blur to png, not their own extension: a
+                    # single decoded frame re-quantized to a 256-color gif
+                    # palette bands badly, and a video obviously can't be a
+                    # single still frame in its own format
+                    isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
+                    case "\${ext,,}" in gif|mp4) ext="png" ;; esac
                     BLUR="$3/blurred/$stem.$ext"
                     if [ ! -e "$BLUR" ]; then
-                        if command -v magick >/dev/null 2>&1; then
+                        if [ "$isvid" = "1" ]; then
+                            if command -v ffmpeg >/dev/null 2>&1; then
+                                ffmpeg -y -v error -i "$WALL" -vframes 1 -vf "scale=1024:-1,gblur=sigma=20" "$BLUR"
+                            elif [ "$6" = "1" ]; then
+                                notify-send -a pibble -i dialog-error "ffmpeg not found" "ffmpeg is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
+                            fi
+                        elif command -v magick >/dev/null 2>&1; then
                             magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
                         elif [ "$6" = "1" ]; then
                             notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
@@ -4690,16 +4736,36 @@ ShellRoot {
                                     radius: 14
                                     color: Qt.alpha(root.accent, wallCell.isSelected ? 0.22 : 0.11)
 
-                                    // Only the selected tile plays its .gif (from
-                                    // the source file, not the static thumbnail);
-                                    // every other tile stays a still frame so
-                                    // scrolling the grid doesn't decode a movie
-                                    // per cell.
-                                    readonly property bool animating: wallCell.isSelected && !!wallCell.shownWall?.gif
+                                    // Only the selected tile plays its .gif/.mp4
+                                    // (from the source file, not the static
+                                    // thumbnail); every other tile stays a still
+                                    // frame so scrolling the grid doesn't decode
+                                    // a movie per cell.
+                                    //
+                                    // gated on this grid being the style in use,
+                                    // and on the launcher being up: the grid's
+                                    // `visible: false` in carousel mode hides
+                                    // these tiles but keeps every binding under
+                                    // them live, so without the check the hidden
+                                    // grid was still building a MediaPlayer for
+                                    // the selected video (~80ms) and tearing it
+                                    // down again (~65ms) on each carousel step
+                                    // past one — a stall landing mid-slide, on a
+                                    // player nobody could see.
+                                    readonly property bool tileLive: cfg.wallpaperStyle === "grid" && win.shown
+                                    readonly property bool gifAnimating: wallCell.isSelected && tileLive && !!wallCell.shownWall?.gif
+                                    readonly property bool videoAnimating: wallCell.isSelected && tileLive && !!wallCell.shownWall?.video
 
                                     Image {
+                                        // stays visible underneath even while
+                                        // animating/videoAnimating — the layers
+                                        // below paint on top once they actually
+                                        // have a frame ready, so there's no gap
+                                        // where neither is showing anything (a
+                                        // decoded gif is close to instant, but
+                                        // MediaPlayer opening/probing a video file
+                                        // has real latency before its first frame)
                                         anchors.fill: parent
-                                        visible: !thumb.animating
                                         asynchronous: true
                                         fillMode: Image.PreserveAspectCrop
                                         sourceSize: Qt.size(480, 270)
@@ -4707,11 +4773,37 @@ ShellRoot {
                                     }
                                     AnimatedImage {
                                         anchors.fill: parent
-                                        visible: thumb.animating
-                                        playing: thumb.animating
+                                        visible: thumb.gifAnimating
+                                        playing: thumb.gifAnimating
                                         asynchronous: true
                                         fillMode: Image.PreserveAspectCrop
-                                        source: thumb.animating ? "file://" + wallCell.shownWall.path : ""
+                                        source: thumb.gifAnimating ? "file://" + wallCell.shownWall.path : ""
+                                    }
+                                    // MediaPlayer's own backend init (opening/
+                                    // probing the file) has a real cost —
+                                    // instantiated only via this Loader, gated
+                                    // the same way AnimatedImage is above, so at
+                                    // most one exists across the whole grid at a
+                                    // time instead of every tile carrying its own
+                                    // idle MediaPlayer permanently.
+                                    Loader {
+                                        anchors.fill: parent
+                                        active: thumb.videoAnimating
+                                        asynchronous: true
+                                        sourceComponent: Component {
+                                            VideoOutput {
+                                                id: vidOut
+                                                anchors.fill: parent
+                                                fillMode: VideoOutput.PreserveAspectCrop
+                                                MediaPlayer {
+                                                    source: wallCell.shownWall ? "file://" + wallCell.shownWall.path : ""
+                                                    loops: MediaPlayer.Infinite
+                                                    autoPlay: true
+                                                    videoOutput: vidOut
+                                                    audioOutput: AudioOutput { muted: true }
+                                                }
+                                            }
+                                        }
                                     }
                                     // TapHandler + DragHandler split, see the
                                     // matching app-tile handlers above
@@ -4875,6 +4967,11 @@ ShellRoot {
                         if (win.pane === "walls" && cfg.wallpaperStyle !== "grid") {
                             win.jumpWallCarousel();
                             carouselIn.restart();
+                            // cells replay their entrance spring below; the
+                            // shared video has none, so keep it out until
+                            // they've landed (see wallCarousel.entranceDone)
+                            wallCarousel.entranceDone = false;
+                            wallVideoEntrance.restart();
                         }
                     }
                 }
@@ -5073,14 +5170,24 @@ ShellRoot {
                                     // landscape frame and has no spare width to
                                     // pan through) decoded at bar height keeps
                                     // the pan free of seams.
+                                    //
+                                    // Video uses its cached still frame here
+                                    // (Image can't decode the source file — see
+                                    // the source binding below) in this same
+                                    // wide/panned box, so it pans exactly like
+                                    // every other type. The still keeps the
+                                    // video's own aspect rather than the tile
+                                    // grid's 16:9 crop (see the ffmpeg call in
+                                    // wallScan), which is what lets the shared
+                                    // player below hand over to it — and back —
+                                    // without the crop shifting.
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: (parent.width - width) / 2 - wcCell.rank * wallCarousel.parallaxPx
-                                    // hidden once the centered gif takes over below,
-                                    // so its still frame doesn't show through at
-                                    // slightly different crop/pan geometry
-                                    visible: !wcThumb.animating
+                                    // stays visible underneath even once
+                                    // animating/videoAnimating — see the matching
+                                    // note on the grid tile's still Image
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
                                     sourceSize: Qt.size(0, wallCarousel.barHeight)
@@ -5088,15 +5195,25 @@ ShellRoot {
                                     // the cell is filtered/emptied out, but the exit
                                     // spring below still needs something to fade —
                                     // shownWall keeps the last-rendered wallpaper
-                                    // until a new one replaces it (see onWallChanged)
-                                    source: wcCell.shownWall ? "file://" + wcCell.shownWall.path : ""
+                                    // until a new one replaces it (see onWallChanged).
+                                    // A video source can't be decoded by Image at
+                                    // all, so it falls back to the (narrower,
+                                    // tightly-cropped) static thumb instead of the
+                                    // full-res pan source every other type gets.
+                                    source: wcCell.shownWall ? "file://" + (wcCell.shownWall.video ? wcCell.shownWall.thumb : wcCell.shownWall.path) : ""
                                 }
                                 // Only the centered window plays its .gif from the
                                 // source file; side windows keep the still Image
                                 // above (which already shows frame 0 of a gif) so
                                 // scrolling the carousel doesn't decode a movie
-                                // per window.
-                                readonly property bool animating: wcCell.isCenter && win.wallCarouselSettled && !!wcCell.shownWall?.gif
+                                // per window. Video is not played per cell at all
+                                // — see the single shared player below the
+                                // Repeater.
+                                // style/shown checked for the same reason the
+                                // grid's tiles check them (see tileLive above):
+                                // the carousel is only `visible: false` in grid
+                                // mode, so its bindings keep running there.
+                                readonly property bool gifAnimating: wcCell.isCenter && win.wallCarouselSettled && cfg.wallpaperStyle !== "grid" && win.shown && !!wcCell.shownWall?.gif
                                 AnimatedImage {
                                     // Same (wider-than-bar) target width as the still
                                     // Image above, not just barWidth: PreserveAspectCrop
@@ -5108,11 +5225,11 @@ ShellRoot {
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
                                     anchors.centerIn: parent
-                                    visible: wcThumb.animating
-                                    playing: wcThumb.animating
+                                    visible: wcThumb.gifAnimating
+                                    playing: wcThumb.gifAnimating
                                     asynchronous: true
                                     fillMode: Image.PreserveAspectCrop
-                                    source: wcThumb.animating ? "file://" + wcCell.shownWall.path : ""
+                                    source: wcThumb.gifAnimating ? "file://" + wcCell.shownWall.path : ""
                                 }
                             }
                             // Stroke above the image, not a border on wcThumb:
@@ -5201,6 +5318,136 @@ ShellRoot {
                             ParallelAnimation {
                                 NumberAnimation { target: wcWrap; property: "scale"; to: win.animFromScale; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
                                 NumberAnimation { target: wcWrap; property: "opacity"; to: 0; duration: win.ad(win.animOutSettleDur); easing.type: win.animOutEase }
+                            }
+                        }
+                    }
+                }
+
+                // One video player for the whole carousel, pinned to the
+                // center slot (rank 0's geometry, see wcCell's x above)
+                // rather than living inside the cells. Building a
+                // MediaPlayer costs ~600ms of backend init the first time
+                // in a process and ~80ms every time after, and tearing one
+                // down another ~65ms, all on the GUI thread — a per-cell
+                // player gated on wallCarouselSettled paid a teardown as
+                // each slide started and a build as it stopped, which is
+                // exactly the stall that made navigating on and off a video
+                // lag (and ate the slide's parallax pan with it). Nothing
+                // here is ever destroyed: navigation only toggles
+                // play/pause and opacity, which cost nothing.
+                //
+                // Pinning to the center is safe precisely because playback
+                // is gated on wallCarouselSettled: whenever this is
+                // visible, the cell it stands in for is resting at rank 0,
+                // unscaled and unpanned. While a slide or drag is in
+                // flight the cell's own still Image takes over, panning
+                // with everything else.
+                readonly property var centerWall: (!win.wallCarouselEmpty && win.wallSelected >= 0 && win.wallSelected < win.wallMatches.length) ? win.wallMatches[win.wallSelected] : null
+                // File the player currently has open. Sticky: navigating
+                // off a video pauses it instead of clearing the source,
+                // since reopening one costs as much as building the player
+                // did. Seeded with the first video the scan finds so that
+                // cost lands at startup, with nothing on screen to stutter
+                // — the same reason pibble-warmup decodes theme SVGs there.
+                property string videoSource: ""
+                readonly property string firstVideo: {
+                    const v = root.wallpapers.find(w => w.video);
+                    return v ? v.path : "";
+                }
+                onFirstVideoChanged: if (videoSource === "")
+                    videoSource = firstVideo
+                Component.onCompleted: if (videoSource === "")
+                    videoSource = firstVideo
+                onCenterWallChanged: if (centerWall && centerWall.video)
+                    videoSource = centerWall.path
+                // videoSource === centerWall.path holds off the handover for
+                // the frame or two after a switch between two videos, while
+                // the player still has the previous file open.
+                // win.shown, not just the pane: the launcher keeps its last
+                // pane while hidden, and decoding frames for a window nobody
+                // is looking at costs the same as decoding for one they are.
+                readonly property bool videoShowing: win.shown && win.pane === "walls" && cfg.wallpaperStyle !== "grid" && win.wallCarouselSettled && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
+                // The shared player has no entrance spring of its own, so
+                // hold it back until the cells have finished theirs — it
+                // would otherwise sit at full opacity in the center slot
+                // while the cell it stands in for is still fading/sliding
+                // in. Longest case: the center cell's stagger delay plus
+                // its own duration.
+                property bool entranceDone: true
+                Timer {
+                    id: wallVideoEntrance
+                    interval: win.animDelay(wallCarousel.halfVisible, 1, 35) + win.animDur + 40
+                    onTriggered: wallCarousel.entranceDone = true
+                }
+                Loader {
+                    id: wallVideo
+                    x: parent.width / 2 - width / 2
+                    y: 0
+                    width: wallCarousel.barWidth
+                    height: wallCarousel.barHeight
+                    active: wallCarousel.videoSource !== ""
+                    asynchronous: true
+                    opacity: wallCarousel.videoShowing ? 1 : 0
+                    visible: opacity > 0
+                    Behavior on opacity {
+                        NumberAnimation { duration: win.ad(90); easing.type: Easing.OutCubic }
+                    }
+                    sourceComponent: Component {
+                        Item {
+                            // Rewound rather than resumed, since the still
+                            // frame it takes over from is frame 0 (see the
+                            // ffmpeg call in wallScan) — picking up mid-clip
+                            // would make the handover jump in content the
+                            // same way it used to jump in scale. Pausing and
+                            // seeking a loaded player is free; only stopping
+                            // or reopening one isn't.
+                            function sync(): void {
+                                if (live) {
+                                    wallVideoPlayer.position = 0;
+                                    wallVideoPlayer.play();
+                                } else {
+                                    wallVideoPlayer.pause();
+                                }
+                            }
+                            readonly property bool live: wallCarousel.videoShowing
+                            onLiveChanged: sync()
+                            // the Loader above builds this asynchronously, so
+                            // it can finish with live already true
+                            Component.onCompleted: sync()
+                            ClippingRectangle {
+                                anchors.fill: parent
+                                radius: 12
+                                color: "transparent"
+                                VideoOutput {
+                                    id: wallVideoOut
+                                    // exactly the box — and therefore
+                                    // exactly the crop — the centered cell's
+                                    // still Image uses at rank 0
+                                    width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
+                                    height: parent.height
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    x: (parent.width - width) / 2
+                                    fillMode: VideoOutput.PreserveAspectCrop
+                                    MediaPlayer {
+                                        id: wallVideoPlayer
+                                        source: "file://" + wallCarousel.videoSource
+                                        loops: MediaPlayer.Infinite
+                                        videoOutput: wallVideoOut
+                                        audioOutput: AudioOutput { muted: true }
+                                    }
+                                }
+                            }
+                            // the centered cell's own 1px stroke is
+                            // underneath this overlay, so redraw it on top,
+                            // in the color that cell resolves to at selFade
+                            // 1. Outside the ClippingRectangle for the same
+                            // reason the cell's is (see wcWrap above).
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 12
+                                color: "transparent"
+                                border.width: 1
+                                border.color: root.accent
                             }
                         }
                     }
