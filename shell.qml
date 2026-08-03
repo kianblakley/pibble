@@ -2084,17 +2084,27 @@ ShellRoot {
     readonly property string wallDir: expandHome(cfg.wallpaperDir)
 
     // Single persistent, self-cleaning cache root for everything the app
-    // generates (wallpaper thumbnails/blur, clip thumbnails) — separate from
-    // the source directories so deleting a wallpaper or a clip scrolling
-    // past clipsMax can be detected and swept on the next scan.
+    // generates — separate from the source directories so deleting a
+    // wallpaper or a clip scrolling past clipsMax can be detected and swept
+    // on the next scan. Three directories, one per kind of generated file:
+    // thumbnails/ and blurred/ (both per wallpaper, see wallScan) and clips/.
     readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/pibble"
-    readonly property string wallCacheDir: cacheRoot + "/wallpapers"
 
-    // Each entry: path|thumb|blurred. thumb/blurred point into wallCacheDir,
-    // keyed by a hash of the source path (stable across renames of unrelated
-    // files, safe across multiple wallpaperDirs); <stem>blurred.<ext> next to
-    // the source is still honored as a user-supplied override.
+    // Each entry: path|thumb|blurred. Both point into cacheRoot, keyed by a
+    // hash of the source path (stable across renames of unrelated files, safe
+    // across multiple wallpaperDirs); <stem>blurred.<ext> next to the source
+    // is still honored as a user-supplied override of the blurred one.
+    //
+    // One blurred image serves both uses: the launcher's own backdrop in
+    // "xray" mode and the $BLUR the wallpaper command gets (see
+    // applyWallpaper) — they're the same picture, so they're the same file.
     property var wallpapers: []
+    // xrayCacheKey as of the last scan that landed. Only when it matches the
+    // current one do the entries say anything about the backdrops the
+    // launcher is actually after — before that (a scan from before the
+    // output scale resolved, say) a missing entry means "not looked for
+    // yet", not "not there".
+    property string wallScanKey: ""
     property string lastMissingDir: ""
     // matugen chokes on/slow-decodes an animated source (and can't read
     // video at all); sample the cached static thumbnail instead when the
@@ -2105,13 +2115,33 @@ ShellRoot {
         const w = root.wallpapers.find(x => x.path === cfg.currentWallpaper);
         return (w && (w.gif || w.video) && w.thumb) ? w.thumb : cfg.currentWallpaper;
     }
+    // Started a tick late: this is called from change handlers on the very
+    // properties the scan's own command binding reads (see xrayCacheKey), and
+    // a binding is only guaranteed to have caught up by the time the next one
+    // reads it — flipping `running` inline reliably ran the scan against the
+    // previous geometry.
     function rescanWallpapers() {
         wallScan.running = false;
-        wallScan.running = true;
+        Qt.callLater(() => wallScan.running = true);
+    }
+    // cache entries the last scan found missing, and the one re-scan armed
+    // to pick them up once the background generation has written them (see
+    // where it's armed, in wallScan's output handler)
+    property string wallGenMissing: ""
+    Timer {
+        id: wallGenRescan
+        interval: 3000
+        onTriggered: root.rescanWallpapers()
     }
     Process {
         id: wallScan
         running: true
+        // the xray parameters this run went looking for, captured at spawn
+        // rather than read back when it finishes — the two can differ by a
+        // whole scan (the output scale resolving is exactly that case), and
+        // reading it late would claim a stale result was current
+        property string scanKey: ""
+        onRunningChanged: if (running) scanKey = root.xrayCacheKey
         command: ["bash", "-c", `
             cd "$1" || { echo NODIR; exit 0; }
             cachedir="$2"
@@ -2127,6 +2157,14 @@ ShellRoot {
                 # back untouched
                 oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                 key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
+                # the blurred variant is the one cache entry that depends on
+                # more than the source file, so the output geometry, the blur
+                # and the recipe version go in its key too: a resized output,
+                # a retuned kernel or a changed recipe then lands on a
+                # different name, and the old one falls out of the sweep
+                # below like any other dead entry. Bump r<n> (here and in the
+                # generation pass) whenever the magick command changes.
+                bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
                 # a video source can't stand in as its own thumbnail (unlike
                 # a fresh image/gif, which the Image element can decode
                 # directly) — leave thumb blank until the async pass below
@@ -2135,12 +2173,14 @@ ShellRoot {
                 case "\${ext,,}" in mp4) thumb="" ;; esac
                 # only trust caches newer than the source image
                 [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$oext"
-                [ "$cachedir/blurred/$key.$oext" -nt "$f" ] && blur="$cachedir/blurred/$key.$oext"
+                [ "$cachedir/blurred/$bkey.png" -nt "$f" ] && blur="$cachedir/blurred/$bkey.png"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
                 printf '%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur"
-            done | sort`, "_", root.wallDir, root.wallCacheDir]
+            done | sort`, "_", root.wallDir, root.cacheRoot,
+            root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)]
         stdout: StdioCollector {
             onStreamFinished: {
+                root.wallScanKey = wallScan.scanKey;
                 if (text.trim() === "NODIR") {
                     root.wallpapers = [];
                     if (root.lastMissingDir !== root.wallDir) {
@@ -2157,15 +2197,49 @@ ShellRoot {
                 root.wallpapers = walls;
                 // Generate missing thumbnails (a full 5K image standing in as
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
-                // overview variants in the background; the next scan picks
-                // them up and applying never has to blur synchronously. Also
-                // sweeps cache entries whose source wallpaper is gone — runs
-                // every scan (not just when something's missing) so deletions
-                // get cleaned up promptly.
-                const wantBlur = cfg.wallCommand.includes("$BLUR");
+                // variants in the background; the next scan picks them up and
+                // applying never has to blur synchronously. Also sweeps cache
+                // entries whose source wallpaper is gone — runs every scan
+                // (not just when something's missing) so deletions get cleaned
+                // up promptly.
+                //
+                // Both consumers of the blurred variant gate it the same way:
+                // it's wanted if the launcher draws it (xray mode) or the
+                // wallpaper command asks for it ($BLUR). The geometry check is
+                // what holds it back until the output scale it's keyed on has
+                // resolved.
+                const wantBlur = (cfg.bgBlur === "xray" || cfg.wallCommand.includes("$BLUR"))
+                    && root.xraySize.width > 0 && root.xrayCacheSigma > 0;
+                // current wallpaper first: on a cold cache its backdrop is the
+                // one thing the launcher needs before any other entry, and a
+                // big folder is minutes of work to get through
+                const paths = walls.map(w => w.path);
+                const cur = paths.indexOf(cfg.currentWallpaper);
+                const order = cur > 0 ? [paths[cur]].concat(paths.slice(0, cur), paths.slice(cur + 1)) : paths;
+                // Arm one follow-up scan whenever anything is still missing:
+                // the pass below is fire-and-forget, so nothing reports when
+                // its output lands, and until a scan sees the files the
+                // launcher keeps falling back (a sharp thumbnail-less video
+                // tile, a live-blurred backdrop). Comparing against the last
+                // set of missing entries is what keeps a cache that *can't*
+                // be filled — no ImageMagick — from scanning on a loop: it
+                // only re-arms while the set is still shrinking.
+                const missing = walls.filter(w => w.thumb === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
+                if (missing !== "" && missing !== root.wallGenMissing)
+                    wallGenRescan.restart();
+                root.wallGenMissing = missing;
                 Quickshell.execDetached(["bash", "-c", `
-                    walldir="$1" cachedir="$2" gb="$3" alerts="$4"; shift 4
+                    walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6"; shift 6
                     mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
+                    # layout from before thumbnails/ and blurred/ moved up
+                    # next to clips/, and from when the backdrop had a cache
+                    # of its own
+                    rm -rf "$cachedir/wallpapers" "$cachedir/xray"
+                    # one generation pass at a time: scans are cheap and fire
+                    # on every open, and two passes racing on the same cache
+                    # entry is duplicated magick work at best
+                    exec 9>"$cachedir/.generating"
+                    flock -n 9 || exit 0
                     warnedMagick=0
                     warnedFfmpeg=0
                     live=""
@@ -2176,11 +2250,13 @@ ShellRoot {
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                         key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
-                        live="$live $key"
+                        # see the matching bkey note in the scan pass above
+                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
+                        live="$live $key $bkey"
                         needthumb=0 needblur=0
                         [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] || needthumb=1
                         if [ "$gb" = "1" ]; then
-                            [ "$cachedir/blurred/$key.$oext" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
+                            [ "$cachedir/blurred/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
                         if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
                             if [ "$isvid" = "1" ]; then
@@ -2202,7 +2278,6 @@ ShellRoot {
                                     # source aspect makes the two identical in
                                     # any box.
                                     [ "$needthumb" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale=480:-1" "$cachedir/thumbnails/$key.$oext"
-                                    [ "$needblur" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale=1024:-1,gblur=sigma=20" "$cachedir/blurred/$key.$oext"
                                 fi
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
@@ -2215,31 +2290,58 @@ ShellRoot {
                                 # thumbnail/blur (only the selected/centered
                                 # tile/window plays the source file itself)
                                 [ "$needthumb" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$oext"
-                                [ "$needblur" = "1" ] && magick "$f[0]" -resize 1024x -blur 0x10 "$cachedir/blurred/$key.$oext"
                             fi
+                        fi
+                        # The blurred variant: the wallpaper as the compositor
+                        # would blur it behind the launcher (see the xray
+                        # block on root for where the numbers come from),
+                        # which is also what the wallpaper command gets as
+                        # $BLUR. A video goes through the still frame ffmpeg
+                        # just wrote, since magick can't read one.
+                        #
+                        # Cropped to the output's aspect so the launcher's
+                        # PreserveAspectCrop has nothing left to crop and the
+                        # blur lands at the sigma it was baked for. The crop
+                        # rounds to a whole pixel of an image a quarter of the
+                        # screen's size, which measures ~3 output pixels below
+                        # the compositor's blur of the same wallpaper —
+                        # deliberately left as is.
+                        if [ "$needblur" = "1" ] && command -v magick >/dev/null 2>&1; then
+                            bsrc="$f"
+                            [ "$isvid" = "1" ] && bsrc="$cachedir/thumbnails/$key.$oext"
+                            [ -e "$bsrc" ] && magick "$bsrc[0]" -resize "$xgeom^" -gravity center -extent "$xgeom" -blur "0x$xsigma" -color-matrix "1.3937 -0.3576 -0.0361, -0.1063 1.1424 -0.0361, -0.1063 -0.3576 1.4639" "$cachedir/blurred/$bkey.png"
                         fi
                     done
                     for d in "$cachedir/thumbnails" "$cachedir/blurred"; do
+                        # with nothing asking for blurred variants the keys
+                        # this pass knows are not the ones those files were
+                        # baked under, so leave them alone rather than
+                        # sweeping the lot: asking again picks them straight
+                        # back up, and any entry that really is dead by then
+                        # goes with the first sweep that can tell.
+                        [ "$d" = "$cachedir/blurred" ] && [ "$gb" != "1" ] && continue
                         for c in "$d"/*; do
                             [ -e "$c" ] || continue
                             k=$(basename "$c"); k="\${k%.*}"
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
-                    done`, "_", root.wallDir, root.wallCacheDir, wantBlur ? "1" : "0", root.alertOn("errors") ? "1" : "0"].concat(walls.map(w => w.path)));
+                    done`, "_", root.wallDir, root.cacheRoot, wantBlur ? "1" : "0", root.alertOn("errors") ? "1" : "0",
+                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)].concat(order));
             }
         }
     }
 
-    // ---------- baked "xray" backdrop ----------
-    // The client-side blur ("xray", see cfg.bgBlur) bakes the blurred
-    // wallpaper into a cached image whenever the wallpaper changes, rather
+    // ---------- the blurred wallpaper ----------
+    // The client-side blur ("xray", see cfg.bgBlur) draws the wallpaper
+    // blurred into the cache alongside its thumbnail (see wallScan), rather
     // than blurring live every time the launcher opens. niri's own xray mode
     // works the same way, and for the same reason: the wallpaper is the only
     // thing being blurred and it almost never changes, so blurring it once
     // and reusing the result is free from then on. Live blur, by contrast,
     // pays a shader compile plus a screen-sized offscreen pass on the first
     // frame after the layer surface maps — long enough to watch the backdrop
-    // turn up late behind a grow reveal.
+    // turn up late behind a grow reveal. The same file is what a wallpaper
+    // command gets as $BLUR (see applyWallpaper).
     //
     // The kernel is cloned from niri's defaults (`blur { passes 3; offset 3;
     // noise 0.02; saturation 1.5 }`). Its dual kawase chain — 3 downsample
@@ -2256,20 +2358,23 @@ ShellRoot {
     // which is what -color-matrix does here, and why nothing converts to
     // linear light first. Noise is the one part not baked in: this image is
     // upscaled on the way to the screen, which would come out as blotches
-    // rather than dither (see the noise tile in `content`).
+    // rather than dither (see the noise tile in xrayBackdrop).
     //
-    // Sigma is niri's radius in *output* pixels, taken here as logical
-    // pixels, i.e. as it looks on an unscaled output. A client can't do
-    // better than that: on a fractionally scaled output the compositor
-    // advertises a rounded wl_output scale to anyone not speaking
-    // wp-fractional-scale (niri hands 2 to a 1.25x output, which is what
-    // ShellScreen.devicePixelRatio reports here), so scaling by that would
-    // land the blur further from niri's than ignoring it does.
+    // Sigma is niri's radius in *output* pixels, which is not something a
+    // client is told: on a fractionally scaled output the compositor hands
+    // anyone not speaking wp-fractional-scale a rounded wl_output scale
+    // (niri reports 2 for a 1.25x output, which is what both the window's
+    // and the screen's devicePixelRatio come back as here), so dividing by
+    // that lands the blur a long way off. The one number that is available,
+    // on any compositor, is the output's true pixel size — which comes back
+    // in a single still screencopy frame. See xrayScaleProbe.
     readonly property real xraySigma: 19.17
-    // Baked at half resolution: sigma this wide leaves nothing a half-rate
-    // sampling can't carry, and the magick run, the decode and the texture
-    // upload all scale with the pixel count.
-    readonly property int xrayScale: 2
+    // Baked at a quarter of the output's logical resolution. A blur this
+    // wide leaves nothing that a quarter-rate sampling can't carry: against
+    // the same blur done at full output resolution, the quarter-size bake
+    // scaled back up measures 55dB PSNR — visually identical, at a sixteenth
+    // of the magick run, the file size, the decode and the texture upload.
+    readonly property int xrayScale: 4
     readonly property var xrayScreen: win.screen ?? (Quickshell.screens.length > 0 ? Quickshell.screens[0] : null)
     readonly property size xraySize: {
         const s = root.xrayScreen;
@@ -2277,81 +2382,95 @@ ShellRoot {
             return Qt.size(0, 0);
         return Qt.size(Math.max(1, Math.round(s.width / root.xrayScale)), Math.max(1, Math.round(s.height / root.xrayScale)));
     }
-    // the blur as it applies to the baked image rather than to the screen
-    readonly property real xrayCacheSigma: root.xraySigma / root.xrayScale
-    // Keyed on everything the baked image depends on — wallpaper, output
-    // geometry and kernel — so a screen or parameter change lands on a
-    // different file instead of quietly reusing a mismatched one. Empty
-    // whenever there's nothing to bake, which is also what stops the bake
-    // from running at all outside "xray" mode.
-    readonly property string xrayCacheFile: (cfg.bgBlur !== "xray" || root.matugenSource === "" || root.xraySize.width < 1)
-        ? "" : root.cacheRoot + "/xray/" + Qt.md5(root.matugenSource + "|" + root.xraySize.width + "x" + root.xraySize.height + "|" + root.xrayCacheSigma) + ".png"
-    // The baked image, once it exists. Empty falls the launcher back to
-    // blurring live (no ImageMagick, or a wallpaper nothing has baked yet).
-    property string xrayBlur: ""
-    onXrayCacheFileChanged: root.bakeXrayBlur()
-    // Builds the command and starts the run in one statement each, rather
-    // than binding `command` and flipping `running`: a binding is only
-    // guaranteed to have re-evaluated by the time the *next* one reads it,
-    // and this runs off a change handler on the very property `command`
-    // would depend on — so `running` reliably flipped while `command` still
-    // held the previous (at startup, empty) paths. matugenProc has the same
-    // shape for the same reason.
-    function bakeXrayBlur() {
-        const src = root.matugenSource;
-        const out = root.xrayCacheFile;
-        if (out === "" || src === "") {
-            root.xrayBlur = "";
-            return;
-        }
-        // deliberately not clearing xrayBlur first: while a new wallpaper
-        // bakes, the last wallpaper's backdrop is a better thing to be
-        // showing than the sharp wallpaper the live fallback would put up.
-        if (xrayProc.running) {
-            xrayProc.rerun = true;
-            return;
-        }
-        xrayProc.command = ["bash", "-c", `
-            src="$1" out="$2" sigma="$3" w="$4" h="$5"
-            # nothing below is safe against an empty path (an empty $dir
-            # globs the filesystem root, an empty $out makes magick write the
-            # image to stdout), and this is a place a binding that hasn't
-            # caught up yet would hand us one
-            [ -n "$src" ] && [ -n "$out" ] || exit 0
-            command -v magick >/dev/null 2>&1 || exit 0
-            dir=\${out%/*}
-            mkdir -p "$dir"
-            # geometry and kernel are part of the cache key, so anything else
-            # in here belongs to a wallpaper, output or blur that is no longer
-            # current - only one entry is ever live
-            for f in "$dir"/*; do
-                [ "$f" = "$out" ] || rm -f "$f"
-            done
-            # "$src[0]": first frame only, for a .gif standing in as its own
-            # still (matugenSource already redirects video to a thumbnail).
-            # Cropped to the output's aspect here so the launcher's own
-            # PreserveAspectCrop has nothing left to crop, and the baked blur
-            # lands at the sigma it was baked for.
-            [ "$out" -nt "$src" ] || magick "$src[0]" -resize "\${w}x\${h}^" -gravity center -extent "\${w}x\${h}" -blur "0x$sigma" -color-matrix "1.3937 -0.3576 -0.0361, -0.1063 1.1424 -0.0361, -0.1063 -0.3576 1.4639" "$out" 2>/dev/null
-            [ -s "$out" ] && printf '%s' "$out"`,
-            "_", src, out, String(root.xrayCacheSigma),
-            String(root.xraySize.width), String(root.xraySize.height)];
-        xrayProc.running = true;
+    // output pixels per logical pixel, 0 until measured (see
+    // xrayScaleProbe). Nothing bakes until it resolves — baking a whole
+    // wallpaper folder at the wrong sigma and then again at the right one
+    // is minutes of pointless work — but it always resolves, to 1 if the
+    // measurement can't be made.
+    property real xrayOutputScale: 0
+    // the blur as it applies to the baked image rather than to the screen:
+    // output pixels -> logical pixels -> the quarter-size image. 0 while the
+    // scale is unknown, which is what holds the bake back.
+    readonly property real xrayCacheSigma: root.xrayOutputScale > 0 ? root.xraySigma / root.xrayOutputScale / root.xrayScale : 0
+    // The baked backdrop for the current wallpaper, or "" if there isn't one
+    // yet (no ImageMagick, or a folder still being worked through), which
+    // falls the launcher back to blurring live.
+    readonly property string xrayBlur: {
+        if (cfg.bgBlur !== "xray")
+            return "";
+        const w = root.wallpapers.find(x => x.path === cfg.currentWallpaper);
+        return w ? w.blur : "";
     }
-    Process {
-        id: xrayProc
-        property bool rerun: false
-        onRunningChanged: {
-            if (!running && rerun) {
-                rerun = false;
-                Qt.callLater(() => root.bakeXrayBlur());
+    // What the backdrop actually draws — xrayBlur, but only ever picked up
+    // while the launcher is down. Applying a wallpaper leaves the launcher
+    // open on the picker, where the tiles hide the backdrop; the swap only
+    // becomes visible as the UI fades out on the way to closing, which reads
+    // as the backdrop changing out from under the exit animation.
+    property string xrayShown: ""
+    function syncXrayShown() {
+        if (!win.shown)
+            root.xrayShown = root.xrayBlur;
+    }
+    onXrayBlurChanged: root.syncXrayShown()
+    // Everything the baked files are named after. A new output geometry or
+    // scale (or switching the mode on at all) changes every name, so the
+    // scan has to run again to generate the new ones and sweep the old.
+    readonly property string xrayCacheKey: (cfg.bgBlur === "xray" || cfg.wallCommand.includes("$BLUR") ? "on" : "off")
+        + "|" + root.xraySize.width + "x" + root.xraySize.height + "|" + root.xrayCacheSigma
+    onXrayCacheKeyChanged: root.rescanWallpapers()
+
+    // Measures the output scale that xraySigma needs, once, by asking for a
+    // single still screencopy frame of the output and dividing its pixel
+    // size by the screen's logical size. Only ever runs in "xray" mode, the
+    // frame is never displayed or read — only its dimensions — and the
+    // surface it needs to exist on goes away the moment the number lands.
+    // A compositor with no screencopy support just leaves the timeout to
+    // settle it at 1, i.e. logical pixels stand in for output pixels, which
+    // is exactly right on an unscaled output.
+    readonly property bool xrayScaleWanted: (cfg.bgBlur === "xray" || cfg.wallCommand.includes("$BLUR"))
+        && root.xrayOutputScale === 0 && root.xrayScreen !== null
+    function setXrayOutputScale(s) {
+        // a bad measurement (no content, a screen that resized mid-capture)
+        // must still resolve to something, or nothing would ever bake
+        root.xrayOutputScale = s > 0.1 ? s : 1;
+    }
+    Timer {
+        id: xrayScaleTimeout
+        interval: 3000
+        running: root.xrayScaleWanted
+        onTriggered: root.setXrayOutputScale(1)
+    }
+    LazyLoader {
+        id: xrayScaleProbe
+        active: root.xrayScaleWanted
+        // screencopy only delivers to a surface that is actually being
+        // composited, so this has to be a real (1x1, click-through,
+        // invisible) window rather than a bare item — same shape as the
+        // warm-up window below.
+        PanelWindow {
+            anchors.top: true
+            anchors.left: true
+            implicitWidth: 1
+            implicitHeight: 1
+            color: "transparent"
+            exclusionMode: ExclusionMode.Ignore
+            screen: root.xrayScreen
+            WlrLayershell.layer: WlrLayer.Background
+            WlrLayershell.namespace: "pibble-probe"
+            mask: Region {}
+
+            ScreencopyView {
+                width: 1
+                height: 1
+                live: false
+                paintCursor: false
+                captureSource: root.xrayScreen
+                onHasContentChanged: {
+                    const s = root.xrayScreen;
+                    if (hasContent && s && s.width > 0)
+                        root.setXrayOutputScale(sourceSize.width / s.width);
+                }
             }
-        }
-        stdout: StdioCollector {
-            // a path, or empty for every failure the script exits early on
-            // (no ImageMagick, unreadable wallpaper) — which is what puts the
-            // launcher back on blurring live
-            onStreamFinished: root.xrayBlur = text.trim()
         }
     }
 
@@ -2745,6 +2864,8 @@ ShellRoot {
 
         property bool shown: false
         visible: shown
+        // down again: safe to pick up a wallpaper applied while it was up
+        onShownChanged: root.syncXrayShown()
 
         function open(targetPane) {
             fadeOut.stop(); // reopening mid-dismiss is allowed
@@ -2882,8 +3003,8 @@ ShellRoot {
         // on niri, which then defaults its own xray-through-other-windows
         // behavior on too — so only ask when "Background blur" is actually
         // set to "compositor" ("xray", the non-protocol mode, draws a
-        // blurred wallpaper as a plain layer inside `content` instead — see
-        // xrayBg below).
+        // blurred wallpaper behind the launcher itself instead — see
+        // xrayBackdrop below).
         //
         // The other modes ask for a 1px region rather than for nothing at
         // all, which is not the same thing: a compositor-side rule that
@@ -3667,40 +3788,18 @@ ShellRoot {
                 Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "preferences-desktop-wallpaper",
                     "-h", "string:image-path:" + wall.thumb, "Wallpaper changed", wall.path.split("/").pop()]);
             // Runs the configurable command with $WALL and $BLUR exported.
-            // The blurred variant is only ensured when the command actually
-            // references $BLUR, so non-blur setups skip that work entirely.
+            // $BLUR is the cached blurred variant the scan already resolved
+            // for this wallpaper — the same image the launcher's own backdrop
+            // draws, or the user's <stem>blurred.<ext> where they've supplied
+            // one. Empty until the background pass has generated it (a few
+            // seconds on a cold cache, see wallScan), which is why commands
+            // that use it should guard for that.
             Quickshell.execDetached(["bash", "-c", `
                 export PATH="$HOME/.local/bin:$PATH"
-                WALL="$1"
-                BLUR="$2"
-                if [ "$5" = "1" ] && [ -z "$BLUR" ]; then
-                    mkdir -p "$3/blurred"
-                    b=$(basename "$1"); stem="\${b%.*}" ext="\${b##*.}"
-                    # gif/mp4 sources blur to png, not their own extension: a
-                    # single decoded frame re-quantized to a 256-color gif
-                    # palette bands badly, and a video obviously can't be a
-                    # single still frame in its own format
-                    isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
-                    case "\${ext,,}" in gif|mp4) ext="png" ;; esac
-                    BLUR="$3/blurred/$stem.$ext"
-                    if [ ! -e "$BLUR" ]; then
-                        if [ "$isvid" = "1" ]; then
-                            if command -v ffmpeg >/dev/null 2>&1; then
-                                ffmpeg -y -v error -i "$WALL" -vframes 1 -vf "scale=1024:-1,gblur=sigma=20" "$BLUR"
-                            elif [ "$6" = "1" ]; then
-                                notify-send -a pibble -i dialog-error "ffmpeg not found" "ffmpeg is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
-                            fi
-                        elif command -v magick >/dev/null 2>&1; then
-                            magick "$WALL[0]" -resize 1024x -blur 0x10 "$BLUR"
-                        elif [ "$6" = "1" ]; then
-                            notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate the blurred wallpaper variant referenced by \\$BLUR - install it to enable blur."
-                        fi
-                    fi
-                fi
+                WALL="$1" BLUR="$2"
                 export WALL BLUR
-                eval "$4" || { [ "$6" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$4"; }
-            `, "_", wall.path, wall.blur, root.wallCacheDir, cfg.wallCommand,
-                cfg.wallCommand.includes("$BLUR") ? "1" : "0", root.alertOn("errors") ? "1" : "0"]);
+                eval "$3" || { [ "$4" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$3"; }
+            `, "_", wall.path, wall.blur, cfg.wallCommand, root.alertOn("errors") ? "1" : "0"]);
             exit();
         }
 
@@ -4083,6 +4182,147 @@ ShellRoot {
             }
         }
 
+        // Mask shape: same geometry as the blur-region ellipse above, so
+        // the client-drawn circle and any compositor blur behind it
+        // (where supported) stay in sync.
+        //
+        // Sized to match the surface (not just the circle) so MultiEffect
+        // maps mask <-> source pixel-for-pixel instead of stretching a small
+        // texture across the whole surface — which holds for both the items
+        // that mask against it, since both fill the window. Kept genuinely
+        // visible (not visible: false) and layered explicitly, since an
+        // invisible item's layer never actually renders — a huge offset is
+        // what keeps it off the real screen instead.
+        Item {
+            id: growMask
+            visible: true
+            layer.enabled: true
+            x: -100000
+            y: -100000
+            width: win.width
+            height: win.height
+
+            Rectangle {
+                antialiasing: true
+                x: win.originX - win.revealDiameter / 2
+                y: win.originY - win.revealDiameter / 2
+                width: win.revealDiameter
+                height: win.revealDiameter
+                radius: width / 2
+                color: "white"
+            }
+        }
+
+        // ---------- xray backdrop ----------
+        // The client-side stand-in for compositor blur ("xray", see
+        // cfg.bgBlur), deliberately a sibling of content rather than a child
+        // of it: the compositor blur it imitates is a solid backdrop that
+        // the reveal circle uncovers, where content fades up from nothing
+        // over the same animation (see fadeIn). Inside content it inherited
+        // that fade and read as a backdrop dissolving in — the one visible
+        // difference left between the two modes.
+        //
+        // Same mask as content, so it is revealed by exactly the same
+        // circle, and in "fade"/"none" styles it simply appears with the
+        // window — which is also what the compositor's blur region does
+        // there.
+        Item {
+            id: xrayBackdrop
+            anchors.fill: parent
+            visible: cfg.bgBlur === "xray"
+            layer.enabled: win.growMode
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: growMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 0.05
+            }
+
+            // The wallpaper, blurred, sitting exactly where the real
+            // compositor blur would show through — at exactly screen
+            // geometry, since any oversizing here reads as a zoomed-in
+            // backdrop (PreserveAspectCrop scales the wallpaper to cover the
+            // item, so a larger item is a larger wallpaper).
+            //
+            // Normally this is just an image: root.xrayBlur is the wallpaper
+            // already blurred (and saturated) to niri's own kernel, baked
+            // into the cache alongside its thumbnail, so opening the launcher
+            // costs one small texture upload and no effect pass at all. See
+            // the xray block on root for the parameters.
+            //
+            // MultiEffect is only the stopgap for when that image doesn't
+            // exist yet (no ImageMagick, or a folder still being worked
+            // through). It cannot stand in for the real thing: blurMax caps
+            // at 64, which is a sigma of about 8 against niri's 19, so this
+            // is as wide a blur as the effect has. Saturation matches
+            // exactly though — MultiEffect's saturation is an adjustment
+            // around 0, so 0.5 is niri's `saturation 1.5`, the same mix
+            // toward luma.
+            readonly property real bgBlurAmount: 1.0
+            readonly property int bgBlurMax: 64
+            readonly property real bgBlurSaturation: 0.5
+            Image {
+                id: xrayBg
+                anchors.fill: parent
+                fillMode: Image.PreserveAspectCrop
+                // Deliberately keyed on the setting and not on this item's
+                // `visible`: Item.visible reads *effective* visibility, so a
+                // binding on it goes false every time the window hides,
+                // which dropped the loaded pixmap and made the next open
+                // decode the image again — visible as the backdrop arriving
+                // a fraction of the way into the reveal (measured at ~30ms
+                // for the baked image, far worse for the raw wallpaper).
+                // Held loaded across opens instead.
+                //
+                // The raw wallpaper is only worth decoding once a scan that
+                // was actually looking for the current backdrops has come
+                // back without one; before that it is just a full-size
+                // wallpaper decode that the baked path replaces moments
+                // later.
+                source: cfg.bgBlur !== "xray" ? ""
+                    : (root.xrayShown !== "" ? "file://" + root.xrayShown
+                        : (root.wallScanKey === root.xrayCacheKey ? root.matugenSource : ""))
+                asynchronous: true
+                // the baked backdrop is small and reused across every open,
+                // so it is worth keeping decoded; the raw wallpaper the
+                // fallback loads is not
+                cache: root.xrayShown !== ""
+                layer.enabled: cfg.bgBlur === "xray" && root.xrayShown === ""
+                layer.effect: MultiEffect {
+                    blurEnabled: true
+                    blur: xrayBackdrop.bgBlurAmount
+                    blurMax: xrayBackdrop.bgBlurMax
+                    saturation: xrayBackdrop.bgBlurSaturation
+                }
+            }
+
+            // Dither. A wide blur of a smooth gradient quantizes into visible
+            // bands once it lands in an 8-bit framebuffer — measured against
+            // niri's own blurred backdrop, which never holds a value for more
+            // than a few pixels because the compositor dithers, where ours
+            // held single values for runs of 100+ pixels. This is niri's own
+            // `noise 0.02`, uniform noise a hundredth of full scale either
+            // side of the pixel, which the tile's own standard deviation
+            // (0.216 of full scale) turns into this opacity; nearest-neighbour
+            // sampling (smooth: false) keeps it from being averaged back into
+            // a flat tint by the output scale. Sits with the backdrop rather
+            // than over the dim because that's where niri's is: the
+            // compositor noises the backdrop, and our own translucency then
+            // composites over that. Only the client-side blur needs it — in
+            // "compositor" mode niri is already dithering its own.
+            //
+            // This is a blend, not an addition, so unlike the compositor's it
+            // also drags the backdrop a little toward the tile's mean grey —
+            // measured at 2/255 in the darks, which is deliberately left in.
+            Image {
+                anchors.fill: parent
+                source: Qt.resolvedUrl("assets/noise.png")
+                fillMode: Image.Tile
+                smooth: false
+                opacity: 0.027
+            }
+        }
+
         // ---------- content ----------
         Item {
             id: content
@@ -4099,105 +4339,12 @@ ShellRoot {
                 maskSpreadAtMin: 0.05
             }
 
-            // Mask shape: same geometry as the blur-region ellipse above, so
-            // the client-drawn circle and any compositor blur behind it
-            // (where supported) stay in sync.
-            //
-            // Sized to match content's own bounds (not just the circle) so
-            // MultiEffect maps mask <-> source pixel-for-pixel instead of
-            // stretching a small texture across the whole surface. Kept
-            // genuinely visible (not visible: false) and layered explicitly,
-            // since an invisible item's layer never actually renders — a
-            // huge offset is what keeps it off the real screen instead.
-            Item {
-                id: growMask
-                visible: true
-                layer.enabled: true
-                x: -100000
-                y: -100000
-                width: content.width
-                height: content.height
-
-                Rectangle {
-                    antialiasing: true
-                    x: win.originX - win.revealDiameter / 2
-                    y: win.originY - win.revealDiameter / 2
-                    width: win.revealDiameter
-                    height: win.revealDiameter
-                    radius: width / 2
-                    color: "white"
-                }
-            }
-
             // the swipe-to-power/reboot rubber band, shared: every pane
             // references this one instance, so the pull physics live in a
             // single place. Power pulls content down, reboot pulls it up.
             Translate {
                 id: panePull
                 y: win.powerPull - win.rebootPull
-            }
-
-            // client-side fake blur ("xray") for compositors without
-            // ext-background-effect-v1: the wallpaper, blurred, sitting
-            // exactly where the real compositor blur would show through — at
-            // exactly screen geometry, since any oversizing here reads as a
-            // zoomed-in backdrop (PreserveAspectCrop scales the wallpaper to
-            // cover the item, so a larger item is a larger wallpaper).
-            //
-            // Normally this is just an image: root.xrayBlur is the wallpaper
-            // already blurred (and saturated) to niri's own kernel, baked
-            // into the cache when the wallpaper changed, so opening the
-            // launcher costs one small texture upload and no effect pass at
-            // all. See the baked-backdrop block on root for the parameters.
-            //
-            // MultiEffect is only the stopgap for when that image doesn't
-            // exist yet (no ImageMagick, or a wallpaper mid-bake). It cannot
-            // stand in for the real thing: blurMax caps at 64, which is a
-            // sigma of about 8 against niri's 19, so this is as wide a blur
-            // as the effect has. Saturation matches exactly though —
-            // MultiEffect's saturation is an adjustment around 0, so 0.5 is
-            // niri's `saturation 1.5`, the same mix toward luma.
-            readonly property real bgBlurAmount: 1.0
-            readonly property int bgBlurMax: 64
-            readonly property real bgBlurSaturation: 0.5
-            Image {
-                id: xrayBg
-                anchors.fill: parent
-                visible: cfg.bgBlur === "xray"
-                fillMode: Image.PreserveAspectCrop
-                source: !visible ? "" : (root.xrayBlur !== "" ? "file://" + root.xrayBlur : root.matugenSource)
-                asynchronous: true
-                cache: false
-                layer.enabled: visible && root.xrayBlur === ""
-                layer.effect: MultiEffect {
-                    blurEnabled: true
-                    blur: content.bgBlurAmount
-                    blurMax: content.bgBlurMax
-                    saturation: content.bgBlurSaturation
-                }
-            }
-
-            // Dither. A wide blur of a smooth gradient quantizes into visible
-            // bands once it lands in an 8-bit framebuffer — measured against
-            // niri's own blurred backdrop, which never holds a value for more
-            // than a few pixels because the compositor dithers, where ours
-            // held single values for runs of 100+ pixels. This is niri's own
-            // `noise 0.02`, uniform noise a hundredth of full scale either
-            // side of the pixel, which the tile's own standard deviation
-            // (0.216 of full scale) turns into this opacity; nearest-neighbour
-            // sampling (smooth: false) keeps it from being averaged back into
-            // a flat tint by the output scale. Sits under the dim rather than
-            // over it because that's where niri's is: the compositor noises
-            // the backdrop, and our own translucency then composites over
-            // that. Only the client-side blur needs it — in "compositor" mode
-            // niri is already dithering its own.
-            Image {
-                anchors.fill: parent
-                visible: cfg.bgBlur === "xray"
-                source: Qt.resolvedUrl("assets/noise.png")
-                fillMode: Image.Tile
-                smooth: false
-                opacity: 0.027
             }
 
             Rectangle {
