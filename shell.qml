@@ -1518,6 +1518,25 @@ ShellRoot {
         Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
     }
 
+    // fires from a video wallpaper's MediaPlayer.onErrorOccurred (grid tile
+    // and carousel preview both wire into this) rather than a startup probe:
+    // the QtMultimedia QML module can still import fine with no working
+    // backend installed (its plugins are a separate runtime dependency) —
+    // playback only actually fails once a MediaPlayer tries to open a file.
+    // Distinct from the "ffmpeg not found" alert in wallScan/applyWallpaper,
+    // which is about the ffmpeg CLI used to generate thumbnails/blur - this
+    // one is QtMultimedia's own playback backend, missing/broken independent
+    // of whether that CLI is installed. Once-per-session, not once-per-tile,
+    // since every video tile would otherwise re-report the same cause.
+    property bool warnedMediaBackend: false
+    function notifyMediaBackendFailure(errorString: string): void {
+        if (warnedMediaBackend)
+            return;
+        warnedMediaBackend = true;
+        notifyError("Video wallpaper playback failed",
+            "QtMultimedia has no working playback backend (" + errorString + ") - install your distro's Qt6 multimedia backend package (e.g. qt6-multimedia-ffmpeg) to enable video wallpapers.");
+    }
+
     // the two `wl-paste --watch` invocations cliphist needs to see both text
     // and image copies; shared between the alert body and the flyout's
     // tap-to-copy action (see the "Clipboard watcher not running" case in
@@ -5176,6 +5195,7 @@ ShellRoot {
                                                     autoPlay: true
                                                     videoOutput: vidOut
                                                     audioOutput: AudioOutput { muted: true }
+                                                    onErrorOccurred: (error, errorString) => root.notifyMediaBackendFailure(errorString)
                                                 }
                                             }
                                         }
@@ -5809,6 +5829,7 @@ ShellRoot {
                                         loops: MediaPlayer.Infinite
                                         videoOutput: wallVideoOut
                                         audioOutput: AudioOutput { muted: true }
+                                        onErrorOccurred: (error, errorString) => root.notifyMediaBackendFailure(errorString)
                                     }
                                 }
                             }
