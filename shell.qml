@@ -2175,7 +2175,12 @@ ShellRoot {
                 # own thumbnail at all; the source itself is still played
                 # back untouched
                 oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
-                key=$(printf '%s' "$PWD/$f" | md5sum | cut -d' ' -f1)
+                # versioned like bkey below (r<n>): bump t<n> (here and in
+                # the generation pass) whenever the ffmpeg/magick thumbnail
+                # recipe changes, so stale cached thumbnails fall out of the
+                # sweep instead of sticking around under the old recipe
+                # until their source file happens to change.
+                key=$(printf '%s' "$PWD/$f|t3" | md5sum | cut -d' ' -f1)
                 # the blurred variant is the one cache entry that depends on
                 # more than the source file, so the output geometry, the blur
                 # and the recipe version go in its key too: a resized output,
@@ -2268,7 +2273,8 @@ ShellRoot {
                         isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
-                        key=$(printf '%s' "$f" | md5sum | cut -d' ' -f1)
+                        # see the matching key note in the scan pass above
+                        key=$(printf '%s' "$f|t3" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
                         bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
                         live="$live $key $bkey"
@@ -2296,7 +2302,32 @@ ShellRoot {
                                     # instant playback starts. Keeping the
                                     # source aspect makes the two identical in
                                     # any box.
-                                    [ "$needthumb" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale=480:-1" "$cachedir/thumbnails/$key.$oext"
+                                    #
+                                    # Capped at 1920 wide rather than a small
+                                    # fixed size: this still doesn't only back
+                                    # the 480x270 grid tile (which downscales
+                                    # at decode time regardless of source
+                                    # size) - the windows-carousel style
+                                    # reuses it as the wide pan source (see
+                                    # wcThumb), decoded at up to ~barHeight
+                                    # tall. A 480px-wide still stretched to
+                                    # fill that box read as noticeably
+                                    # blurrier than the live video it hands
+                                    # off to. min() so a source already
+                                    # narrower than 1920 isn't upscaled.
+                                    #
+                                    # flags=lanczos: ffmpeg's default scaler
+                                    # is soft on top of an already-lossy
+                                    # source, and unsharp claws a bit of that
+                                    # back - a frozen compressed frame reads
+                                    # blurrier than the same footage in
+                                    # motion even at matched resolution
+                                    # (motion masks the quantization/deblock
+                                    # softness codecs lean on; playback via
+                                    # VideoOutput never shows a truly static
+                                    # frame the way this thumbnail does), so
+                                    # this only narrows the gap, not closes it.
+                                    [ "$needthumb" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos,unsharp=5:5:0.8:5:5:0.0" "$cachedir/thumbnails/$key.$oext"
                                 fi
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
