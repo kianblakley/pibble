@@ -2427,7 +2427,12 @@ ShellRoot {
     // as the backdrop changing out from under the exit animation.
     property string xrayShown: ""
     function syncXrayShown() {
-        if (!win.shown)
+        // ...unless there is nothing on screen to swap *from*, which is the
+        // whole of the first session after a daemon restart: the bake for the
+        // current wallpaper only lands part-way into that first open, and
+        // holding it back until the launcher closes left the entire open
+        // drawing the live-blur fallback instead.
+        if (!win.shown || root.xrayShown === "")
             root.xrayShown = root.xrayBlur;
     }
     onXrayBlurChanged: root.syncXrayShown()
@@ -2785,6 +2790,12 @@ ShellRoot {
     // ---------- weather (clock page) ----------
     property string weatherText: ""
     property bool weatherOk: false
+    // A fetch that came back with nothing — no network yet, DNS not up,
+    // wttr.in unreachable. Distinct from weatherOk (which means "there is a
+    // reading to show"), because the two want different handling: a failure
+    // keeps the last good reading on screen and retries soon, while a
+    // rejected location clears the readout and retrying can't help.
+    property bool weatherFailed: false
     Process {
         id: weatherFetch
         // location passed as $1, not interpolated into the script, since
@@ -2798,7 +2809,15 @@ ShellRoot {
                 // (double space: the "+" separator plus %C's own trailing
                 // padding), so normalize runs of whitespace down to one
                 const t = text.trim().replace(/\s+/g, " ");
-                root.weatherOk = t.length > 0 && !t.includes("Unknown location");
+                // curl -f writes nothing at all on a failed request, which is
+                // what a boot-time fetch looks like while the network is
+                // still coming up: keep whatever was last on screen and let
+                // weatherRetry try again shortly, rather than blanking the
+                // readout until the 15-minute refresh comes round.
+                root.weatherFailed = t.length === 0;
+                if (root.weatherFailed)
+                    return;
+                root.weatherOk = !t.includes("Unknown location");
                 root.weatherText = root.weatherOk ? t : "";
             }
         }
@@ -2809,15 +2828,36 @@ ShellRoot {
             }
         }
     }
+    function refetchWeather() {
+        weatherFetch.running = false;
+        weatherFetch.running = true;
+    }
     Timer {
         interval: 15 * 60 * 1000
         running: cfg.weatherEnabled
         repeat: true
         triggeredOnStart: true
+        onTriggered: root.refetchWeather()
+    }
+    // The shell starts with the session, typically several seconds before the
+    // network is up, so the first fetch of a fresh boot fails and — with only
+    // the refresh above — nothing tried again for 15 minutes, which read as
+    // weather never loading until the daemon was restarted. Backs off 5s, 10s,
+    // 20s ... up to the refresh interval, and stops itself the moment a fetch
+    // comes back with anything (including a rejected location, which retrying
+    // can't fix).
+    Timer {
+        id: weatherRetry
+        property int attempt: 0
+        interval: Math.min(15 * 60 * 1000, 5000 * Math.pow(2, attempt))
+        running: cfg.weatherEnabled && root.weatherFailed
+        repeat: true
         onTriggered: {
-            weatherFetch.running = false;
-            weatherFetch.running = true;
+            attempt++;
+            root.refetchWeather();
         }
+        onRunningChanged: if (!running)
+            attempt = 0
     }
     // maps the wttr.in condition text to a weather glyph
     function weatherIcon(text) {
@@ -3529,19 +3569,8 @@ ShellRoot {
         property bool wallCarouselDragging: false
         Behavior on wallCarouselAnim {
             enabled: !win.wallCarouselDragging
-            NumberAnimation { id: wallCarouselAnimAnim; duration: 420; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
         }
-        // isCenter (Math.abs(rank) < 0.5) goes true well before the slide's
-        // eased approach actually reaches rank 0 — gating gif playback on
-        // isCenter alone starts the (unpanned, fixed-crop) AnimatedImage
-        // mid-slide, while the still frame beside it is still panning,
-        // which reads as a jump. Wait for the slide to fully stop first.
-        // Also exclude an active drag: the Behavior above is disabled while
-        // dragging (so wallCarouselAnimAnim.running is false throughout),
-        // but the strip is still moving frame-to-frame with the finger, so
-        // without this the gif would start/stop every time a back-and-forth
-        // drag crossed center.
-        readonly property bool wallCarouselSettled: !wallCarouselAnimAnim.running && !wallCarouselDragging
         function moveCarousel(dir: int) {
             const count = wallMatches.length;
             if (!count)
@@ -4249,6 +4278,9 @@ ShellRoot {
             id: xrayBackdrop
             anchors.fill: parent
             visible: cfg.bgBlur === "xray"
+            // holds the oversized fallback image (see xrayBg) inside screen
+            // geometry; a screen-sized, axis-aligned clip is a scissor test
+            clip: true
             layer.enabled: win.growMode
             layer.effect: MultiEffect {
                 maskEnabled: true
@@ -4280,9 +4312,21 @@ ShellRoot {
             readonly property real bgBlurAmount: 1.0
             readonly property int bgBlurMax: 64
             readonly property real bgBlurSaturation: 0.5
+            // no baked file for the current wallpaper yet, so the wallpaper is
+            // being blurred live below
+            readonly property bool liveBlur: cfg.bgBlur === "xray" && root.xrayShown === ""
             Image {
                 id: xrayBg
                 anchors.fill: parent
+                // The live blur samples past the image's own edges, where
+                // there is nothing but transparency, so the outer ~blurMax
+                // pixels fade out — which is the transparent border around the
+                // backdrop on the first open after a daemon restart, before
+                // any bake exists. Oversize the image by that much and let the
+                // parent clip it back, so the faded band lands off-screen. The
+                // slight zoom this costs (see the PreserveAspectCrop note
+                // above) only ever applies to the fallback.
+                anchors.margins: xrayBackdrop.liveBlur ? -xrayBackdrop.bgBlurMax : 0
                 fillMode: Image.PreserveAspectCrop
                 // Deliberately keyed on the setting and not on this item's
                 // `visible`: Item.visible reads *effective* visibility, so a
@@ -4306,7 +4350,7 @@ ShellRoot {
                 // so it is worth keeping decoded; the raw wallpaper the
                 // fallback loads is not
                 cache: root.xrayShown !== ""
-                layer.enabled: cfg.bgBlur === "xray" && root.xrayShown === ""
+                layer.enabled: xrayBackdrop.liveBlur
                 layer.effect: MultiEffect {
                     blurEnabled: true
                     blur: xrayBackdrop.bgBlurAmount
@@ -5608,7 +5652,22 @@ ShellRoot {
                                 // grid's tiles check them (see tileLive above):
                                 // the carousel is only `visible: false` in grid
                                 // mode, so its bindings keep running there.
-                                readonly property bool gifAnimating: wcCell.isCenter && win.wallCarouselSettled && cfg.wallpaperStyle !== "grid" && win.shown && !!wcCell.shownWall?.gif
+                                //
+                                // Starts as soon as this cell is the selected
+                                // one and within a slot of center, rather than
+                                // waiting for the slide to stop — a gif that
+                                // only came to life after the strip had already
+                                // settled read as the preview lagging the
+                                // navigation. Playing mid-slide is only safe
+                                // because the AnimatedImage below pans with the
+                                // still frame it replaces (it used to sit
+                                // unpanned, which is what made a mid-slide
+                                // start jump). The full slot of slack, rather
+                                // than isCenter's half, is hysteresis for
+                                // dragging back and forth across center:
+                                // dropping out reloads the source below.
+                                readonly property bool gifAnimating: wcCell.wallIndex >= 0 && wcCell.wallIndex === win.wallSelected && Math.abs(wcCell.rank) < 1
+                                    && cfg.wallpaperStyle !== "grid" && win.shown && !!wcCell.shownWall?.gif
                                 AnimatedImage {
                                     // Same (wider-than-bar) target width as the still
                                     // Image above, not just barWidth: PreserveAspectCrop
@@ -5619,7 +5678,11 @@ ShellRoot {
                                     // instant a centered gif starts playing.
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
-                                    anchors.centerIn: parent
+                                    // exactly the still Image's box *and* its
+                                    // parallax offset, so handing over to the
+                                    // animation mid-slide moves nothing
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    x: (parent.width - width) / 2 - wcCell.rank * wallCarousel.parallaxPx
                                     visible: wcThumb.gifAnimating
                                     playing: wcThumb.gifAnimating
                                     asynchronous: true
@@ -5718,25 +5781,25 @@ ShellRoot {
                     }
                 }
 
-                // One video player for the whole carousel, pinned to the
-                // center slot (rank 0's geometry, see wcCell's x above)
-                // rather than living inside the cells. Building a
-                // MediaPlayer costs ~600ms of backend init the first time
-                // in a process and ~80ms every time after, and tearing one
-                // down another ~65ms, all on the GUI thread — a per-cell
-                // player gated on wallCarouselSettled paid a teardown as
-                // each slide started and a build as it stopped, which is
-                // exactly the stall that made navigating on and off a video
-                // lag (and ate the slide's parallax pan with it). Nothing
-                // here is ever destroyed: navigation only toggles
-                // play/pause and opacity, which cost nothing.
+                // One video player for the whole carousel, standing in for
+                // whichever cell holds the selection, rather than living
+                // inside the cells. Building a MediaPlayer costs ~600ms of
+                // backend init the first time in a process and ~80ms every
+                // time after, and tearing one down another ~65ms, all on the
+                // GUI thread — a per-cell player built and destroyed as the
+                // selection moved paid a teardown as each slide started and a
+                // build as it stopped, which is exactly the stall that made
+                // navigating on and off a video lag (and ate the slide's
+                // parallax pan with it). Nothing here is ever destroyed:
+                // navigation only toggles play/pause and opacity, which cost
+                // nothing.
                 //
-                // Pinning to the center is safe precisely because playback
-                // is gated on wallCarouselSettled: whenever this is
-                // visible, the cell it stands in for is resting at rank 0,
-                // unscaled and unpanned. While a slide or drag is in
-                // flight the cell's own still Image takes over, panning
-                // with everything else.
+                // It is not pinned to the middle of the strip, though: it
+                // takes the placement, scale, stacking and parallax a cell
+                // at centerRank would get, so it rides a slide (or a drag)
+                // in its cell's place. Playback used to wait for the strip
+                // to settle instead, which is what made a video preview
+                // read as arriving late behind the navigation.
                 readonly property var centerWall: (!win.wallCarouselEmpty && win.wallSelected >= 0 && win.wallSelected < win.wallMatches.length) ? win.wallMatches[win.wallSelected] : null
                 // File the player currently has open. Sticky: navigating
                 // off a video pauses it instead of clearing the source,
@@ -5761,7 +5824,14 @@ ShellRoot {
                 // win.shown, not just the pane: the launcher keeps its last
                 // pane while hidden, and decoding frames for a window nobody
                 // is looking at costs the same as decoding for one they are.
-                readonly property bool videoShowing: win.shown && win.pane === "walls" && cfg.wallpaperStyle !== "grid" && win.wallCarouselSettled && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
+                readonly property bool videoShowing: win.shown && win.pane === "walls" && cfg.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
+                // Rank of the slot the player stands in for: the cell that a
+                // slide in flight is on its way to leaving at center (the one
+                // whose absStep is wallCarouselStep). 0 at rest, ±1 at the
+                // start of a step, free-running under a drag — which is what
+                // keeps the player over its own cell throughout the motion
+                // rather than over whatever happens to be in the middle.
+                readonly property real centerRank: win.wallCarouselStep - win.wallCarouselAnim
                 // The shared player has no entrance spring of its own, so
                 // hold it back until the cells have finished theirs — it
                 // would otherwise sit at full opacity in the center slot
@@ -5776,13 +5846,27 @@ ShellRoot {
                 }
                 Loader {
                     id: wallVideo
-                    x: parent.width / 2 - width / 2
+                    // the same placement/scale/stacking wcCell derives from
+                    // its own rank — see the notes there for why each is
+                    // shaped the way it is
+                    x: parent.width / 2 - width / 2 + Math.sign(wallCarousel.centerRank) * wallCarousel.edgeOffset(Math.abs(wallCarousel.centerRank))
                     y: 0
                     width: wallCarousel.barWidth
                     height: wallCarousel.barHeight
+                    scale: Math.max(wallCarousel.edgeFloor, 1 - Math.abs(wallCarousel.centerRank) * wallCarousel.edgeRate)
+                    // ties with the cell it stands in for; declared after the
+                    // Repeater, so it wins the tie and draws over that cell's
+                    // still frame
+                    z: -Math.abs(wallCarousel.centerRank)
                     active: wallCarousel.videoSource !== ""
                     asynchronous: true
-                    opacity: wallCarousel.videoShowing ? 1 : 0
+                    // fades out toward the edges exactly as its cell does, so
+                    // a slide that carries a video off the strip takes the
+                    // playing frame with it instead of leaving it at full
+                    // strength over a faded cell
+                    opacity: wallCarousel.videoShowing
+                        ? Math.max(0, Math.min(1, wallCarousel.halfVisible + 1 - Math.abs(wallCarousel.centerRank)))
+                        : 0
                     visible: opacity > 0
                     Behavior on opacity {
                         NumberAnimation { duration: win.ad(90); easing.type: Easing.OutCubic }
@@ -5821,7 +5905,11 @@ ShellRoot {
                                     width: wallCarousel.barWidth + ((wallCarousel.halfVisible + 1) * wallCarousel.parallaxPx + 20) * 2
                                     height: parent.height
                                     anchors.verticalCenter: parent.verticalCenter
-                                    x: (parent.width - width) / 2
+                                    // parallax included, same as the still
+                                    // frame it hands over from: without it the
+                                    // video would sit still inside its bar
+                                    // while everything around it panned
+                                    x: (parent.width - width) / 2 - wallCarousel.centerRank * wallCarousel.parallaxPx
                                     fillMode: VideoOutput.PreserveAspectCrop
                                     MediaPlayer {
                                         id: wallVideoPlayer
