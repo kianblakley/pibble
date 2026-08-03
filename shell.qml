@@ -3577,8 +3577,9 @@ ShellRoot {
                 let delta = ((best - wallSelected) % count + count) % count;
                 if (delta > count / 2)
                     delta -= count;
-                wallSelected = best;
+                // order matches moveCarousel — see its comment
                 wallCarouselStep += delta;
+                wallSelected = best;
             }
         }
         readonly property int wallPageSize: cfg.wallsCols * cfg.wallsRows
@@ -3606,8 +3607,13 @@ ShellRoot {
             const count = wallMatches.length;
             if (!count)
                 return;
-            wallSelected = ((wallSelected + dir) % count + count) % count;
+            // wallCarouselStep first: wallSelected's change is what fires
+            // centerWall's binding (and the shared video player's
+            // onCenterWallChanged off that), so wallCarouselStep must
+            // already hold its new value by then or the player captures the
+            // slot it's leaving instead of the one it's arriving at.
             wallCarouselStep += dir;
+            wallSelected = ((wallSelected + dir) % count + count) % count;
         }
         // Swipe-to-scroll the carousel, live: dx is the total horizontal drag
         // distance so far (from the gesture's press, not since the last
@@ -5847,8 +5853,23 @@ ShellRoot {
                     videoSource = firstVideo
                 Component.onCompleted: if (videoSource === "")
                     videoSource = firstVideo
-                onCenterWallChanged: if (centerWall && centerWall.video)
-                    videoSource = centerWall.path
+                // absStep of the cell videoSource was last handed over from,
+                // updated in lockstep with videoSource itself (see below) so
+                // centerRank always measures from the slot the open file
+                // actually belongs to. Without this it tracked
+                // win.wallCarouselStep directly, which jumps to the
+                // *destination* slot the instant navigation starts — fine
+                // while hopping video-to-video (videoSource jumps with it),
+                // but wrong leaving a video for a plain image: videoSource
+                // stays put (see onCenterWallChanged), so the fading-out
+                // player would ride the incoming cell's position instead of
+                // the outgoing one, flashing the old thumbnail over the tile
+                // being navigated to.
+                property int videoAbsStep: win.wallCarouselStep
+                onCenterWallChanged: if (centerWall && centerWall.video) {
+                    videoSource = centerWall.path;
+                    videoAbsStep = win.wallCarouselStep;
+                }
                 // videoSource === centerWall.path holds off the handover for
                 // the frame or two after a switch between two videos, while
                 // the player still has the previous file open.
@@ -5856,13 +5877,15 @@ ShellRoot {
                 // pane while hidden, and decoding frames for a window nobody
                 // is looking at costs the same as decoding for one they are.
                 readonly property bool videoShowing: win.shown && win.pane === "walls" && cfg.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
-                // Rank of the slot the player stands in for: the cell that a
-                // slide in flight is on its way to leaving at center (the one
-                // whose absStep is wallCarouselStep). 0 at rest, ±1 at the
-                // start of a step, free-running under a drag — which is what
-                // keeps the player over its own cell throughout the motion
-                // rather than over whatever happens to be in the middle.
-                readonly property real centerRank: win.wallCarouselStep - win.wallCarouselAnim
+                // Rank of the slot the player stands in for: the cell
+                // videoSource belongs to (see videoAbsStep above) — the one
+                // it's riding into on a video-to-video handover, or the one
+                // it's riding off of when the next cell over isn't a video.
+                // 0 at rest, ±1 at the start of a step, free-running under a
+                // drag — which is what keeps the player over its own cell
+                // throughout the motion rather than over whatever happens to
+                // be in the middle.
+                readonly property real centerRank: videoAbsStep - win.wallCarouselAnim
                 // The shared player has no entrance spring of its own, so
                 // hold it back until the cells have finished theirs — it
                 // would otherwise sit at full opacity in the center slot
