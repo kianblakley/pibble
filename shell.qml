@@ -3909,9 +3909,83 @@ ShellRoot {
             exit();
         }
 
-        function applyWallpaper(wall) {
-            if (!wall)
-                return;
+        // A pick is only committed once the user's wallCommand has actually
+        // succeeded: cfg.currentWallpaper is what the Dynamic theme samples
+        // (see matugenProc) and what the xray backdrop resolves its blurred
+        // variant from, so committing it up front would retheme the whole
+        // shell around a wallpaper that never reached the screen. That's the
+        // reason the command runs as a tracked Process rather than an
+        // execDetached — its exit code is the deciding signal.
+        property var pendingWall: null
+        property var queuedWall: null
+        Process {
+            id: wallApply
+            // set when a newer pick killed this run (see applyWallpaper): the
+            // non-zero exit that follows is ours, not the command failing
+            property bool superseded: false
+            onExited: exitCode => {
+                wallGrace.stop();
+                const wall = win.pendingWall;
+                win.pendingWall = null;
+                if (superseded)
+                    superseded = false;
+                else if (exitCode !== 0)
+                    root.notifyError("Wallpaper command failed", cfg.wallCommand);
+                else if (wall)
+                    win.commitWallpaper(wall);
+                if (win.queuedWall) {
+                    const next = win.queuedWall;
+                    win.queuedWall = null;
+                    // one event-loop hop before respawning, same as
+                    // matugenProc's rerun: running can't go false→true from
+                    // inside the handler that observed it going false
+                    Qt.callLater(() => win.runWallCommand(next));
+                }
+            }
+        }
+        // Commands that never exit — a foreground swaybg/mpvpaper rather than
+        // a daemon client like awww/swww — would otherwise hold the commit
+        // forever. Anything that genuinely fails (missing binary, bad
+        // arguments) does so in milliseconds, so a command still alive this
+        // long has taken effect and is simply staying resident: commit it and
+        // leave onExited above to report a failure that arrives much later.
+        Timer {
+            id: wallGrace
+            interval: 3000
+            onTriggered: {
+                if (win.pendingWall) {
+                    win.commitWallpaper(win.pendingWall);
+                    win.pendingWall = null;
+                }
+            }
+        }
+        function runWallCommand(wall) {
+            pendingWall = wall;
+            // $WALL and $BLUR are exported for the command to template with.
+            // $BLUR is the cached blurred variant the scan already resolved
+            // for this wallpaper — the same image the launcher's own backdrop
+            // draws, or the user's <stem>blurred.<ext> where they've supplied
+            // one. Empty until the background pass has generated it (a few
+            // seconds on a cold cache, see wallScan), which is why commands
+            // that use it should guard for that.
+            // setsid -w keeps this a tracked child in every way that matters
+            // (it waits, and reports the command's own exit code) while giving
+            // the command its own session, so a resident setter — mpvpaper,
+            // a foreground swaybg — outlives the daemon exactly as it did
+            // under the execDetached this replaced, instead of being torn down
+            // with quickshell. Stdio goes to /dev/null for the reason spelled
+            // out on appLaunch: a resident child left holding this Process's
+            // pipes gets SIGPIPE'd the moment they close.
+            wallApply.command = ["bash", "-c", `
+                export PATH="$HOME/.local/bin:$PATH"
+                WALL="$1" BLUR="$2"
+                export WALL BLUR
+                exec setsid -w bash -c "$3" >/dev/null 2>&1
+            `, "_", wall.path, wall.blur, cfg.wallCommand];
+            wallApply.running = true;
+            wallGrace.restart();
+        }
+        function commitWallpaper(wall) {
             // record what was applied so the Dynamic theme can sample this
             // exact file directly, instead of asking the compositor what's
             // currently on screen (see matugenProc)
@@ -3924,19 +3998,22 @@ ShellRoot {
             if (root.alertOn("actions"))
                 Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "preferences-desktop-wallpaper",
                     "-h", "string:image-path:" + wall.thumb, "Wallpaper changed", wall.path.split("/").pop()]);
-            // Runs the configurable command with $WALL and $BLUR exported.
-            // $BLUR is the cached blurred variant the scan already resolved
-            // for this wallpaper — the same image the launcher's own backdrop
-            // draws, or the user's <stem>blurred.<ext> where they've supplied
-            // one. Empty until the background pass has generated it (a few
-            // seconds on a cold cache, see wallScan), which is why commands
-            // that use it should guard for that.
-            Quickshell.execDetached(["bash", "-c", `
-                export PATH="$HOME/.local/bin:$PATH"
-                WALL="$1" BLUR="$2"
-                export WALL BLUR
-                eval "$3" || { [ "$4" = "1" ] && notify-send -a pibble -i dialog-error "Wallpaper command failed" "$3"; }
-            `, "_", wall.path, wall.blur, cfg.wallCommand, root.alertOn("errors") ? "1" : "0"]);
+        }
+        function applyWallpaper(wall) {
+            if (!wall)
+                return;
+            if (wallApply.running) {
+                // a newer pick supersedes one still in flight: drop the wrapper
+                // (its wallpaper is no longer the one wanted) and start the new
+                // command from onExited. Only the wrapper is signalled — a
+                // resident setter is off in its own session, left for the
+                // user's own command to replace as it always was
+                queuedWall = wall;
+                wallApply.superseded = true;
+                wallApply.running = false;
+            } else {
+                runWallCommand(wall);
+            }
             exit();
         }
 
