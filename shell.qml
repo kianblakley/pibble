@@ -787,8 +787,14 @@ ShellRoot {
     component KeyCap: Item {
         id: keycap
         property string label: ""
-        // Return always gets a glyph; every other key renders as plain text.
-        property string glyph: label === "Return" ? root.ti.cornerDownLeft : ""
+        // Return and the arrow keys always get a glyph; every other key
+        // renders as plain text.
+        property string glyph: label === "Return" ? root.ti.cornerDownLeft
+            : label === "Left" ? root.ti.arrowLeft
+            : label === "Right" ? root.ti.arrowRight
+            : label === "Up" ? root.ti.arrowUp
+            : label === "Down" ? root.ti.arrowDown
+            : ""
         implicitWidth: Math.max(28, capText.implicitWidth + 16)
         implicitHeight: 26
 
@@ -1050,8 +1056,8 @@ ShellRoot {
             // bars visible in the "windows" carousel: the selected center
             // plus equal wings, so always odd (healSettings clamps to 3–9)
             property int wallsVisible: 7
-            property int clipsCols: 4
-            property int clipsRows: 4
+            property int clipsCols: 3
+            property int clipsRows: 3
             property int clipsMax: 100
             property var pages: ({ clock: true, apps: true, walls: true, clips: true })
             // cycle order of the pages (drag the chips in settings to change)
@@ -1111,7 +1117,7 @@ ShellRoot {
             // or the client-side fake ("xray", a blurred wallpaper — see the
             // background layer inside `content`); independent of
             // launchAnimation
-            property string bgBlur: "compositor"
+            property string bgBlur: "xray"
             // gates every navigation gesture as one switch: the edge
             // swipe-up/swipe-down power-off/reboot drag (and, once that
             // prompt is armed, the screen-wide swipe that confirms/dismisses
@@ -1121,14 +1127,15 @@ ShellRoot {
             // swipe-to-go-back drag (win.goBack()). The keybind/Enter-confirm
             // flow the power gesture feeds into stays available either way.
             property bool gestures: true
-            // when on, clicking an app/wall/clip tile that isn't already
+            // when on, a single click on an app/wall/clip tile activates it
+            // immediately. Off means clicking a tile that isn't already
             // selected only highlights it — a second click (on the now-
-            // selected tile) is what actually activates it. Off reverts to
-            // instant activate-on-any-click. The wallpaper carousel already
-            // behaves this way inherently (tapping a bar off-center recenters
-            // it, tapping the centered one applies it) so isn't gated by this.
-            property bool clickToSelect: true
-            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
+            // selected tile) is what actually activates it. The wallpaper
+            // carousel already behaves like the "off" mode inherently
+            // (tapping a bar off-center recenters it, tapping the centered
+            // one applies it) so isn't gated by this.
+            property bool singleClickActivate: false
+            property var keybinds: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down" })
             // flyouts (volume + notification OSDs) — independent of whether
             // other apps' notifications show
             property var flyouts: ({ volume: true, notifs: true })
@@ -1500,7 +1507,8 @@ ShellRoot {
         settings: "\ue8b8", refresh: "\ue5d5", copy: "\ue14d", bell: "\ue7f4",
         alertTriangle: "\ue002", cornerDownLeft: "\ue31b",
         wallpaperSlideshow: "\uf672", plus: "\uf710", trash: "\ue872",
-        batteryLow: "\uf251", download: "\ue171", chevronLeft: "\ue5cb"
+        batteryLow: "\uf251", download: "\ue171", chevronLeft: "\ue5cb",
+        arrowLeft: "\ue5c4", arrowRight: "\ue5c8", arrowUp: "\ue5d8", arrowDown: "\ue5db"
     })
 
     function fs(px: int): int {
@@ -4070,7 +4078,7 @@ ShellRoot {
         }
 
         // ---------- keybinds ----------
-        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R" })
+        readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down" })
         // capture (Keybindings tab, click-to-record): capturingBind names the
         // action being recorded; captureHeldKeys tracks which physical keys
         // are still down so the bind only commits once every key of the
@@ -4997,7 +5005,7 @@ ShellRoot {
                                         TapHandler {
                                             enabled: cell.filled
                                             onTapped: {
-                                                if (!cfg.clickToSelect || cell.isSelected)
+                                                if (cfg.singleClickActivate || cell.isSelected)
                                                     win.launch(cell.entry);
                                                 else
                                                     win.selected = cell.appIndex;
@@ -5286,7 +5294,7 @@ ShellRoot {
                                     TapHandler {
                                         enabled: wallCell.filled
                                         onTapped: {
-                                            if (!cfg.clickToSelect || wallCell.isSelected)
+                                            if (cfg.singleClickActivate || wallCell.isSelected)
                                                 win.applyWallpaper(wallCell.wall);
                                             else
                                                 win.wallSelected = wallCell.wallIndex;
@@ -6332,7 +6340,7 @@ ShellRoot {
                                         TapHandler {
                                             enabled: clipCell.filled && win.expandedClip === null
                                             onTapped: {
-                                                if (!cfg.clickToSelect || clipCell.isSelected) {
+                                                if (cfg.singleClickActivate || clipCell.isSelected) {
                                                     win.clipSelected = clipCell.clipIndex;
                                                     win.expandClip(clipCell.clip);
                                                 } else {
@@ -7012,14 +7020,13 @@ ShellRoot {
 
                     SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 190 }
                     SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; sub: "settings pane and power-off/reboot prompts" }
-                    SettingRow { key: "dimOpacity"; label: "Background opacity" }
                     SettingRow {
                         key: "bgBlur"
                         label: "Background blur"
-                        sub: cfg.bgBlur === "compositor" ? "real blur — needs a compositor that implements ext-background-effect-v1"
-                            : cfg.bgBlur === "xray" ? "blurs the wallpaper behind the launcher"
-                            : "no background effect"
+                        valueWidth: 190
+                        sub: "ext-background-effect requires compositor support"
                     }
+                    SettingRow { key: "dimOpacity"; label: "Background opacity" }
                     SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 190 }
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
@@ -7233,7 +7240,7 @@ ShellRoot {
                     SettingRow { key: "notifStyle"; label: "Notification style" }
                     SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
+                    SettingRow { key: "replayCount"; label: "Pibble replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
                 }
 
                 Column {
@@ -7307,7 +7314,7 @@ ShellRoot {
                             if (idx !== win.fullPageOrder.indexOf(draggedId))
                                 win.moveFullPage(draggedId, idx);
                         }
-                        readonly property var defLabels: ({ clock: "Clock", apps: "Apps", walls: "Walls", clips: "Clips" })
+                        readonly property var defLabels: ({ clock: "Clock", apps: "Apps", walls: "Wallpapers", clips: "Clipboard" })
                         function pageLabel(id) {
                             if (id === "__add_folder__")
                                 return "Add a page…";
@@ -8126,9 +8133,9 @@ ShellRoot {
 
                     SettingRow { key: "animStyle"; label: "Grid animation" }
 
-                    SettingRow { key: "iconTheme"; label: "App icon theme"; sub: "applies on next launch"; valueWidth: 190 }
+                    SettingRow { key: "iconTheme"; label: "App icon theme"; sub: "applied after daemon reload"; valueWidth: 190 }
 
-                    SettingRow { key: "wallpaperStyle"; label: "Wallpaper style"; valueWidth: 190 }
+                    SettingRow { key: "wallpaperStyle"; label: "Wallpapers style"; valueWidth: 190 }
 
                     // wallpaper path
                     Item {
@@ -8137,7 +8144,7 @@ ShellRoot {
 
                         SLabel {
                             anchors.left: parent.left
-                            text: "Wallpaper path"
+                            text: "Wallpapers path"
                         }
                         SReset {
                             key: "wallpaperDir"
@@ -8159,7 +8166,7 @@ ShellRoot {
                                 anchors.margins: 8
                                 verticalAlignment: Text.AlignVCenter
                                 visible: pathInput.text.length === 0
-                                text: "~/Pictures/wallpapers"
+                                text: "type the path to your wallpapers"
                                 color: root.muted
                                 font { family: root.mono; pixelSize: root.fs(13) }
                             }
@@ -8208,7 +8215,7 @@ ShellRoot {
 
                         SLabel {
                             anchors.left: parent.left
-                            text: "Wallpaper command"
+                            text: "Wallpapers command"
                         }
                         SReset {
                             key: "wallCommand"
@@ -8218,7 +8225,7 @@ ShellRoot {
                             anchors.right: parent.right
                             anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 506
+                            width: 508
                             height: 34
                             radius: 8
                             color: Qt.alpha(root.accent, cmdInput.activeFocus ? 0.16 : 0.08)
@@ -8230,10 +8237,10 @@ ShellRoot {
                                 anchors.margins: 8
                                 verticalAlignment: Text.AlignVCenter
                                 visible: cmdInput.text.length === 0
-                                text: root.defaultWallCommand
+                                text: "type the command to be executed when a wallpaper is selected"
                                 color: root.muted
                                 elide: Text.ElideRight
-                                font { family: root.mono; pixelSize: root.fs(12) }
+                                font { family: root.mono; pixelSize: root.fs(13) }
                             }
                             TextInput {
                                 id: cmdInput
@@ -8243,7 +8250,7 @@ ShellRoot {
                                 text: cfg.wallCommand
                                 color: root.fg
                                 clip: true
-                                font { family: root.mono; pixelSize: root.fs(12) }
+                                font { family: root.mono; pixelSize: root.fs(13) }
                                 onEditingFinished: {
                                     if (text !== cfg.wallCommand) {
                                         cfg.wallCommand = text;
@@ -8315,7 +8322,11 @@ ShellRoot {
                         model: [
                             { action: "cycle", label: "Cycle pages" },
                             { action: "reverseCycle", label: "Cycle pages (reverse)" },
-                            { action: "launch", label: "Launch / apply" },
+                            { action: "navLeft", label: "Navigate left" },
+                            { action: "navRight", label: "Navigate right" },
+                            { action: "navUp", label: "Navigate up" },
+                            { action: "navDown", label: "Navigate down" },
+                            { action: "launch", label: "Activate" },
                             { action: "settings", label: "Settings" },
                             { action: "power", label: "Power off prompt" },
                             { action: "reboot", label: "Reboot prompt" },
@@ -8397,14 +8408,13 @@ ShellRoot {
                     }
 
                     SettingRow {
-                        key: "gestures"
-                        label: "Navigation gestures"
-                        sub: "swipe from the top/bottom edge to arm the power/reboot prompt (swipe again to confirm or dismiss it) · swipe left/right to cycle panes/settings tabs · swipe up/down to page through the current grid · swipe left from the right edge to go back"
+                        key: "singleClickActivate"
+                        label: "Single click to activate"
                     }
                     SettingRow {
-                        key: "clickToSelect"
-                        label: "Click to select"
-                        sub: "first click on an app/wallpaper/clip only highlights it; a second click activates it"
+                        key: "gestures"
+                        label: "Navigation gestures"
+                        sub: "top edge: power off prompt · bottom edge: reboot prompt · right edge: exit/back"
                     }
                 }
 
@@ -8792,9 +8802,9 @@ ShellRoot {
             case "fontScale": return Math.round(cfg.fontScale * 100) + "%";
             case "dimOpacity": return Math.round(cfg.dimOpacity * 100) + "%";
             case "launchAnimation": return cfg.launchAnimation;
-            case "bgBlur": return cfg.bgBlur;
+            case "bgBlur": return cfg.bgBlur === "compositor" ? "ext-background-effect" : cfg.bgBlur;
             case "gestures": return cfg.gestures ? "on" : "off";
-            case "clickToSelect": return cfg.clickToSelect ? "on" : "off";
+            case "singleClickActivate": return cfg.singleClickActivate ? "on" : "off";
             case "hiddenMenuAnimations": return cfg.hiddenMenuAnimations ? "on" : "off";
             case "fontFamily": return cfg.fontFamily || "system default";
             case "iconTheme": return cfg.iconTheme || "system default";
@@ -8852,8 +8862,8 @@ ShellRoot {
             case "gestures":
                 cfg.gestures = !cfg.gestures;
                 break;
-            case "clickToSelect":
-                cfg.clickToSelect = !cfg.clickToSelect;
+            case "singleClickActivate":
+                cfg.singleClickActivate = !cfg.singleClickActivate;
                 break;
             case "hiddenMenuAnimations":
                 cfg.hiddenMenuAnimations = !cfg.hiddenMenuAnimations;
@@ -8943,7 +8953,7 @@ ShellRoot {
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; cfg.wallsVisible = 7; break;
-            case "clipsGrid": cfg.clipsCols = 4; cfg.clipsRows = 4; break;
+            case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
             case "clipsMax":
                 cfg.clipsMax = 100;
                 clipScan.running = false;
@@ -8953,9 +8963,10 @@ ShellRoot {
             case "fontScale": cfg.fontScale = 1.0; break;
             case "dimOpacity": cfg.dimOpacity = 0.4; break;
             case "launchAnimation": cfg.launchAnimation = "grow-top-left"; break;
-            case "bgBlur": cfg.bgBlur = "compositor"; break;
+            case "bgBlur": cfg.bgBlur = "xray"; break;
             case "hiddenMenuAnimations": cfg.hiddenMenuAnimations = true; break;
             case "gestures": cfg.gestures = true; break;
+            case "singleClickActivate": cfg.singleClickActivate = false; break;
             case "fontFamily": cfg.fontFamily = ""; break;
             case "iconTheme": cfg.iconTheme = ""; break;
             case "theme": cfg.theme = "matugen"; break;
@@ -9093,16 +9104,16 @@ ShellRoot {
                 } else if (ks === (kb.launch ?? "Return")) {
                     win.activate();
                     event.accepted = true;
-                } else if (event.key === Qt.Key_Right) {
+                } else if (ks === (kb.navRight ?? "Right")) {
                     win.navigate(1, 0);
                     event.accepted = true;
-                } else if (event.key === Qt.Key_Left) {
+                } else if (ks === (kb.navLeft ?? "Left")) {
                     win.navigate(-1, 0);
                     event.accepted = true;
-                } else if (event.key === Qt.Key_Down) {
+                } else if (ks === (kb.navDown ?? "Down")) {
                     win.navigate(0, 1);
                     event.accepted = true;
-                } else if (event.key === Qt.Key_Up) {
+                } else if (ks === (kb.navUp ?? "Up")) {
                     win.navigate(0, -1);
                     event.accepted = true;
                 }
