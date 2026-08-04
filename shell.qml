@@ -1168,10 +1168,11 @@ ShellRoot {
             // other apps' notifications show
             property var flyouts: ({ volume: true, notifs: true })
             // gates notify-send calls pibble sends on its own behalf, split
-            // by kind: errors (missing tools, failed commands), actions
-            // (copy confirmations, custom page discovery, page trashed,
-            // wallpaper changed), battery (low battery warning)
-            property var pibbleAlerts: ({ errors: true, actions: true, battery: true })
+            // by kind: errors (failed commands), missingDeps (a required
+            // external tool isn't installed), actions (copy confirmations,
+            // custom page discovery, page trashed, wallpaper changed),
+            // battery (low battery warning)
+            property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
             property real volWidth: 420
             property string volAnim: "pop"
             // volume OSD content style: pill (a level bar) or sine (equalizer)
@@ -1416,7 +1417,7 @@ ShellRoot {
         case "user-trash": return root.ti.trash;
         case "battery-low": return root.ti.batteryLow;
         case "preferences-desktop-wallpaper": return root.ti.wallpaperSlideshow;
-        case "system-software-install": return root.ti.download;
+        case "system-software-install": return root.ti.deployedCodeAlert;
         }
         const sl = summary.toLowerCase();
         if (urgency === NotificationUrgency.Critical || sl.includes("fail") || sl.includes("not found"))
@@ -1536,6 +1537,7 @@ ShellRoot {
         alertTriangle: "\ue002", cornerDownLeft: "\ue31b",
         wallpaperSlideshow: "\uf672", plus: "\uf710", trash: "\ue872",
         batteryLow: "\uf251", download: "\ue171", chevronLeft: "\ue5cb",
+        deployedCodeAlert: "\uf5f2",
         arrowLeft: "\ue5c4", arrowRight: "\ue5c8", arrowUp: "\ue5d8", arrowDown: "\ue5db"
     })
 
@@ -1554,6 +1556,16 @@ ShellRoot {
         Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
     }
 
+    // a required external tool isn't installed - distinct from notifyError
+    // (both gated separately in Settings and rendered with a different
+    // glyph/color, see notifGlyph and flyWin.snapshot) since a missing
+    // dependency is an environment gap, not something pibble itself failed at
+    function notifyMissingDep(summary: string, body: string) {
+        if (!alertOn("missingDeps"))
+            return;
+        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "system-software-install", summary, body]);
+    }
+
     // fires from a video wallpaper's MediaPlayer.onErrorOccurred (grid tile
     // and carousel preview both wire into this) rather than a startup probe:
     // the QtMultimedia QML module can still import fine with no working
@@ -1569,7 +1581,7 @@ ShellRoot {
         if (warnedMediaBackend)
             return;
         warnedMediaBackend = true;
-        notifyError("Video wallpaper playback failed",
+        notifyMissingDep("Video wallpaper playback failed",
             "QtMultimedia has no working playback backend (" + errorString + ") - install your distro's Qt6 multimedia backend package (e.g. qt6-multimedia-ffmpeg) to enable video wallpapers.");
     }
 
@@ -1774,7 +1786,7 @@ ShellRoot {
             onStreamFinished: {
                 if (text.trim() === "NOMATUGEN") {
                     if (cfg.theme === "matugen")
-                        root.notifyError("matugen not found", "Install matugen to use the Dynamic theme.");
+                        root.notifyMissingDep("matugen not found", "Install matugen to use the Dynamic theme.");
                     return;
                 }
                 // empty output is benign (awww not up yet at login, no
@@ -2324,7 +2336,7 @@ ShellRoot {
                                 if ! command -v ffmpeg >/dev/null 2>&1; then
                                     if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
                                         warnedFfmpeg=1
-                                        notify-send -a pibble -i dialog-error "ffmpeg not found" "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                        notify-send -a pibble -i system-software-install "ffmpeg not found" "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                     fi
                                 else
                                     # not cropped to 480x270 like the image
@@ -2368,7 +2380,7 @@ ShellRoot {
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
                                     warnedMagick=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
@@ -2411,7 +2423,7 @@ ShellRoot {
                             k=$(basename "$c"); k="\${k%.*}"
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
-                    done`, "_", root.wallDir, root.cacheRoot, wantBlur ? "1" : "0", root.alertOn("errors") ? "1" : "0",
+                    done`, "_", root.wallDir, root.cacheRoot, wantBlur ? "1" : "0", root.alertOn("missingDeps") ? "1" : "0",
                     root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)].concat(order));
             }
         }
@@ -2703,7 +2715,7 @@ ShellRoot {
         if (win.pane !== "clips")
             return;
         if (!cliphistAvailable)
-            notifyError("cliphist not found", "Install cliphist to enable clipboard history.");
+            notifyMissingDep("cliphist not found", "Install cliphist to enable clipboard history.");
         else if (!clipWatcherRunning)
             notifyError("Clipboard watcher not running",
                 "Nothing is piping clipboard changes into cliphist - clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" +
@@ -2797,12 +2809,12 @@ ShellRoot {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i dialog-error "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
                             rm -f "$tmp"
-                        done`, "_", root.clipThumbDir, root.alertOn("errors") ? "1" : "0"].concat(imgs);
+                        done`, "_", root.clipThumbDir, root.alertOn("missingDeps") ? "1" : "0"].concat(imgs);
                     clipThumbs.running = true;
                 }
             }
@@ -3987,7 +3999,7 @@ ShellRoot {
             clipCopy.command = ["bash", "-c", `
                 export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
                 if ! command -v wl-copy >/dev/null 2>&1; then
-                    [ "$5" = "1" ] && notify-send -a pibble -i dialog-error "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
+                    [ "$5" = "1" ] && notify-send -a pibble -i system-software-install "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
                     exit 0
                 fi
                 tmp=$(mktemp)
@@ -4017,7 +4029,7 @@ ShellRoot {
                     cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
                 fi
                 exit 0`, "_", clip.id, clip.image ? "img" : "txt", root.clipThumbDir,
-                clip.preview.slice(0, 60), root.alertOn("errors") ? "1" : "0", root.alertOn("actions") ? "1" : "0"];
+                clip.preview.slice(0, 60), root.alertOn("missingDeps") ? "1" : "0", root.alertOn("actions") ? "1" : "0"];
             clipCopy.running = true;
         }
         property string infoClipId: ""
@@ -7254,6 +7266,7 @@ ShellRoot {
                             anchors.verticalCenter: parent.verticalCenter
                             items: [
                                 { id: "errors", label: "errors" },
+                                { id: "missingDeps", label: "dependencies" },
                                 { id: "actions", label: "actions" },
                                 { id: "battery", label: "battery" }
                             ]
@@ -8882,7 +8895,7 @@ ShellRoot {
         }
 
         function toggleAlert(a: string) {
-            const al = Object.assign({ errors: true, actions: true, battery: true }, cfg.pibbleAlerts);
+            const al = Object.assign({ errors: true, missingDeps: true, actions: true, battery: true }, cfg.pibbleAlerts);
             al[a] = al[a] === false;
             cfg.pibbleAlerts = al;
             root.saveSettings();
@@ -8944,7 +8957,7 @@ ShellRoot {
             case "wallCommand": cfg.wallCommand = root.defaultWallCommand; break;
             case "volWidth": cfg.volWidth = 420; break;
             case "flyouts": cfg.flyouts = ({ volume: true, notifs: true }); break;
-            case "pibbleAlerts": cfg.pibbleAlerts = ({ errors: true, actions: true, battery: true }); break;
+            case "pibbleAlerts": cfg.pibbleAlerts = ({ errors: true, missingDeps: true, actions: true, battery: true }); break;
             case "volAnim": cfg.volAnim = "pop"; break;
             case "volStyle": cfg.volStyle = "sine"; break;
             case "volPercent": cfg.volShowPercent = true; break;
@@ -9733,7 +9746,14 @@ ShellRoot {
                 // errors and low battery always read as red, regardless of
                 // theme/tint, so severity is visible at a glance
                 if (view.glyph === root.ti.alertTriangle || view.glyph === root.ti.batteryLow) {
-                    nColor = "#e0524f";
+                    nColor = "#e01e18";
+                    return;
+                }
+                // missing-dependency alerts read as orange rather than red:
+                // less severe than an actual failure, just something to
+                // install when convenient
+                if (view.glyph === root.ti.deployedCodeAlert) {
+                    nColor = "#e0691a";
                     return;
                 }
                 // "default" theme tints from the app icon (else the media
