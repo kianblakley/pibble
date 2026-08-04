@@ -1,5 +1,4 @@
 import QtQuick
-import QtMultimedia
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
@@ -487,18 +486,12 @@ Item {
         }
     }
 
-    // One video player for the whole carousel, standing in for
-    // whichever cell holds the selection, rather than living
-    // inside the cells. Building a MediaPlayer costs ~600ms of
-    // backend init the first time in a process and ~80ms every
-    // time after, and tearing one down another ~65ms, all on the
-    // GUI thread — a per-cell player built and destroyed as the
-    // selection moved paid a teardown as each slide started and a
-    // build as it stopped, which is exactly the stall that made
-    // navigating on and off a video lag (and ate the slide's
-    // parallax pan with it). Nothing here is ever destroyed:
-    // navigation only toggles play/pause and opacity, which cost
-    // nothing.
+    // One video surface for the whole carousel, standing in for
+    // whichever cell holds the selection, rather than one living
+    // inside each cell — every video's player is already open and
+    // paused behind it (see WallpaperVideoPool), so what navigation
+    // does here is only ever move this surface and start or stop
+    // the player it points at, both of which are free.
     //
     // It is not pinned to the middle of the strip, though: it
     // takes the placement, scale, stacking and parallax a cell
@@ -507,21 +500,11 @@ Item {
     // to settle instead, which is what made a video preview
     // read as arriving late behind the navigation.
     readonly property var centerWall: (!LauncherState.carouselEmpty && LauncherState.wallpaperSelected >= 0 && LauncherState.wallpaperSelected < LauncherState.wallpaperMatches.length) ? LauncherState.wallpaperMatches[LauncherState.wallpaperSelected] : null
-    // File the player currently has open. Sticky: navigating
-    // off a video pauses it instead of clearing the source,
-    // since reopening one costs as much as building the player
-    // did. Seeded with the first video the scan finds so that
-    // cost lands at startup, with nothing on screen to stutter
-    // — the same reason pibble-warmup decodes theme SVGs there.
+    // Video the surface shows. Sticky: navigating off a video
+    // leaves it showing that (now paused, and therefore identical
+    // to the still frame underneath) file while it fades out
+    // riding its own cell away, rather than blanking mid-slide.
     property string videoSource: ""
-    readonly property string firstVideo: {
-        const v = Wallpapers.list.find(w => w.video);
-        return v ? v.path : "";
-    }
-    onFirstVideoChanged: if (videoSource === "")
-        videoSource = firstVideo
-    Component.onCompleted: if (videoSource === "")
-        videoSource = firstVideo
     // absStep of the cell videoSource was last handed over from,
     // updated in lockstep with videoSource itself (see below) so
     // centerRank always measures from the slot the open file
@@ -567,7 +550,7 @@ Item {
         interval: Anim.stagger(root.halfVisible, 1, 35) + Anim.duration + 40
         onTriggered: root.entranceDone = true
     }
-    Loader {
+    Item {
         id: sharedVideo
         // the same placement/scale/stacking cell derives from
         // its own rank — see the notes there for why each is
@@ -581,8 +564,6 @@ Item {
         // Repeater, so it wins the tie and draws over that cell's
         // still frame
         z: -Math.abs(root.centerRank)
-        active: root.videoSource !== ""
-        asynchronous: true
         // fades out toward the edges exactly as its cell does, so
         // a slide that carries a video off the strip takes the
         // playing frame with it instead of leaving it at full
@@ -594,83 +575,46 @@ Item {
         Behavior on opacity {
             NumberAnimation { duration: Anim.tile(90); easing.type: Easing.OutCubic }
         }
-        sourceComponent: Component {
-            Item {
-                id: videoHost
-                // Rewound rather than resumed, since the still
-                // frame it takes over from is frame 0 (see the
-                // ffmpeg call in Wallpapers' scan) — picking up mid-clip
-                // would make the handover jump in content the
-                // same way it used to jump in scale. Pausing and
-                // seeking a loaded player is free; only stopping
-                // or reopening one isn't.
-                function sync(): void {
-                    if (live) {
-                        videoPlayer.position = 0;
-                        videoPlayer.play();
-                    } else {
-                        videoPlayer.pause();
-                    }
-                }
-                readonly property bool live: root.videoShowing
-                onLiveChanged: sync()
-                // the Loader above builds this asynchronously, so
-                // it can finish with live already true
-                Component.onCompleted: sync()
-                ClippingRectangle {
-                    anchors.fill: parent
-                    radius: 12
-                    color: "transparent"
-                    VideoOutput {
-                        id: videoSurface
-                        // exactly the box — and therefore
-                        // exactly the crop — the centered cell's
-                        // still Image uses at rank 0
-                        width: root.barWidth + ((root.halfVisible + 1) * root.parallaxPx + 20) * 2
-                        height: parent.height
-                        anchors.verticalCenter: parent.verticalCenter
-                        // parallax included, same as the still
-                        // frame it hands over from: without it the
-                        // video would sit still inside its bar
-                        // while everything around it panned
-                        x: (parent.width - width) / 2 - root.centerRank * root.parallaxPx
-                        fillMode: VideoOutput.PreserveAspectCrop
-                        MediaPlayer {
-                            id: videoPlayer
-                            source: "file://" + root.videoSource
-                            loops: MediaPlayer.Infinite
-                            // Opening a file stops the player, so a
-                            // handover has to re-issue playback after
-                            // the new source lands — and `live` can't
-                            // be what does it: navigating video to
-                            // video leaves it true throughout (both
-                            // ends are showing videos), so sync()
-                            // never runs again and the arriving file
-                            // sits stopped on its first frame. This
-                            // fires once the new file is the open
-                            // one, which is also what keeps a play()
-                            // from racing ahead of the source binding
-                            // it was meant for.
-                            onSourceChanged: videoHost.sync()
-                            videoOutput: videoSurface
-                            audioOutput: AudioOutput { muted: true }
-                            onErrorOccurred: (error, errorString) => Notifier.mediaBackendFailure(errorString)
-                        }
-                    }
-                }
-                // the centered cell's own 1px stroke is
-                // underneath this overlay, so redraw it on top,
-                // in the color that cell resolves to at selFade
-                // 1. Outside the ClippingRectangle for the same
-                // reason the cell's is (see wrap above).
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 12
-                    color: "transparent"
-                    border.width: 1
-                    border.color: Theme.accent
-                }
+        ClippingRectangle {
+            anchors.fill: parent
+            radius: 12
+            color: "transparent"
+            WallpaperVideoPool {
+                anchors.fill: parent
+                // style-gated as well as bound to videoSource, which keeps
+                // moving in grid mode (centerWall is only the selection, and
+                // the bindings under an invisible pane keep running): without
+                // it, navigating the *grid* onto a video would have this pool
+                // open the file too, for a strip nobody is looking at.
+                current: Settings.wallpaperStyle === "grid" ? "" : root.videoSource
+                live: root.videoShowing
+                // Only while the launcher is down, so the file
+                // opens land with nothing on screen to stutter
+                // rather than inside a slide — the same reason
+                // pibble-warmup decodes theme SVGs at startup. The
+                // style check keeps the grid's own pool from
+                // opening the same files a second time over.
+                warming: Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                // exactly the box — and therefore exactly the crop
+                // — the centered cell's still Image uses at rank 0,
+                // parallax included: without it the video would sit
+                // still inside its bar while everything around it
+                // panned
+                surfaceWidth: root.barWidth + ((root.halfVisible + 1) * root.parallaxPx + 20) * 2
+                surfaceHeight: height
+                surfaceX: (width - surfaceWidth) / 2 - root.centerRank * root.parallaxPx
             }
+        }
+        // the centered cell's own 1px stroke is underneath this
+        // overlay, so redraw it on top, in the color that cell
+        // resolves to at selFade 1. Outside the ClippingRectangle
+        // for the same reason the cell's is (see wrap above).
+        Rectangle {
+            anchors.fill: parent
+            radius: 12
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.accent
         }
     }
 

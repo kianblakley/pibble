@@ -1,12 +1,12 @@
 import QtQuick
-import QtMultimedia
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
 
 // Wallpaper selector, "grid" style: a paged grid of thumbnails. Only the
-// selected tile plays a .gif/.mp4; every other one stays a still frame, so
-// scrolling the grid never decodes a movie per cell.
+// selected tile animates — its .gif from the source file, its .mp4 through the
+// one shared video surface below the Grid — so scrolling the grid never decodes
+// a movie per cell.
 Item {
     id: root
 
@@ -37,8 +37,20 @@ Item {
     Connections {
         target: LauncherState
         function onPaneChanged() {
-            if (LauncherState.pane === "walls" && Settings.wallpaperStyle === "grid")
+            if (LauncherState.pane === "walls" && Settings.wallpaperStyle === "grid") {
                 enterAnim.restart();
+                // the tiles replay their entrance spring below; the
+                // shared video surface has none, so keep it out
+                // until the one it stands over has landed (see
+                // root.settled)
+                root.unsettle();
+            }
+        }
+        // a query refills the tiles, which springs any that were
+        // empty back in — and moves the selection to the top match,
+        // i.e. to a different tile
+        function onWallpaperMatchesChanged() {
+            root.unsettle();
         }
     }
 
@@ -141,25 +153,23 @@ Item {
                         radius: 14
                         color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
 
-                        // Only the selected tile plays its .gif/.mp4
-                        // (from the source file, not the static
-                        // thumbnail); every other tile stays a still
-                        // frame so scrolling the grid doesn't decode
-                        // a movie per cell.
+                        // Only the selected tile plays its .gif (from
+                        // the source file, not the static thumbnail);
+                        // every other tile stays a still frame so
+                        // scrolling the grid doesn't decode a movie
+                        // per cell. Video is not played per cell at
+                        // all — see the single shared surface below
+                        // the Grid.
                         //
                         // gated on this grid being the style in use,
                         // and on the launcher being up: the grid's
                         // `visible: false` in carousel mode hides
                         // these tiles but keeps every binding under
-                        // them live, so without the check the hidden
-                        // grid was still building a MediaPlayer for
-                        // the selected video (~80ms) and tearing it
-                        // down again (~65ms) on each carousel step
-                        // past one — a stall landing mid-slide, on a
-                        // player nobody could see.
+                        // them live, so without the check a hidden
+                        // grid would still be decoding frames nobody
+                        // can see on every carousel step.
                         readonly property bool tileLive: Settings.wallpaperStyle === "grid" && LauncherState.shown
                         readonly property bool gifAnimating: cell.isSelected && tileLive && !!cell.shownWall?.gif
-                        readonly property bool videoAnimating: cell.isSelected && tileLive && !!cell.shownWall?.video
 
                         Image {
                             // stays visible underneath even while
@@ -183,33 +193,6 @@ Item {
                             asynchronous: true
                             fillMode: Image.PreserveAspectCrop
                             source: thumb.gifAnimating ? "file://" + cell.shownWall.path : ""
-                        }
-                        // MediaPlayer's own backend init (opening/
-                        // probing the file) has a real cost —
-                        // instantiated only via this Loader, gated
-                        // the same way AnimatedImage is above, so at
-                        // most one exists across the whole grid at a
-                        // time instead of every tile carrying its own
-                        // idle MediaPlayer permanently.
-                        Loader {
-                            anchors.fill: parent
-                            active: thumb.videoAnimating
-                            asynchronous: true
-                            sourceComponent: Component {
-                                VideoOutput {
-                                    id: videoSurface
-                                    anchors.fill: parent
-                                    fillMode: VideoOutput.PreserveAspectCrop
-                                    MediaPlayer {
-                                        source: cell.shownWall ? "file://" + cell.shownWall.path : ""
-                                        loops: MediaPlayer.Infinite
-                                        autoPlay: true
-                                        videoOutput: videoSurface
-                                        audioOutput: AudioOutput { muted: true }
-                                        onErrorOccurred: (error, errorString) => Notifier.mediaBackendFailure(errorString)
-                                    }
-                                }
-                            }
                         }
                         // TapHandler + DragHandler split, see the
                         // matching app-tile handlers above
@@ -288,6 +271,89 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // One video surface for the whole grid, over whichever tile holds the
+    // selection, rather than one inside each tile. Every video wallpaper's
+    // player is already open and paused behind this (see WallpaperVideoPool),
+    // so landing on a video tile only moves the surface and starts a player
+    // that is already sitting on its first frame — the tile used to build a
+    // MediaPlayer as the selection arrived and tear it down again as it left,
+    // which measured as a 70-115ms GUI-thread stall on every single move on or
+    // off a video, and measures as none at all now.
+    //
+    // Drawing over the tile rather than inside it does mean it can't ride
+    // that tile's entrance spring, which is what settled below is for.
+    readonly property int selSlot: LauncherState.wallpaperSelected - LauncherState.wallpaperPage * LauncherState.wallpaperPageSize
+    readonly property var selWall: LauncherState.wallpaperMatches[LauncherState.wallpaperSelected] ?? null
+    // pane checked as well as the style: the grid is only `visible: false`
+    // in carousel mode, so its bindings keep running there (same reason the
+    // tiles check tileLive above), and a pane away from the selector would
+    // otherwise leave a video decoding frames for a window nobody is looking
+    // at.
+    readonly property bool videoShowing: root.settled && !LauncherState.warmingWallpapers
+        && Settings.wallpaperStyle === "grid" && LauncherState.shown && LauncherState.pane === "walls"
+        && !!root.selWall?.video
+
+    // Held false for as long as the tile the surface stands over is still
+    // playing an entrance spring, since the surface can't ride one. Starts
+    // true so a re-open onto the pane the launcher was already on — which
+    // replays no springs, because nothing signals a pane change — doesn't sit
+    // waiting for a timer that never ran.
+    property bool settled: true
+    function unsettle(): void {
+        root.settled = false;
+        settle.restart();
+    }
+    Timer {
+        id: settle
+        // the selected tile's own landing time: its stagger slot plus the
+        // spring, not the whole grid's
+        interval: Anim.stagger(root.selSlot, Settings.wallsCols, 60) + Anim.duration + 40
+        onTriggered: root.settled = true
+    }
+
+    Item {
+        id: videoOverlay
+        // the selected tile's thumbnail box, derived from the slot rather
+        // than read off the tile: a Grid positions its children itself, so
+        // there is nothing to anchor to from outside it
+        x: grid.x + (root.selSlot % Settings.wallsCols) * (240 + grid.columnSpacing)
+        y: grid.y + Math.floor(root.selSlot / Settings.wallsCols) * (159 + grid.rowSpacing)
+        width: 240
+        height: 135
+        // no fade either way: what the surface hands over from (and back to)
+        // is the tile's still frame, which is this video's frame 0, so the
+        // cut has nothing to show
+        visible: root.videoShowing
+
+        ClippingRectangle {
+            anchors.fill: parent
+            radius: 14
+            color: "transparent"
+            WallpaperVideoPool {
+                anchors.fill: parent
+                current: root.videoShowing && root.selWall ? root.selWall.path : ""
+                live: root.videoShowing
+                // Only while the launcher is down, so the file opens land with
+                // nothing on screen to stutter rather than inside a
+                // navigation — the same reason pibble-warmup decodes theme
+                // SVGs at startup. The style check keeps the carousel's own
+                // pool from opening the same files a second time over.
+                warming: Settings.wallpaperStyle === "grid" && !LauncherState.shown
+            }
+        }
+        // the tile's own 1px stroke is underneath this overlay, so redraw it
+        // on top, in the color that tile resolves to while selected. Outside
+        // the ClippingRectangle for the same reason the tile's is (see wrap
+        // above).
+        Rectangle {
+            anchors.fill: parent
+            radius: 14
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.accent
         }
     }
 }
