@@ -1086,7 +1086,7 @@ ShellRoot {
             property int wallsVisible: 7
             property int clipsCols: 4
             property int clipsRows: 3
-            property int clipsMax: 60
+            property int clipsMax: 120
             property var pages: ({ clock: true, apps: true, walls: true, clips: true })
             // cycle order of the pages (drag the chips in settings to change)
             property var pageOrder: ["clock", "apps", "walls", "clips"]
@@ -8916,7 +8916,7 @@ ShellRoot {
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; cfg.wallsVisible = 7; break;
             case "clipsGrid": cfg.clipsCols = 4; cfg.clipsRows = 3; break;
             case "clipsMax":
-                cfg.clipsMax = 60;
+                cfg.clipsMax = 120;
                 clipScan.running = false;
                 clipScan.running = true;
                 break;
