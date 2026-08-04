@@ -6030,6 +6030,7 @@ ShellRoot {
                     }
                     sourceComponent: Component {
                         Item {
+                            id: wallVideoHost
                             // Rewound rather than resumed, since the still
                             // frame it takes over from is frame 0 (see the
                             // ffmpeg call in wallScan) — picking up mid-clip
@@ -6072,6 +6073,19 @@ ShellRoot {
                                         id: wallVideoPlayer
                                         source: "file://" + wallCarousel.videoSource
                                         loops: MediaPlayer.Infinite
+                                        // Opening a file stops the player, so a
+                                        // handover has to re-issue playback after
+                                        // the new source lands — and `live` can't
+                                        // be what does it: navigating video to
+                                        // video leaves it true throughout (both
+                                        // ends are showing videos), so sync()
+                                        // never runs again and the arriving file
+                                        // sits stopped on its first frame. This
+                                        // fires once the new file is the open
+                                        // one, which is also what keeps a play()
+                                        // from racing ahead of the source binding
+                                        // it was meant for.
+                                        onSourceChanged: wallVideoHost.sync()
                                         videoOutput: wallVideoOut
                                         audioOutput: AudioOutput { muted: true }
                                         onErrorOccurred: (error, errorString) => root.notifyMediaBackendFailure(errorString)
