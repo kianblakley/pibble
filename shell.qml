@@ -49,7 +49,6 @@ ShellRoot {
         font { family: root.mono; pixelSize: root.fs(14) }
         anchors.verticalCenter: parent.verticalCenter
     }
-
     component ThemeRow: Item {
         id: tr
         property string sub: ""
@@ -474,11 +473,7 @@ ShellRoot {
         property string key
         property string label
         property string sub: ""
-        // the ‹›-value stepper's total span (‹ + spacing + value + spacing +
-        // ›) should match a keybinding chord box's width, not the value
-        // text alone — subtract the two SBtn arrows and their spacing back
-        // out of the shared box width.
-        property int valueWidth: root.keybindBoxWidth - 72
+        property int valueWidth: 190
         width: 780
         height: 34 + (sub ? srSub.implicitHeight + 2 : 0)
         Item {
@@ -859,6 +854,12 @@ ShellRoot {
         KeyCap { label: "ScrollLock" }
     }
     readonly property real keybindBoxWidth: Math.max(110, Math.max(bindCaptureMetrics.implicitWidth, bindMaxChordMetrics.implicitWidth) + 32)
+    // the ‹›-value stepper's total span (‹ + spacing + value + spacing + ›)
+    // matching a keybinding chord box's width, not the value text alone —
+    // subtract the two SBtn arrows and their spacing back out of the
+    // shared box width. Used on the Keybindings/Flyouts tabs, where rows
+    // sit directly alongside (or logically belong with) the chord boxes.
+    readonly property real shortValueWidth: keybindBoxWidth - 72
 
     // visible grid-of-tiles size picker (Grids settings tab): hovering
     // previews a cols×rows selection Excel-insert-table style, clicking
@@ -7045,16 +7046,15 @@ ShellRoot {
                     }
                     spacing: 14
 
-                    SettingRow { key: "launchAnimation"; label: "Launch animation"; valueWidth: 190 }
+                    SettingRow { key: "launchAnimation"; label: "Launch animation" }
                     SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; sub: "settings pane and power-off/reboot prompts" }
                     SettingRow {
                         key: "bgBlur"
                         label: "Background blur"
-                        valueWidth: 190
                         sub: "ext-background-effect requires compositor support"
                     }
                     SettingRow { key: "dimOpacity"; label: "Background opacity" }
-                    SettingRow { key: "fontFamily"; label: "Font"; valueWidth: 190 }
+                    SettingRow { key: "fontFamily"; label: "Font" }
                     SettingRow { key: "fontScale"; label: "Font size" }
                     ThemeRow {}
                     CustomColorRow {}
@@ -7199,9 +7199,6 @@ ShellRoot {
                     }
                     spacing: 14
 
-                    // default valueWidth throughout (the values are short), so
-                    // the ‹ › buttons line up column-tight like the launcher
-                    // tab; only the font row needs a wide value
                     // enabled flyouts (unloading notifications releases the
                     // org.freedesktop.Notifications DBus name for other daemons)
                     Item {
@@ -7218,7 +7215,7 @@ ShellRoot {
                         }
                         ChipRow {
                             anchors.right: parent.right
-                            anchors.rightMargin: 34 + 32
+                            anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
                             items: [
                                 { id: "volume", label: "volume" },
@@ -7229,11 +7226,11 @@ ShellRoot {
                         }
                     }
 
-                    SettingRow { key: "volStyle"; label: "Volume style" }
-                    SettingRow { key: "volWidth"; label: "Volume size" }
-                    SettingRow { key: "volAnim"; label: "Volume animation" }
-                    SettingRow { key: "volPercent"; label: "Volume percent" }
-                    SettingRow { key: "volTimeout"; label: "Volume timeout" }
+                    SettingRow { key: "volStyle"; label: "Volume style"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "volWidth"; label: "Volume size"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "volPercent"; label: "Volume percent"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "volTimeout"; label: "Volume timeout"; valueWidth: root.shortValueWidth }
 
                     // pibble's own notify-send calls (missing tools, failed
                     // commands, copy confirmations, low battery), independent
@@ -7253,7 +7250,7 @@ ShellRoot {
                         }
                         ChipRow {
                             anchors.right: parent.right
-                            anchors.rightMargin: 34 + 32
+                            anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
                             items: [
                                 { id: "errors", label: "errors" },
@@ -7264,10 +7261,10 @@ ShellRoot {
                             toggle: win.toggleAlert
                         }
                     }
-                    SettingRow { key: "notifStyle"; label: "Notification style" }
-                    SettingRow { key: "notifAnim"; label: "Notification animation" }
-                    SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
+                    SettingRow { key: "notifStyle"; label: "Notification style"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "notifTimeout"; label: "Notification timeout"; valueWidth: root.shortValueWidth }
+                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` can step back through"; valueWidth: root.shortValueWidth }
                 }
 
                 Column {
@@ -8038,61 +8035,17 @@ ShellRoot {
                             key: "clock"
                             anchors.right: parent.right
                         }
-                        Item {
-                            id: clockArea
+                        ChipRow {
                             anchors.right: parent.right
                             anchors.rightMargin: 34
                             anchors.verticalCenter: parent.verticalCenter
-                            // fixed 100px pitch between tickboxes
-                            readonly property int slotW: 100
-                            width: slotW * 3 - 8
-                            height: 28
-
-                            Repeater {
-                                model: ["date", "battery", "weather"]
-
-                                Item {
-                                    id: clockChip
-                                    required property var modelData
-                                    required property int index
-                                    readonly property bool on: (cfg.clockShow ?? {})[modelData] !== false
-                                    x: index * clockArea.slotW
-                                    width: clockArea.slotW - 8
-                                    height: 28
-
-                                    Rectangle {
-                                        id: clockCheckbox
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 18
-                                        height: 18
-                                        radius: 4
-                                        color: clockChip.on ? Qt.alpha(root.accent, 0.85) : "transparent"
-                                        border.width: 1
-                                        border.color: clockChip.on ? root.accent : Qt.alpha(root.muted, 0.6)
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            visible: clockChip.on
-                                            text: root.ti.check
-                                            color: "#141210"
-                                            font { family: root.iconFont; pixelSize: 13 }
-                                        }
-                                    }
-                                    Text {
-                                        id: clockLabel
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left: clockCheckbox.right
-                                        anchors.leftMargin: 6
-                                        text: clockChip.modelData
-                                        color: clockChip.on ? root.fg : root.muted
-                                        font { family: root.mono; pixelSize: root.fs(12) }
-                                    }
-
-                                    TapHandler {
-                                        onTapped: win.toggleClockItem(clockChip.modelData)
-                                    }
-                                }
-                            }
+                            items: [
+                                { id: "date", label: "date" },
+                                { id: "battery", label: "battery" },
+                                { id: "weather", label: "weather" }
+                            ]
+                            isOn: id => (cfg.clockShow ?? {})[id] !== false
+                            toggle: win.toggleClockItem
                         }
                     }
 
@@ -8112,7 +8065,7 @@ ShellRoot {
                         }
                         Row {
                             anchors.right: parent.right
-                            anchors.rightMargin: 34 + 32
+                            anchors.rightMargin: 34
                             spacing: 24
                             height: parent.height
 
@@ -8160,9 +8113,9 @@ ShellRoot {
 
                     SettingRow { key: "animStyle"; label: "Grid animation" }
 
-                    SettingRow { key: "iconTheme"; label: "App icon theme"; sub: "applied after daemon reload"; valueWidth: 190 }
+                    SettingRow { key: "iconTheme"; label: "App icon theme"; sub: "applied after daemon reload" }
 
-                    SettingRow { key: "wallpaperStyle"; label: "Wallpapers style"; valueWidth: 190 }
+                    SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }
 
                     // wallpaper path
                     Item {
@@ -8416,11 +8369,13 @@ ShellRoot {
                         key: "singleClickActivate"
                         label: "Single click to activate"
                         sub: "activates tile without requiring two clicks"
+                        valueWidth: root.shortValueWidth
                     }
                     SettingRow {
                         key: "gestures"
                         label: "Navigation gestures"
                         sub: "left/right: cycle pages · up/down: scroll tiles · top edge: power off · bottom edge: reboot · right edge: exit/back"
+                        valueWidth: root.shortValueWidth
                     }
                 }
 
@@ -8913,7 +8868,7 @@ ShellRoot {
                 cfg.notifAnim = cycleChoice(cfg.notifAnim, ["pop", "none"], dir);
                 break;
             case "wallpaperStyle":
-                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["grid", "carousel", "carousel-flat"], dir);
+                cfg.wallpaperStyle = cycleChoice(cfg.wallpaperStyle, ["grid", "carousel-flat", "carousel"], dir);
                 break;
             }
             root.saveSettings();
