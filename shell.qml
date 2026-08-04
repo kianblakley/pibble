@@ -474,7 +474,11 @@ ShellRoot {
         property string key
         property string label
         property string sub: ""
-        property int valueWidth: 90
+        // the ‹›-value stepper's total span (‹ + spacing + value + spacing +
+        // ›) should match a keybinding chord box's width, not the value
+        // text alone — subtract the two SBtn arrows and their spacing back
+        // out of the shared box width.
+        property int valueWidth: root.keybindBoxWidth - 72
         width: 780
         height: 34 + (sub ? srSub.implicitHeight + 2 : 0)
         Item {
@@ -833,6 +837,29 @@ ShellRoot {
         font { family: root.mono; pixelSize: root.fs(12) }
     }
 
+    // shared width for every keybinding chord box, fixed to the longest
+    // possible two-key chord (one modifier + the longest recognised key
+    // name) rather than derived from whatever binds happen to be set — so
+    // the box is wide enough for anything keyName() can produce and never
+    // resizes when a row starts/stops capturing or a bind changes length.
+    // Also doubles as the short ‹›-value column width elsewhere in
+    // settings, so both line up at a glance.
+    Text {
+        id: bindCaptureMetrics
+        visible: false
+        text: "press a key…"
+        font { family: root.mono; pixelSize: root.fs(13) }
+    }
+    Row {
+        id: bindMaxChordMetrics
+        visible: false
+        spacing: 4
+        KeyCap { label: "Shift" }
+        KeyPlus {}
+        KeyCap { label: "ScrollLock" }
+    }
+    readonly property real keybindBoxWidth: Math.max(110, Math.max(bindCaptureMetrics.implicitWidth, bindMaxChordMetrics.implicitWidth) + 32)
+
     // visible grid-of-tiles size picker (Grids settings tab): hovering
     // previews a cols×rows selection Excel-insert-table style, clicking
     // commits it. `target` indexes root.gridTargets for which page's cfg
@@ -1056,9 +1083,9 @@ ShellRoot {
             // bars visible in the "windows" carousel: the selected center
             // plus equal wings, so always odd (healSettings clamps to 3–9)
             property int wallsVisible: 7
-            property int clipsCols: 3
+            property int clipsCols: 4
             property int clipsRows: 3
-            property int clipsMax: 100
+            property int clipsMax: 60
             property var pages: ({ clock: true, apps: true, walls: true, clips: true })
             // cycle order of the pages (drag the chips in settings to change)
             property var pageOrder: ["clock", "apps", "walls", "clips"]
@@ -7240,7 +7267,7 @@ ShellRoot {
                     SettingRow { key: "notifStyle"; label: "Notification style" }
                     SettingRow { key: "notifAnim"; label: "Notification animation" }
                     SettingRow { key: "notifTimeout"; label: "Notification timeout" }
-                    SettingRow { key: "replayCount"; label: "Pibble replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
+                    SettingRow { key: "replayCount"; label: "Replay count"; sub: "how many recent notifications `pibble replay` can step back through" }
                 }
 
                 Column {
@@ -8295,28 +8322,6 @@ ShellRoot {
                     }
                     spacing: 14
 
-                    // shared width for every chord box, fixed to the longest
-                    // possible two-key chord (one modifier + the longest
-                    // recognised key name) rather than derived from whatever
-                    // binds happen to be set — so the box is wide enough for
-                    // anything keyName() can produce and never resizes when
-                    // a row starts/stops capturing or a bind changes length.
-                    readonly property real uniformBoxWidth: Math.max(captureMetrics.implicitWidth, maxChordMetrics.implicitWidth)
-                    Text {
-                        id: captureMetrics
-                        visible: false
-                        text: "press a key…"
-                        font { family: root.mono; pixelSize: root.fs(13) }
-                    }
-                    Row {
-                        id: maxChordMetrics
-                        visible: false
-                        spacing: 4
-                        KeyCap { label: "Shift" }
-                        KeyPlus {}
-                        KeyCap { label: "ScrollLock" }
-                    }
-
                     Repeater {
                         id: bindRepeater
                         model: [
@@ -8361,7 +8366,7 @@ ShellRoot {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 34
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.max(110, keybindCol.uniformBoxWidth + 32)
+                                width: root.keybindBoxWidth
                                 height: 34
                                 radius: 8
                                 color: Qt.alpha(root.accent, capturing ? 0.3 : 0.11)
@@ -8410,11 +8415,12 @@ ShellRoot {
                     SettingRow {
                         key: "singleClickActivate"
                         label: "Single click to activate"
+                        sub: "activates tile without requiring two clicks"
                     }
                     SettingRow {
                         key: "gestures"
                         label: "Navigation gestures"
-                        sub: "top edge: power off prompt · bottom edge: reboot prompt · right edge: exit/back"
+                        sub: "left/right: cycle pages · up/down: scroll tiles · top edge: power off · bottom edge: reboot · right edge: exit/back"
                     }
                 }
 
@@ -8821,7 +8827,7 @@ ShellRoot {
             }
             return "";
         }
-        readonly property var launchAnimChoices: ["grow-center", "grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "fade", "none"]
+        readonly property var launchAnimChoices: ["grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "grow-center", "fade", "none"]
         function cycleChoice(cur: string, list, dir: int): string {
             let i = list.indexOf(cur);
             if (i < 0)
@@ -8836,7 +8842,7 @@ ShellRoot {
                 clipScan.running = true;
                 break;
             case "animStyle": {
-                const styles = ["bloom", "pop", "fade", "cascade", "slide", "none"];
+                const styles = ["bloom", "pop", "cascade", "fade", "slide", "none"];
                 let i = styles.indexOf(cfg.animStyle);
                 if (i < 0)
                     i = 0;
@@ -8953,9 +8959,9 @@ ShellRoot {
                 break;
             case "appsGrid": cfg.appsCols = 4; cfg.appsRows = 3; break;
             case "wallsGrid": cfg.wallsCols = 3; cfg.wallsRows = 3; cfg.wallsVisible = 7; break;
-            case "clipsGrid": cfg.clipsCols = 3; cfg.clipsRows = 3; break;
+            case "clipsGrid": cfg.clipsCols = 4; cfg.clipsRows = 3; break;
             case "clipsMax":
-                cfg.clipsMax = 100;
+                cfg.clipsMax = 60;
                 clipScan.running = false;
                 clipScan.running = true;
                 break;
