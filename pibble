@@ -71,9 +71,10 @@ list_pages() {
     settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
     ids="clock, apps, walls, clips"
     if [ -f "$settings" ]; then
-        # ids are namespaced "folder:name"/"upload:name" (see customPagesDir
-        # in shell.qml); the prefix is internal, so strip it here — the CLI
-        # accepts (and this prints) just the bare name, via win.resolvePageArg
+        # ids are namespaced "folder:name" (see CustomPages.dir in
+        # services/CustomPages.qml); the prefix is internal, so strip it here —
+        # the CLI accepts (and this prints) just the bare name, which
+        # LauncherState.resolvePageArg maps back to the real id
         custom=$(sed -n '/"uploadedPages"/,/^    \]/ s/.*"id": *"\([^"]*\)".*/\1/p' "$settings" | sed 's/^[^:]*://' | paste -sd, -)
         [ -n "$custom" ] && ids="$ids, ${custom//,/, }"
     fi
