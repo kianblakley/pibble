@@ -2454,9 +2454,13 @@ ShellRoot {
     // applied to the blurred result in the same non-linear sRGB the blur
     // itself runs in (its textures are plain 8-bit ABGR, no linearization) —
     // which is what -color-matrix does here, and why nothing converts to
-    // linear light first. Noise is the one part not baked in: this image is
-    // upscaled on the way to the screen, which would come out as blotches
-    // rather than dither (see the noise tile in xrayBackdrop).
+    // linear light first. Niri's noise step is the one part deliberately not
+    // reproduced: it can't be baked in (this image is upscaled on the way to
+    // the screen, so it would land as blotches rather than dither), and the
+    // alternative — a noise tile drawn live over the backdrop — is a
+    // full-screen texture that also shows as grain over the desktop whenever
+    // there's no wallpaper baked to sit under it. The banding it would have
+    // hidden is accepted instead.
     //
     // Sigma is niri's radius in *output* pixels, which is not something a
     // client is told: on a fractionally scaled output the compositor hands
@@ -4442,32 +4446,6 @@ ShellRoot {
                     blurMax: xrayBackdrop.bgBlurMax
                     saturation: xrayBackdrop.bgBlurSaturation
                 }
-            }
-
-            // Dither. A wide blur of a smooth gradient quantizes into visible
-            // bands once it lands in an 8-bit framebuffer — measured against
-            // niri's own blurred backdrop, which never holds a value for more
-            // than a few pixels because the compositor dithers, where ours
-            // held single values for runs of 100+ pixels. This is niri's own
-            // `noise 0.02`, uniform noise a hundredth of full scale either
-            // side of the pixel, which the tile's own standard deviation
-            // (0.216 of full scale) turns into this opacity; nearest-neighbour
-            // sampling (smooth: false) keeps it from being averaged back into
-            // a flat tint by the output scale. Sits with the backdrop rather
-            // than over the dim because that's where niri's is: the
-            // compositor noises the backdrop, and our own translucency then
-            // composites over that. Only the client-side blur needs it — in
-            // "compositor" mode niri is already dithering its own.
-            //
-            // This is a blend, not an addition, so unlike the compositor's it
-            // also drags the backdrop a little toward the tile's mean grey —
-            // measured at 2/255 in the darks, which is deliberately left in.
-            Image {
-                anchors.fill: parent
-                source: Qt.resolvedUrl("assets/noise.png")
-                fillMode: Image.Tile
-                smooth: false
-                opacity: 0.027
             }
         }
 
