@@ -18,7 +18,35 @@ PanelWindow {
     id: root
 
     property bool shown: false
-    visible: root.shown
+    // Mapped for the life of the daemon, not just while open. Unmapping makes
+    // Qt drop this window's scene graph and every texture in it, so the next
+    // open has to rebuild the lot on the GUI thread before it can draw a frame
+    // - which is exactly the stall that ate the start of the reveal. Measured
+    // per open, after a throwaway open so the one-time build isn't counted:
+    //
+    //                      unmapped on close        kept mapped
+    //   compositor blur    72-102ms, 2 stalls       0ms (one 36ms outlier)
+    //   xray blur          148-161ms, 1 stall       0ms
+    //
+    // Identical on all four panes; the pane only decides how much there is to
+    // rebuild, not whether the rebuild happens.
+    //
+    // What it holds is the whole window, every pane at once - the panes are
+    // direct children, never Loaders, so their item trees always existed; what
+    // survives a close now is their scene-graph nodes and, mostly, their GPU
+    // textures. That is not free, and the bill is in VRAM rather than RSS:
+    // measured with nvidia-smi against this process, closed, having visited all
+    // four panes, ~812MiB against ~341MiB when the surface unmaps instead, plus
+    // ~86MB of RSS. Roughly 240MiB of the gap is there from daemon start before
+    // any pane is opened, which is the surface's own full-screen buffers and the
+    // 5120x2160 growMask layer.
+    //
+    // Worth knowing on a box that also wants its VRAM for something else.
+    visible: true
+    // Mapped but closed: the surface exists only to hold its own scene graph,
+    // so it has to behave as if it were not there at all - see the
+    // keyboardFocus, mask and content bindings that read this.
+    readonly property bool surfaceIdle: !root.shown
 
     // LauncherState and Wallpapers both need to know whether the launcher is
     // up: panes gate live decoding on it, and a wallpaper applied while it's
@@ -27,6 +55,13 @@ PanelWindow {
         LauncherState.shown = root.shown;
         Wallpapers.launcherShown = root.shown;
         Wallpapers.syncXrayShown();
+        // While the surface stays mapped, backingWindowVisible is already true
+        // and never changes again, so the reveal has to be kicked off here
+        // instead. A no-op the rest of the time: on the unmapped path the
+        // window has not mapped yet at this point, so startReveal() bails on
+        // its own backingWindowVisible guard and the map fires it as before.
+        if (root.shown)
+            root.startReveal();
     }
     // Keeps the xray bake keyed on the output the launcher actually mapped
     // onto; Wallpapers falls back to the primary screen until this resolves.
@@ -146,7 +181,15 @@ PanelWindow {
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "pibble-launcher"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // Exclusive is what makes the launcher take every key while it is open, so
+    // an idle mapped surface must give it up completely - otherwise the
+    // keyboard stays captured by a launcher nobody can see.
+    WlrLayershell.keyboardFocus: root.surfaceIdle ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
+    // Likewise for pointer input: an empty region is click-through, so an idle
+    // surface can't swallow clicks meant for whatever is underneath it. Only
+    // set while idle - an open launcher wants the whole surface.
+    mask: root.surfaceIdle ? idleMask : null
+    Region { id: idleMask }
     // This is a bonus on top of the client-side circle, not what draws
     // it: wherever a compositor implements ext-background-effect-v1,
     // this blurs the same area the circle already occupies. "fade" and
@@ -167,7 +210,12 @@ PanelWindow {
     // the wasted work is invisible under an opaque fake, but it does
     // show wherever the surface is still transparent (outside the grow
     // circle, mid-animation). A region confines it to one pixel.
-    BackgroundEffect.blurRegion: Settings.bgBlur !== "compositor" ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
+    //
+    // A closed launcher takes that same nothing-to-blur region. The surface is
+    // mapped for the daemon's life now, so a reveal-sized region would sit
+    // there permanently at its 1px floor - drawing a blurred dot at the reveal
+    // origin with the launcher not even open.
+    BackgroundEffect.blurRegion: (root.surfaceIdle || Settings.bgBlur !== "compositor") ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
     // Clipped to the output, which is not cosmetic. A Region is rasterised as
     // one span per scanline, and this ellipse is as tall as it is wide - several
     // screens' worth by the end of the reveal - so most of the spans it costs to
@@ -201,6 +249,18 @@ PanelWindow {
     }
     Region {
         id: noBlurRegion
+        // Off the surface, not at (0,0). All this region has to be is non-empty
+        // (see BackgroundEffect.blurRegion above for why asking for nothing is
+        // not the same as asking for almost nothing) - and a 1px region *inside*
+        // the surface is a genuine pixel of blurred, undimmed backdrop. That is
+        // invisible in a corner but obvious once the reveal origin is somewhere
+        // you look: with grow-center and the launcher merely idle it put one
+        // bright wallpaper-coloured pixel in the exact middle of the screen
+        // (measured: (193,129,60) against a (29,29,32) desktop). Out here the
+        // compositor clips it away entirely while the client still speaks the
+        // protocol, which is the only thing the region was ever for.
+        x: -8
+        y: -8
         width: 1
         height: 1
     }
@@ -625,6 +685,14 @@ PanelWindow {
     // visible (not visible: false) and layered explicitly, since an
     // invisible item's layer never actually renders - a huge offset is
     // what keeps it off the real screen instead.
+    //
+    // Dropping this layer while the launcher is closed was tried, since it is a
+    // full-screen (here 5120x2160) FBO that nothing masks against with nothing
+    // on screen. It rendered correctly and cost no open latency, but it only
+    // moved the number before the first open (590 -> 492MiB); once the launcher
+    // had been opened once, closed sat at 814MiB either way. The driver appears
+    // to keep the freed allocation in this process's pool rather than hand it
+    // back, so the saving never reaches anything else on the GPU.
     Item {
         id: growMask
         visible: true
@@ -646,11 +714,19 @@ PanelWindow {
     }
     XrayBackdrop {
         maskSource: growMask
+        // an idle mapped surface draws nothing at all (see root.surfaceIdle);
+        // the backdrop is otherwise the one thing here that is opaque on its
+        // own rather than riding content's opacity
+        visible: !root.surfaceIdle
     }
 
     Item {
         id: content
         anchors.fill: parent
+        // belt-and-braces with the opacity below, which a closed launcher
+        // already leaves at 0: `visible` is what guarantees an idle mapped
+        // surface costs the compositor nothing to composite
+        visible: !root.surfaceIdle
         opacity: 0
         // "grow" styles: clip content itself into the growing circle
         // instead of relying on compositor blur to fake one - renders
@@ -1140,7 +1216,10 @@ PanelWindow {
         }
     }
     function startReveal() {
-        if (root.revealStarted || !root.backingWindowVisible)
+        // `shown` is part of the guard now that the surface is mapped from
+        // daemon start: without it the entrance would play once, into a closed
+        // launcher, the moment the window first maps.
+        if (root.revealStarted || !root.shown || !root.backingWindowVisible)
             return;
         root.revealStarted = true;
         // With the launch animation off there is no reveal to protect

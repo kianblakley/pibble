@@ -35,6 +35,8 @@ Singleton {
     // "xray" mode and the $BLUR the wallpaper command gets (see
     // applyWallpaper) - they're the same picture, so they're the same file.
     property var list: []
+    // raw stdout of the scan `list` was last built from; see where it's compared
+    property string lastScanText: ""
     // xrayCacheKey as of the last scan that landed. Only when it matches the
     // current one do the entries say anything about the backdrops the
     // launcher is actually after - before that (a scan from before the
@@ -123,6 +125,7 @@ Singleton {
             onStreamFinished: {
                 root.scanKey = scan.scanKey;
                 if (text.trim() === "NODIR") {
+                    root.lastScanText = text;
                     root.list = [];
                     if (root.lastMissingDir !== root.dir) {
                         root.lastMissingDir = root.dir;
@@ -135,7 +138,19 @@ Singleton {
                     const p = l.split("|");
                     return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
-                root.list = walls;
+                // Reassigning this array invalidates every tile's model entry,
+                // which tears each delegate down and rebuilds it - re-creating
+                // its ClippingRectangle render target and re-uploading its
+                // thumbnail texture. A scan runs on every launcher open, and
+                // the folder is almost never different between two of them, so
+                // that cost was being paid mid-reveal for an identical result.
+                // The scan's raw output is the canonical form of everything
+                // `walls` is derived from, so an unchanged one means an
+                // unchanged model: keep the existing array and its delegates.
+                if (text !== root.lastScanText) {
+                    root.lastScanText = text;
+                    root.list = walls;
+                }
                 // Generate missing thumbnails (a full 5K image standing in as
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
                 // variants in the background; the next scan picks them up and

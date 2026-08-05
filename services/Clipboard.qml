@@ -11,6 +11,8 @@ Singleton {
     id: root
 
     property var entries: []
+    // raw stdout of the scan `entries` was last built from; see where it's compared
+    property string lastScanText: ""
     property bool available: true
     // cliphist installed but nothing is feeding it (no `wl-paste --watch`
     // running to pipe clipboard changes into `cliphist store`)
@@ -86,7 +88,12 @@ Singleton {
                 const nl = text.indexOf("\n");
                 root.watcherRunning = text.slice(0, nl).trim() === "WATCH:1";
                 root.checkAlert();
-                root.entries = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
+                // Same reason Wallpapers guards its own list: reassigning this
+                // rebuilds every clip tile's delegate and re-uploads its thumb,
+                // and a scan runs on every launcher open whether or not the
+                // clipboard moved. Identical scan output means an identical
+                // model, so the existing array (and its live delegates) stands.
+                const scanned = text.slice(nl + 1).split("\n").filter(l => l.trim()).map(l => {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
                     const t3 = l.indexOf("\t", t2 + 1);
@@ -101,6 +108,10 @@ Singleton {
                         ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: cached ? root.thumbDir + "/" + id + ".png" : "" }
                         : { id, bytes, image: false, preview: preview.trim(), full: root.unescapeField(fullEsc) };
                 });
+                if (text !== root.lastScanText) {
+                    root.lastScanText = text;
+                    root.entries = scanned;
+                }
                 // Sweep cached thumbs (and on-demand full-res decodes) for
                 // ids that fell out of the current clipsMax window - runs
                 // every scan so the cache never grows past what's shown.

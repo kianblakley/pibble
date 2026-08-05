@@ -41,18 +41,31 @@ export_native_dialogs() {
 
 # Qt picks its render loop per platform, and where it falls back to "basic"
 # animations no longer run off vsync at all - they advance on a ~16ms timer,
-# pinning the whole shell to ~62fps whatever the display does. On a 120Hz output
-# that means every frame of the launcher's reveal is held for two refreshes and
-# the circle's edge covers twice the distance between them, which is what makes
-# the grow styles look like they skip rather than move. Threaded restores real
-# vsync (measured: a flat 62 -> a flat 120, unchanged under the mask and blur the
-# reveal already pays for).
+# pinning the whole shell to ~62fps whatever the display does. The proprietary
+# NVIDIA driver is what triggers that fallback: on one machine, with only the
+# EGL vendor swapped and everything else held fixed, QSG_INFO=1 reports "basic
+# render loop" against 10_nvidia.json and "threaded render loop" against
+# 50_mesa.json. So this is a no-op on Mesa - Qt already chooses threaded there.
 #
-# The proprietary NVIDIA driver is what triggers the fallback: on one machine,
-# with only the EGL vendor swapped and everything else held fixed, QSG_INFO=1
-# reports "basic render loop" against 10_nvidia.json and "threaded render loop"
-# against 50_mesa.json. So this is a no-op on Mesa - Qt already chooses threaded
-# there, software rasteriser included.
+# What the fallback costs is the reveal's edge motion, which is the thing that
+# actually reads as "skipping". Sampling LauncherState.reveal every presented
+# frame on a 5120x2160 120Hz output, over the grow circle's whole travel:
+#
+#            frame dt (ms)          circle edge travel (px/frame)
+#            mean  p95  max         mean   max    peak/avg
+#   basic    17.4   25  113          87    312      3.6x
+#   threaded  8.9    9  111          42    119      2.8x
+#
+# The p95 is the number that matters: under basic one frame in twenty lands
+# 25ms late, and the edge covers 312px in it against an 87px average - a
+# visible jump followed by a crawl. Threaded holds p95 to a single frame and
+# halves the per-frame travel, so the same easing curve reads as continuous.
+#
+# It is not free: threaded also roughly doubles the *duration* of any
+# GUI-thread stall (~47ms -> ~90ms worst on a plain open, measured across three
+# commits). That is a real cost, but it shows up as a discrete hitch when
+# something heavy runs, whereas basic degrades every single frame of every
+# reveal. Fix the stalls; keep the frame rate.
 #
 # Left overridable because "basic" is a deliberate fallback, not an oversight:
 # anyone who hits the driver trouble it exists to dodge can put
