@@ -51,8 +51,15 @@ Singleton {
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
                 n=$(cliphist decode "$id" 2>/dev/null | wc -c)
                 full=""
+                cached=0
                 case "$preview" in
-                    '[[ binary data'*) ;;
+                    # a thumb already on disk is reported here so the entry
+                    # can carry its path straight out of the scan: a rescan
+                    # (one runs on every launcher open) would otherwise hand
+                    # every image tile an empty thumb until the thumbnail
+                    # pass exits, blanking thumbnails that were already
+                    # showing a frame earlier
+                    '[[ binary data'*) [ -s "$2/$id.png" ] && cached=1 ;;
                     *)
                         # full text for search, capped well past any
                         # realistic clip so scanning ~200 of these stays
@@ -66,8 +73,8 @@ Singleton {
                         full=\${full//$'\n'/\\n}
                         ;;
                 esac
-                printf '%s\t%s\t%s\t%s\n' "$id" "$n" "$full" "$preview"
-            done`, "_", String(Settings.clipsMax)]
+                printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$n" "$cached" "$full" "$preview"
+            done`, "_", String(Settings.clipsMax), root.thumbDir]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
@@ -83,13 +90,15 @@ Singleton {
                     const t1 = l.indexOf("\t");
                     const t2 = l.indexOf("\t", t1 + 1);
                     const t3 = l.indexOf("\t", t2 + 1);
+                    const t4 = l.indexOf("\t", t3 + 1);
                     const id = l.slice(0, t1);
                     const bytes = parseInt(l.slice(t1 + 1, t2)) || 0;
-                    const fullEsc = l.slice(t2 + 1, t3);
-                    const preview = l.slice(t3 + 1);
+                    const cached = l.slice(t2 + 1, t3) === "1";
+                    const fullEsc = l.slice(t3 + 1, t4);
+                    const preview = l.slice(t4 + 1);
                     const m = preview.match(/^\[\[ binary data ([0-9.]+ \w+) (\w+) (\d+x\d+)/);
                     return m
-                        ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: "" }
+                        ? { id, bytes, image: true, size: m[1], kind: m[2], dims: m[3], preview: m[2] + " image  " + m[3] + "  " + m[1], thumb: cached ? root.thumbDir + "/" + id + ".png" : "" }
                         : { id, bytes, image: false, preview: preview.trim(), full: root.unescapeField(fullEsc) };
                 });
                 // Sweep cached thumbs (and on-demand full-res decodes) for
@@ -106,7 +115,10 @@ Singleton {
                     done`, "_", root.thumbDir].concat(root.entries.map(c => c.id));
                 prune.running = true;
 
-                const imgs = root.entries.filter(c => c.image).map(c => c.id);
+                // only the ones the scan didn't already find a thumb for:
+                // with every image cached this skips the pass (and the
+                // entries rewrite in its onExited) entirely
+                const imgs = root.entries.filter(c => c.image && !c.thumb).map(c => c.id);
                 if (imgs.length) {
                     thumbnails.command = ["bash", "-c", `
                         export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"

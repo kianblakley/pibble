@@ -91,7 +91,10 @@ list_pages() {
     local shell_id settings ids
     shell_id=$(printf '%s' "$repo/shell.qml" | md5sum | cut -d' ' -f1)
     settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
-    ids="clock, apps, walls, clips"
+    # the readable names, not the panes' internal ids ("walls"/"clips" —
+    # settings keys that can't be renamed); LauncherState.resolvePageArg
+    # maps these back, and still takes the internal ids too
+    ids="clock, apps, wallpapers, clipboard"
     if [ -f "$settings" ]; then
         # ids are namespaced "folder:name" (see CustomPages.dir in
         # services/CustomPages.qml); the prefix is internal, so strip it here —
@@ -148,7 +151,7 @@ restart)
     setsid -f qs -p "$repo" >/dev/null 2>&1
     ;;
 toggle)
-    # $2, if given, is a page id (pibble toggle clips): opens straight onto
+    # $2, if given, is a page id (pibble toggle clipboard): opens straight onto
     # that page, switches to it if the launcher is already open elsewhere,
     # or closes if it's already the one showing. Always passed through
     # (even empty) since the IPC function takes it as a required argument.

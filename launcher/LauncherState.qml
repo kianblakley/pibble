@@ -252,17 +252,30 @@ Singleton {
     function homePane(): string {
         return activePanes[0];
     }
+    // The names `pibble toggle` takes for the two built-in panes whose
+    // internal ids read as abbreviations. The ids themselves stay short:
+    // they're settings keys (Settings.pages/pageOrder), so renaming them
+    // would orphan every existing config. Old-name keybinds keep working
+    // anyway — "walls"/"clips" match activePanes directly in resolvePageArg
+    // below and never reach this map.
+    readonly property var pageArgAliases: ({
+        wallpapers: "walls",
+        clipboard: "clips"
+    })
     // `pibble toggle <page>` accepts a custom page's bare filename (what
     // `pibble help` lists, e.g. "counter") as well as its real, prefixed
     // id ("folder:counter") — the prefix is internal namespacing (see
     // CustomPages.dir/CustomPages' scan) that a CLI user shouldn't have to know
     // or type. Falls through unresolved for built-in ids and "settings",
-    // which already match activePanes directly.
+    // which already match activePanes directly. A custom page wins over the
+    // aliases above, so uploading one called "clipboard" still resolves to it.
     function resolvePageArg(p: string): string {
         if (!p || activePanes.includes(p) || p === "settings")
             return p;
         const u = (Settings.uploadedPages ?? []).find(x => x.id.split(":").slice(1).join(":") === p);
-        return u ? u.id : p;
+        if (u)
+            return u.id;
+        return root.pageArgAliases[p] ?? p;
     }
     readonly property bool drawerOpen: root.pane === "apps"
 

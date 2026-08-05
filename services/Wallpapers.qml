@@ -331,14 +331,13 @@ Singleton {
     // there's no wallpaper baked to sit under it. The banding it would have
     // hidden is accepted instead.
     //
-    // Sigma is niri's radius in *output* pixels, which is not something a
-    // client is told: on a fractionally scaled output the compositor hands
-    // anyone not speaking wp-fractional-scale a rounded wl_output scale
-    // (niri reports 2 for a 1.25x output, which is what both the window's
-    // and the screen's devicePixelRatio come back as here), so dividing by
-    // that lands the blur a long way off. The one number that is available,
-    // on any compositor, is the output's true pixel size — which comes back
-    // in a single still screencopy frame. See XrayScaleProbe.
+    // Sigma is niri's radius in *output* pixels. On a fractionally scaled
+    // output the compositor hands anyone not speaking wp-fractional-scale a
+    // rounded wl_output scale (niri reports 2 for a 1.25x output, which is
+    // what a ShellScreen's devicePixelRatio — and a window's, until its
+    // surface is mapped — comes back as), so dividing by that lands the blur
+    // a long way off. A mapped surface is told the real fractional scale, so
+    // that is what gets measured. See XrayScaleProbe.
     readonly property real xraySigma: 19.17
     // Baked at a quarter of the output's logical resolution. A blur this
     // wide leaves nothing that a quarter-rate sampling can't carry: against
@@ -394,19 +393,18 @@ Singleton {
         + "|" + root.xraySize.width + "x" + root.xraySize.height + "|" + root.xrayCacheSigma
     onXrayCacheKeyChanged: root.rescan()
 
-    // Measures the output scale that xraySigma needs, once, by asking for a
-    // single still screencopy frame of the output and dividing its pixel
-    // size by the screen's logical size. Only ever runs in "xray" mode, the
-    // frame is never displayed or read — only its dimensions — and the
-    // surface it needs to exist on goes away the moment the number lands.
-    // A compositor with no screencopy support just leaves the timeout to
-    // settle it at 1, i.e. logical pixels stand in for output pixels, which
-    // is exactly right on an unscaled output.
+    // Measures the output scale that xraySigma needs, once, off the device
+    // pixel ratio of a mapped surface (see XrayScaleProbe). Only ever runs in
+    // "xray" mode, and the surface it needs to exist on goes away the moment
+    // the number lands. A compositor that never reports one just leaves the
+    // timeout below to settle it at 1, i.e. logical pixels stand in for output
+    // pixels, which is exactly right on an unscaled output.
     readonly property bool xrayScaleWanted: (Settings.bgBlur === "xray" || Settings.wallCommand.includes("$BLUR"))
         && root.xrayOutputScale === 0 && root.screen !== null
     function setXrayOutputScale(s) {
-        // a bad measurement (no content, a screen that resized mid-capture)
-        // must still resolve to something, or nothing would ever bake
+        // a bad measurement (a surface that never mapped, a screen that
+        // resized mid-measure) must still resolve to something, or nothing
+        // would ever bake
         root.xrayOutputScale = s > 0.1 ? s : 1;
     }
     Timer {
