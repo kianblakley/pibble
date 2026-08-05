@@ -67,6 +67,22 @@ Singleton {
     // Clamped to 1px: an empty region reads as "no region set", which the blur
     // protocol treats as blur-the-whole-surface — a full-screen blur flash.
     readonly property int revealDiameter: Math.max(1, Math.ceil(2 * root.maxRevealRadius * root.reveal))
+    // What the compositor blur region asks for (see LauncherWindow's
+    // growRegion), deliberately smaller than the circle the mask draws. The mask
+    // cuts content at the exact geometric edge, but the region is rasterised
+    // outward — so at equal diameters the region pokes out from under the
+    // content as a ring of blurred, saturated backdrop wearing none of the
+    // launcher's dim. That reads as a bright rim riding the edge, and it is what
+    // made the reveal look like it was stepping rather than moving.
+    //
+    // The overshoot measured proportional to the radius (~0.13% of it), not a
+    // fixed pixel or two, which is why a constant inset only cleaned up the
+    // small end of the animation: 0.4% of the diameter, with a ~3x margin over
+    // what was measured, plus 2px for the plain integer rounding on top. Small
+    // enough that the unblurred sliver it trades for stays under notice — a few
+    // pixels wide mid-animation, and off-screen entirely by the time the circle
+    // is at full size.
+    readonly property int revealBlurDiameter: Math.max(1, root.revealDiameter - Math.ceil(root.revealDiameter * 0.004) - 2)
 
     // Raised for the things that need the window's own item tree or a child
     // process. The window connects to each; nothing else does.

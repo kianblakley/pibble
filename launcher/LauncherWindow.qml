@@ -171,10 +171,10 @@ PanelWindow {
     Region {
         id: growRegion
         shape: RegionShape.Ellipse
-        x: LauncherState.originX - LauncherState.revealDiameter / 2
-        y: LauncherState.originY - LauncherState.revealDiameter / 2
-        width: LauncherState.revealDiameter
-        height: LauncherState.revealDiameter
+        x: LauncherState.originX - LauncherState.revealBlurDiameter / 2
+        y: LauncherState.originY - LauncherState.revealBlurDiameter / 2
+        width: LauncherState.revealBlurDiameter
+        height: LauncherState.revealBlurDiameter
     }
     Region {
         id: fadeBlurRegion
@@ -248,8 +248,20 @@ PanelWindow {
             duration: Anim.launch(520)
             // Starts at moderate velocity (no ease-in dead zone where the
             // dot seems stuck, no Out-style explosion), settles gently.
+            //
+            // The constraint here isn't feel, it's edge travel: the radius
+            // scales with this value, so peak velocity is how far the circle's
+            // edge jumps between two frames — and a hard edge stops reading as
+            // motion once that runs far past the animation's own average,
+            // strobing as separate arcs instead. So what matters is the ratio of
+            // peak to average, which is a property of the curve alone. The
+            // previous one ([0.33, 0.15, 0.2, 1.0], its control points crossed
+            // over in x) peaked at 2.53x average and then crawled its last 5%
+            // over 30% of the duration — a lurch followed by a stall. This keeps
+            // the same moderate start and gentle settle at a 1.52x peak, with no
+            // dead tail.
             easing.type: Easing.BezierSpline
-            easing.bezierCurve: [0.33, 0.15, 0.2, 1.0, 1.0, 1.0]
+            easing.bezierCurve: [0.35, 0.3, 0.55, 1.0, 1.0, 1.0]
         }
     }
 
@@ -269,7 +281,14 @@ PanelWindow {
                 // Only visible in "grow" styles, same as above.
                 to: 0
                 duration: Anim.launch(320)
-                easing.type: Easing.InQuad
+                // Same edge-travel budget as the entrance curve above, on a
+                // tighter one: this covers the whole radius in 320ms rather than
+                // 520, so its average is already the higher of the two. InQuad
+                // put its peak (2x average) on the very last frame, which is
+                // exactly the wrong place — the collapse skipped just as it
+                // vanished. This peaks at 1.35x, mid-animation.
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: [0.4, 0.2, 0.55, 0.75, 1.0, 1.0]
             }
         }
         // hide the window; the daemon keeps running
