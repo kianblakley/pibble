@@ -4,7 +4,8 @@ import QtQuick
 import "." as Local
 
 // Example custom page for pibble: a click counter with Click/Reset tiles.
-// See DOCS.md's "API reference" for the pibble contract exercised here.
+// See the header comment in ui/PageContext.qml for the pibble contract
+// exercised here.
 Item {
     id: root
     width: 280

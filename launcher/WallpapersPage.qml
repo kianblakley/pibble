@@ -15,7 +15,7 @@ Item {
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -64,7 +64,7 @@ Item {
                 }
             }
             // windows carousel: LauncherState.wallpaperMatches never empties (it always
-            // holds the full, unfiltered list — see LauncherState.wallpaperMatches
+            // holds the full, unfiltered list - see LauncherState.wallpaperMatches
             // above), so its "nothing matched" state is signaled
             // separately by LauncherState.carouselEmpty instead.
             function onCarouselEmptyChanged() {

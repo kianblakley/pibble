@@ -8,7 +8,7 @@ import "root:/services"
 //
 // It has to be a real (1x1, click-through, invisible) window rather than the
 // screen's own devicePixelRatio: only a mapped surface is told the *fractional*
-// scale (wp-fractional-scale-v1), which is the number the blur needs — 1.25
+// scale (wp-fractional-scale-v1), which is the number the blur needs - 1.25
 // against a screen and a never-shown window that both report the rounded 2.
 // The surface goes away the moment the number lands.
 //
@@ -17,7 +17,7 @@ import "root:/services"
 // back to that: asking for a screencopy frame makes Quickshell bind a second
 // wl_output, and the compositor then sends every one of this process's surfaces
 // a wl_surface.enter naming an output Qt did not bind and cannot resolve, which
-// poisons Qt's per-surface screen bookkeeping for the rest of the session — the
+// poisons Qt's per-surface screen bookkeeping for the rest of the session - the
 // next surface to leave an output (i.e. the first time the launcher closes)
 // segfaults inside QWaylandWindow::handleScreensChanged. That reproduced on
 // every `pibble toggle` against a cold daemon.
@@ -28,7 +28,7 @@ Scope {
 
     // A freshly created surface reports 1, then the output's rounded integer
     // scale, and only lands on the fractional scale a few milliseconds later,
-    // so publish on a debounce rather than latching the first value — the whole
+    // so publish on a debounce rather than latching the first value - the whole
     // wallpaper folder gets baked against whatever this resolves to. Publishing
     // is also what unloads the window below (it clears xrayScaleWanted), which
     // is why the timer sits outside the LazyLoader: it has to outlive what it

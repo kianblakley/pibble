@@ -1,6 +1,5 @@
 import QtQuick
 import QtMultimedia
-import "root:/config"
 import "root:/services"
 
 // One MediaPlayer per video wallpaper, opened once and kept open for the life
@@ -12,7 +11,7 @@ import "root:/services"
 // player as the selection landed on a video tile and tore it down (~65ms more)
 // as it left, and the carousel kept one player but re-pointed its source at
 // each video it reached. Measured against a 16ms budget, every move on or off a
-// video blocked the GUI thread for 70-115ms — the freeze that ate the start of
+// video blocked the GUI thread for 70-115ms - the freeze that ate the start of
 // the slide it landed in.
 //
 // Nothing here is ever destroyed or re-sourced. Navigation only moves `current`
@@ -23,7 +22,7 @@ Item {
     id: root
 
     // Path of the video whose surface shows, "" for none. Opened on the spot if
-    // the warm pass hasn't reached it yet — one stall on first sight of a file
+    // the warm pass hasn't reached it yet - one stall on first sight of a file
     // rather than one per visit.
     property string current: ""
     // Whether `current` runs. Everything else sits paused on frame 0, which is
@@ -47,8 +46,8 @@ Item {
     // Every video in the wallpaper folder. Routed through a joined string
     // because Wallpapers.list is a fresh array after every scan (they run on
     // every open, and on a timer while the cache is still generating), and a
-    // list rebuilt straight from it would re-evaluate — and reopen every player
-    // — on scans that changed nothing.
+    // list rebuilt straight from it would re-evaluate - and reopen every player
+    // - on scans that changed nothing.
     readonly property string videoKey: Wallpapers.list.filter(w => w.video).map(w => w.path).join("\n")
     readonly property var videoPaths: root.videoKey === "" ? [] : root.videoKey.split("\n")
 
@@ -100,7 +99,7 @@ Item {
             visible: surface.showing
 
             // Rewound rather than resumed, since the still frame this takes
-            // over from is frame 0 — picking up mid-clip would make the
+            // over from is frame 0 - picking up mid-clip would make the
             // handover jump in content. Seeking, pausing and starting a player
             // that already has its file open are all free; only the open
             // itself isn't.

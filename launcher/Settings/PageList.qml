@@ -13,7 +13,7 @@ import "root:/ui"
 // Click a row's box to toggle it, drag a row up or down to reorder the cycle
 // (topmost is the home pane), swipe an uploaded row right to reveal its delete
 // control. A vertical list rather than a horizontal chip row so it can hold an
-// arbitrary number of uploaded pages without running out of width — it grows
+// arbitrary number of uploaded pages without running out of width - it grows
 // with the page count up to six rows, then scrolls.
 Item {
     id: root
@@ -24,7 +24,7 @@ Item {
     // small left inset applied to every row's content
     // (both the checkbox/label and the revealed delete
     // box) so nothing ever sits flush against pagesFlick's
-    // own clip edge — a border drawn exactly on that
+    // own clip edge - a border drawn exactly on that
     // boundary gets its outer half-pixel clipped away
     readonly property real rowInset: 2
 
@@ -41,7 +41,7 @@ Item {
     property string revealedId: ""
     // which uploaded row (if any) is mid dismiss-animation
     // after a confirmed trash, before the file is actually
-    // moved — see trashPage()
+    // moved - see trashPage()
     property string removingId: ""
 
     // rubber-bands value past [min,max] instead of hard
@@ -49,7 +49,7 @@ Item {
     // (or back past fully-closed) still tracks the
     // pointer but with resistance that grows the further
     // past the limit it goes, asymptoting toward min-damp/
-    // max+damp rather than ever truly reaching it — only
+    // max+damp rather than ever truly reaching it - only
     // used while Hidden menu animations is on (see
     // swipeDrag.onCentroidChanged); off, the reveal is
     // hard-clamped instead, with no left-swipe at all
@@ -102,7 +102,7 @@ Item {
             LauncherState.toggleUploadedPage(id);
     }
     // moves an uploaded page's file to the trash (not a
-    // hard delete — gio trash/trash-put when available,
+    // hard delete - gio trash/trash-put when available,
     // otherwise a same-directory rename as a last
     // resort); the row itself drops out on the rescan
     // this kicks off, same path as noticing the file
@@ -138,7 +138,7 @@ Item {
 
     // copies the folder picked via the "add a page" row
     // into pibble/custom-pages (gitignored, since it's
-    // user content, not shell code) and rescans — the
+    // user content, not shell code) and rescans - the
     // row shows up unchecked once the scan picks the
     // new folder up, the same path an outside drag-
     // and-drop into that folder would take. Kept under
@@ -219,8 +219,8 @@ Item {
         onTriggered: CustomPages.rescan()
     }
 
-    // stops short of 780 — the same 24px+8px gap the
-    // header's ResetButton sits in above — so the scroll
+    // stops short of 780 - the same 24px+8px gap the
+    // header's ResetButton sits in above - so the scroll
     // track lands to the left of it instead of hugging
     // the column's outer edge like the reset icon does.
     // The list itself is narrower still, leaving room
@@ -260,7 +260,7 @@ Item {
                 // pageIds only changes on genuine add/remove,
                 // so a plain reorder never touches the
                 // Repeater's model and never destroys/
-                // recreates delegates — see the comment on
+                // recreates delegates - see the comment on
                 // LauncherState.pageIds for why that matters (a
                 // recreated delegate mid-drag loses its
                 // DragHandler's grab, and a recreated one on
@@ -303,7 +303,7 @@ Item {
                         // it, with the actual file-move
                         // (and the model update that
                         // destroys this delegate) held off
-                        // until it's finished — see the
+                        // until it's finished - see the
                         // delete TapHandler below and
                         // pageRemoveDelay
                         readonly property bool removing: root.removingId === modelData
@@ -329,7 +329,7 @@ Item {
                         // enabled is toggled imperatively from
                         // swipeDrag (not bound to !swipeDrag.active):
                         // that binding races the same handler's own
-                        // revealX write on release — both react to
+                        // revealX write on release - both react to
                         // the same activeChanged signal, and there's
                         // no guarantee the enabled binding resolves
                         // before the write reaches this Behavior, so
@@ -365,7 +365,7 @@ Item {
                         // vertical reorder drag, covering the whole
                         // row; pageFront below carries an orthogonal
                         // horizontal-only DragHandler for the swipe
-                        // gesture — xAxis/yAxis being disabled on
+                        // gesture - xAxis/yAxis being disabled on
                         // one each is what lets a mostly-vertical vs.
                         // mostly-horizontal drag resolve to the right
                         // one without the two fighting over the grab
@@ -408,7 +408,7 @@ Item {
                             }
                         }
 
-                        // trash button — no background needed to hide
+                        // trash button - no background needed to hide
                         // it: it sits just past the row's left edge,
                         // outside pagesFlick's clip rect, and slides
                         // into view as pageFront (below) moves right in
@@ -419,7 +419,7 @@ Item {
                         // tickbox-sized slot pushing the row's content
                         // over, not a floating overlay. Tap once to
                         // arm (turns red), tap again to actually trash
-                        // — only reachable once revealed, so
+                        // - only reachable once revealed, so
                         // swipe-then-tap-tap is the full confirmation
                         Item {
                             id: pageDelete
@@ -469,7 +469,7 @@ Item {
                                 enabled: pageRow.revealX > pageRow.revealWidth - 1
                                 onTapped: {
                                     if (pageDelete.confirming) {
-                                        // leaves revealX/revealedId alone —
+                                        // leaves revealX/revealedId alone -
                                         // the row slides away exactly as
                                         // last seen (still revealed, still
                                         // red) rather than snapping closed
@@ -485,12 +485,12 @@ Item {
                         }
 
                         // front layer: checkbox/label (or the add
-                        // affordance) — slides right on a swipe to
+                        // affordance) - slides right on a swipe to
                         // expose pageDelete above. width/height
                         // are plain bindings rather than
                         // anchors.fill: an item can't have both an
                         // anchored (left+right) and an explicitly
-                        // bound x — whichever is (re)assigned last
+                        // bound x - whichever is (re)assigned last
                         // wins, and the two silently fight for
                         // control of x on every relayout
                         Item {
@@ -527,7 +527,7 @@ Item {
                                     }
                                     // disabled while revealed (a tap there
                                     // closes the swipe instead) or when the
-                                    // page is broken — there's nothing to
+                                    // page is broken - there's nothing to
                                     // toggle on, only to trash
                                     TapHandler {
                                         enabled: pageRow.revealX < 1 && !pageBox.broken
@@ -603,7 +603,7 @@ Item {
                                     // rubber-banded when animations are on
                                     // (dragging past either end still tracks
                                     // the finger, with resistance); hard-
-                                    // clamped when they're off — no leftward
+                                    // clamped when they're off - no leftward
                                     // swipe, no resistance past either end
                                     pageRow.revealX = Settings.hiddenMenuAnimations
                                         ? root.rubberBand(centroid.scenePosition.x - grabX, 0, pageRow.revealWidth, 90)
@@ -633,11 +633,11 @@ Item {
         // events to a WheelHandler (see the background
         // click-catcher's identical note above), and a
         // plain Flickable's own wheel handling relies on
-        // one — acceptedButtons: NoButton lets presses/
+        // one - acceptedButtons: NoButton lets presses/
         // drags fall through to the rows underneath while
         // still catching the wheel. contentY is animated
         // rather than set outright (a standalone
-        // NumberAnimation, not a Behavior — a Behavior on
+        // NumberAnimation, not a Behavior - a Behavior on
         // contentY would also apply to, and fight, native
         // touch/drag flicking): with only a handful of
         // rows one notch can easily cover the whole
@@ -700,7 +700,7 @@ Item {
                     color: Qt.alpha(Theme.accent, pagesScrollArea.pressed ? 0.85 : 0.6)
                     // floored so it stays grabbable once the
                     // list is long enough that the honest
-                    // proportional size would be a sliver —
+                    // proportional size would be a sliver -
                     // no ceiling, since capping the top end
                     // would misrepresent how much is
                     // visible (e.g. 6 of 7 rows shown should

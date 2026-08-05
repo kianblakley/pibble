@@ -7,7 +7,7 @@ import "root:/services"
 
 // Volume OSD: a pill (or an equalizer) sliding up from the bottom edge.
 //
-// A persistent window of fixed size whose card animates inside it — always
+// A persistent window of fixed size whose card animates inside it - always
 // loaded, only mapped while showing. Mapping a pre-built window costs a frame
 // or two where a full rebuild costs far more, so rapid volume changes never
 // lag; and layer-shell margins never animate, since a margin change needs a
@@ -201,8 +201,8 @@ Scope {
             // fixed-width bars (the design's 6px) mirrored above and below
             // a horizontal centre axis, following the flyout accent colour
             // (neutral when muted / 0). The card width sets how many bars
-            // fit — resizing adds/removes bars at the design's ~26px pitch
-            // instead of stretching them — and the row still spans edge to
+            // fit - resizing adds/removes bars at the design's ~26px pitch
+            // instead of stretching them - and the row still spans edge to
             // edge like the pill's bar. No per-bar height Behaviors: the
             // ~90ms tick already paces the motion, and animating the bars
             // at 60fps kept the compositor re-blurring the backdrop every

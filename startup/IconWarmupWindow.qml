@@ -6,7 +6,7 @@ import "root:/services"
 // Warms the app-icon pixmap cache the moment the daemon starts, so the very
 // first launcher open renders icons immediately instead of briefly showing the
 // two-letter fallback while the SVGs decode. QML decodes images on a single
-// reader thread, so ~100 theme SVGs take a second or two — pay that at session
+// reader thread, so ~100 theme SVGs take a second or two - pay that at session
 // start, not at first open.
 //
 // A tiny transparent overlay surface is enough to drive the image provider and

@@ -4,15 +4,15 @@ import "root:/config"
 import "root:/services"
 
 // Wallpaper selector, "grid" style: a paged grid of thumbnails. Only the
-// selected tile animates — its .gif from the source file, its .mp4 through the
-// one shared video surface below the Grid — so scrolling the grid never decodes
+// selected tile animates - its .gif from the source file, its .mp4 through the
+// one shared video surface below the Grid - so scrolling the grid never decodes
 // a movie per cell.
 Item {
     id: root
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -47,7 +47,7 @@ Item {
             }
         }
         // a query refills the tiles, which springs any that were
-        // empty back in — and moves the selection to the top match,
+        // empty back in - and moves the selection to the top match,
         // i.e. to a different tile
         function onWallpaperMatchesChanged() {
             root.unsettle();
@@ -115,7 +115,7 @@ Item {
                             // the clock queries this pane before switching to
                             // it): drop straight to hidden rather than play an
                             // exit that would only become visible once the pane
-                            // arrives — see AppsPage's identical branch
+                            // arrives - see AppsPage's identical branch
                             springOut.stop();
                             wrap.opacity = 0;
                         }
@@ -158,7 +158,7 @@ Item {
                         // every other tile stays a still frame so
                         // scrolling the grid doesn't decode a movie
                         // per cell. Video is not played per cell at
-                        // all — see the single shared surface below
+                        // all - see the single shared surface below
                         // the Grid.
                         //
                         // gated on this grid being the style in use,
@@ -173,7 +173,7 @@ Item {
 
                         Image {
                             // stays visible underneath even while
-                            // animating/videoAnimating — the layers
+                            // animating/videoAnimating - the layers
                             // below paint on top once they actually
                             // have a frame ready, so there's no gap
                             // where neither is showing anything (a
@@ -223,7 +223,7 @@ Item {
                     // Stroke above the image, not a border on thumb
                     // (ClippingRectangle): the clip mask and an
                     // underlying border rasterize a pixel apart, so
-                    // the image eats the bottom (and right) stroke —
+                    // the image eats the bottom (and right) stroke -
                     // same image-over-border effect as the carousel's
                     // the carousel cell's thumbnail stroke below.
                     Rectangle {
@@ -278,7 +278,7 @@ Item {
     // selection, rather than one inside each tile. Every video wallpaper's
     // player is already open and paused behind this (see WallpaperVideoPool),
     // so landing on a video tile only moves the surface and starts a player
-    // that is already sitting on its first frame — the tile used to build a
+    // that is already sitting on its first frame - the tile used to build a
     // MediaPlayer as the selection arrived and tear it down again as it left,
     // which measured as a 70-115ms GUI-thread stall on every single move on or
     // off a video, and measures as none at all now.
@@ -298,8 +298,8 @@ Item {
 
     // Held false for as long as the tile the surface stands over is still
     // playing an entrance spring, since the surface can't ride one. Starts
-    // true so a re-open onto the pane the launcher was already on — which
-    // replays no springs, because nothing signals a pane change — doesn't sit
+    // true so a re-open onto the pane the launcher was already on - which
+    // replays no springs, because nothing signals a pane change - doesn't sit
     // waiting for a timer that never ran.
     property bool settled: true
     function unsettle(): void {
@@ -338,7 +338,7 @@ Item {
                 live: root.videoShowing
                 // Only while the launcher is down, so the file opens land with
                 // nothing on screen to stutter rather than inside a
-                // navigation — the same reason pibble-warmup decodes theme
+                // navigation - the same reason pibble-warmup decodes theme
                 // SVGs at startup. The style check keeps the carousel's own
                 // pool from opening the same files a second time over.
                 warming: Settings.wallpaperStyle === "grid" && !LauncherState.shown

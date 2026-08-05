@@ -11,7 +11,7 @@ Item {
     anchors.centerIn: parent
     width: lines.width
     height: lines.height
-    // its own instance of the shared power/reboot rubber band — one
+    // its own instance of the shared power/reboot rubber band - one
     // Translate per pane, all bound to the same pull, so no pane has to
     // reach across the tree for a sibling's transform
     transform: Translate {
@@ -21,7 +21,7 @@ Item {
     onVisibleChanged: if (visible) enterAnim.restart()
     // "grow" styles: fade in only once the hole (from wherever it
     // originates) has grown enough to reach and contain the
-    // clock. "fade" has no hole — content's own opacity fade
+    // clock. "fade" has no hole - content's own opacity fade
     // (plus lines's own enterAnim below) is the whole effect.
     opacity: {
         if (LauncherState.fadeMode)
@@ -63,7 +63,7 @@ Item {
                 // membership in modelData is settings-driven and
                 // stable; runtime availability (battery present,
                 // weather fetched) only ever fades a segment in
-                // place via its own opacity below — it never adds
+                // place via its own opacity below - it never adds
                 // to or removes from this Repeater's model, so
                 // Row's move transition can animate every reflow
                 // instead of anything popping
@@ -98,7 +98,7 @@ Item {
                 }
 
                 Repeater {
-                    // static per-line membership — see
+                    // static per-line membership - see
                     // line.isAvailable above
                     model: line.modelData
 
@@ -143,7 +143,7 @@ Item {
                             // frozenText holds the last real icon, only updating
                             // the instant a new one arrives, while opacity (not
                             // "visible") tracks whether one should currently show
-                            // — dropping out of the layout only once it's faded
+                            // - dropping out of the layout only once it's faded
                             // low enough not to be noticed
                             readonly property string iconText: segment.modelData === "battery" ? (Battery.charging ? Icons.bolt : "")
                                 : segment.modelData === "weather" ? Weather.glyphFor(Weather.text) : ""

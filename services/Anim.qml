@@ -43,7 +43,7 @@ Singleton {
         return Settings.launchAnimation === "none" ? 0 : ms;
     }
     // Settings pane and power/reboot prompt duration: zeroed by
-    // Settings.hiddenMenuAnimations alone — neither is a grid.
+    // Settings.hiddenMenuAnimations alone - neither is a grid.
     function menu(ms: int): int {
         return Settings.hiddenMenuAnimations ? ms : 0;
     }
@@ -62,7 +62,7 @@ Singleton {
     }
 
     // Tile stagger applies when a pane opens or a grid page turns, not on every
-    // keystroke — re-staggering while filtering makes tiles blink out and pause.
+    // keystroke - re-staggering while filtering makes tiles blink out and pause.
     property bool staggering: false
     function beginStagger(): void {
         root.staggering = true;

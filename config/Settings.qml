@@ -8,7 +8,7 @@ import Quickshell.Io
 // FileView that binds it to disk (a singleton can't be reparented into a
 // FileView's default property, so the two halves have to live apart).
 //
-// Mutating a property only changes it in memory — call Settings.save()
+// Mutating a property only changes it in memory - call Settings.save()
 // afterwards to persist.
 JsonAdapter {
     id: settings
@@ -40,7 +40,7 @@ JsonAdapter {
     property int wallsCols: Defaults.wallsCols
     property int wallsRows: Defaults.wallsRows
     // bars visible in the "windows" carousel: the selected center plus equal
-    // wings, so always odd (heal() clamps to 3–9)
+    // wings, so always odd (heal() clamps to 3-9)
     property int wallsVisible: Defaults.wallsVisible
     property int clipsCols: Defaults.clipsCols
     property int clipsRows: Defaults.clipsRows
@@ -51,11 +51,11 @@ JsonAdapter {
     property var pageOrder: Defaults.pageOrder
     // pages added via the Pages settings row's upload picker; each is
     // { id, label, path, on } and starts unchecked. Loaded and cycled
-    // alongside the built-in four once ticked on — see LauncherState.pageOrder
+    // alongside the built-in four once ticked on - see LauncherState.pageOrder
     // and CustomPageHost
     property var uploadedPages: []
     // per-page persistent storage for custom pages, namespaced by page id (see
-    // PageContext.getSetting/setSetting) — never read or written to directly
+    // PageContext.getSetting/setSetting) - never read or written to directly
     // by pibble itself otherwise
     property var customPageData: ({})
 
@@ -79,7 +79,7 @@ JsonAdapter {
 
     // "grid" is the grid picker; "carousel" and "carousel-flat" are the
     // horizontal carousel (see WallpaperCarousel), the latter with the backdrop
-    // parallax pan disabled — shown to the user as "carousel" and "parallax
+    // parallax pan disabled - shown to the user as "carousel" and "parallax
     // carousel" respectively (see SettingsSchema.display's wallpaperStyle case);
     // the internal ids stay as-is because "carousel"/"carousel-flat" already
     // once meant something else (the pre-rename windows/windows-flat styles)
@@ -87,7 +87,7 @@ JsonAdapter {
     // old saved configs mid-migration
     property string wallpaperStyle: "grid"
     property string wallpaperDir: Defaults.wallpaperDir
-    // command run when a wallpaper is chosen; $WALL is the image (or video —
+    // command run when a wallpaper is chosen; $WALL is the image (or video -
     // pibble stays backend-agnostic, so a command that wants to handle .mp4
     // differently, e.g. via mpvpaper instead of an image-only tool like the
     // default awww, has to branch on $WALL's extension and tear down/start the
@@ -102,9 +102,9 @@ JsonAdapter {
 
     property real dimOpacity: 0.4
     property string launchAnimation: "grow-top-left"
-    // how the launcher blurs whatever's behind it — "off", real compositor blur
+    // how the launcher blurs whatever's behind it - "off", real compositor blur
     // ("compositor", see BackgroundEffect.blurRegion), or the client-side fake
-    // ("xray", a blurred wallpaper — see XrayBackdrop); independent of
+    // ("xray", a blurred wallpaper - see XrayBackdrop); independent of
     // launchAnimation
     property string bgBlur: "xray"
 
@@ -118,14 +118,14 @@ JsonAdapter {
     property bool gestures: true
     // when on, a single click on an app/wall/clip tile activates it
     // immediately. Off means clicking a tile that isn't already selected only
-    // highlights it — a second click (on the now-selected tile) is what
+    // highlights it - a second click (on the now-selected tile) is what
     // actually activates it. The wallpaper carousel already behaves like the
     // "off" mode inherently (tapping a bar off-center recenters it, tapping the
     // centered one applies it) so isn't gated by this.
     property bool singleClickActivate: false
     property var keybinds: Defaults.keybinds
 
-    // flyouts (volume + notification OSDs) — independent of whether other apps'
+    // flyouts (volume + notification OSDs) - independent of whether other apps'
     // notifications show
     property var flyouts: Defaults.flyouts
     // gates notify-send calls pibble sends on its own behalf, split by kind:
@@ -162,20 +162,20 @@ JsonAdapter {
 
     // Heal out-of-range / retired values. Hooked to the store's loaded signal
     // (not Component.onCompleted) so it also covers hot reloads and hand edits
-    // picked up by the file watcher — which means every branch below must be a
+    // picked up by the file watcher - which means every branch below must be a
     // no-op on an already-healed config, because this also runs if a load ever
     // surfaces adapter defaults (an unconditional save here once clobbered the
     // file).
     function heal(): void {
         // clamp out-of-range clip rows (old list-style pane stored large
-        // values; the grid renders 2–4 rows) — clamp, don't reset, so a
+        // values; the grid renders 2-4 rows) - clamp, don't reset, so a
         // hand-edited value degrades to the nearest legal one
         if (settings.clipsRows > 4 || settings.clipsRows < 2) {
             settings.clipsRows = Math.max(2, Math.min(4, settings.clipsRows));
             settings.save();
         }
         // the windows carousel shows a selected center bar plus equal wings, so
-        // the visible count must be odd; clamp to 3–9 and round even
+        // the visible count must be odd; clamp to 3-9 and round even
         // hand-edited values down
         if (settings.wallsVisible < 3 || settings.wallsVisible > 9 || settings.wallsVisible % 2 === 0) {
             settings.wallsVisible = Math.max(3, Math.min(9, settings.wallsVisible % 2 === 0 ? settings.wallsVisible - 1 : settings.wallsVisible));
@@ -252,7 +252,7 @@ JsonAdapter {
             settings.save();
         }
         // the old power/panes per-category gesture toggles collapsed back into a
-        // single "gestures" switch that gates all navigation gestures at once —
+        // single "gestures" switch that gates all navigation gestures at once -
         // on only if both halves were
         if (settings.gestures && typeof settings.gestures === "object") {
             settings.gestures = settings.gestures.power !== false && settings.gestures.panes !== false;
@@ -262,7 +262,7 @@ JsonAdapter {
         // client-side fake-blur mode alongside it. The property is declared
         // `string` now, so JsonAdapter coerces an old on-disk `true`/`false`
         // into the strings "true"/"false" on load rather than leaving it a JS
-        // boolean — check for those, not typeof.
+        // boolean - check for those, not typeof.
         if (settings.bgBlur === "true" || settings.bgBlur === "false") {
             settings.bgBlur = settings.bgBlur === "true" ? "compositor" : "off";
             settings.save();

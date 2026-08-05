@@ -2,7 +2,7 @@ import QtQuick
 import "root:/config"
 import "root:/services"
 
-// A label, a ‹ value › stepper and a reset button — the shape almost every
+// A label, a ‹ value › stepper and a reset button - the shape almost every
 // setting takes. `key` is what SettingsSchema reads, steps and resets.
 Item {
     id: root

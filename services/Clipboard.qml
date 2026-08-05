@@ -30,7 +30,7 @@ Singleton {
     property bool paneVisible: false
 
     // Raised (and re-raised) every time the clips pane is navigated to, and
-    // again whenever a scan lands while it's open — not just once per problem,
+    // again whenever a scan lands while it's open - not just once per problem,
     // since the user wants a reminder each visit. Silent while the pane isn't
     // showing: a scan runs on every launcher open regardless of pane.
     function checkAlert(): void {
@@ -102,7 +102,7 @@ Singleton {
                         : { id, bytes, image: false, preview: preview.trim(), full: root.unescapeField(fullEsc) };
                 });
                 // Sweep cached thumbs (and on-demand full-res decodes) for
-                // ids that fell out of the current clipsMax window — runs
+                // ids that fell out of the current clipsMax window - runs
                 // every scan so the cache never grows past what's shown.
                 prune.command = ["bash", "-c", `
                     dir="$1"; shift

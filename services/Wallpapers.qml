@@ -33,11 +33,11 @@ Singleton {
     //
     // One blurred image serves both uses: the launcher's own backdrop in
     // "xray" mode and the $BLUR the wallpaper command gets (see
-    // applyWallpaper) — they're the same picture, so they're the same file.
+    // applyWallpaper) - they're the same picture, so they're the same file.
     property var list: []
     // xrayCacheKey as of the last scan that landed. Only when it matches the
     // current one do the entries say anything about the backdrops the
-    // launcher is actually after — before that (a scan from before the
+    // launcher is actually after - before that (a scan from before the
     // output scale resolved, say) a missing entry means "not looked for
     // yet", not "not there".
     property string scanKey: ""
@@ -54,7 +54,7 @@ Singleton {
     // Started a tick late: this is called from change handlers on the very
     // properties the scan's own command binding reads (see xrayCacheKey), and
     // a binding is only guaranteed to have caught up by the time the next one
-    // reads it — flipping `running` inline reliably ran the scan against the
+    // reads it - flipping `running` inline reliably ran the scan against the
     // previous geometry.
     function rescan(): void {
         scan.running = false;
@@ -73,7 +73,7 @@ Singleton {
         id: scan
         running: true
         // the xray parameters this run went looking for, captured at spawn
-        // rather than read back when it finishes — the two can differ by a
+        // rather than read back when it finishes - the two can differ by a
         // whole scan (the output scale resolving is exactly that case), and
         // reading it late would claim a stale result was current
         property string scanKey: ""
@@ -108,7 +108,7 @@ Singleton {
                 bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
                 # a video source can't stand in as its own thumbnail (unlike
                 # a fresh image/gif, which the Image element can decode
-                # directly) — leave thumb blank until the async pass below
+                # directly) - leave thumb blank until the async pass below
                 # generates a real frame
                 thumb="$PWD/$f" blur=""
                 case "\${ext,,}" in mp4) thumb="" ;; esac
@@ -140,7 +140,7 @@ Singleton {
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
                 // variants in the background; the next scan picks them up and
                 // applying never has to blur synchronously. Also sweeps cache
-                // entries whose source wallpaper is gone — runs every scan
+                // entries whose source wallpaper is gone - runs every scan
                 // (not just when something's missing) so deletions get cleaned
                 // up promptly.
                 //
@@ -163,7 +163,7 @@ Singleton {
                 // launcher keeps falling back (a sharp thumbnail-less video
                 // tile, a live-blurred backdrop). Comparing against the last
                 // set of missing entries is what keeps a cache that *can't*
-                // be filled — no ImageMagick — from scanning on a loop: it
+                // be filled - no ImageMagick - from scanning on a loop: it
                 // only re-arms while the set is still shrinking.
                 const missing = walls.filter(w => w.thumb === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
                 if (missing !== "" && missing !== root.generationMissing)
@@ -271,7 +271,7 @@ Singleton {
                         # blur lands at the sigma it was baked for. The crop
                         # rounds to a whole pixel of an image a quarter of the
                         # screen's size, which measures ~3 output pixels below
-                        # the compositor's blur of the same wallpaper —
+                        # the compositor's blur of the same wallpaper -
                         # deliberately left as is.
                         if [ "$needblur" = "1" ] && command -v magick >/dev/null 2>&1; then
                             bsrc="$f"
@@ -306,27 +306,27 @@ Singleton {
     // thing being blurred and it almost never changes, so blurring it once
     // and reusing the result is free from then on. Live blur, by contrast,
     // pays a shader compile plus a screen-sized offscreen pass on the first
-    // frame after the layer surface maps — long enough to watch the backdrop
+    // frame after the layer surface maps - long enough to watch the backdrop
     // turn up late behind a grow reveal. The same file is what a wallpaper
     // command gets as $BLUR (see LauncherWindow.applyWallpaper).
     //
     // The kernel is cloned from niri's defaults (`blur { passes 3; offset 3;
-    // noise 0.02; saturation 1.5 }`). Its dual kawase chain — 3 downsample
+    // noise 0.02; saturation 1.5 }`). Its dual kawase chain - 3 downsample
     // then 3 upsample passes, each tapping at `offset` halves of a
     // destination pixel with the 5/8-tap kernels in
-    // src/render_helpers/shaders/blur_{down,up}.frag — has an impulse
+    // src/render_helpers/shaders/blur_{down,up}.frag - has an impulse
     // response indistinguishable from a gaussian of sigma 19.17: simulating
     // the chain and blurring a hard edge with `-blur 0x19.17` both spread it
     // over exactly 50px, 10% to 90%. So one gaussian is the whole chain.
     //
     // Saturation is niri's postprocess step: a mix toward Rec.709 luma,
     // applied to the blurred result in the same non-linear sRGB the blur
-    // itself runs in (its textures are plain 8-bit ABGR, no linearization) —
+    // itself runs in (its textures are plain 8-bit ABGR, no linearization) -
     // which is what -color-matrix does here, and why nothing converts to
     // linear light first. Niri's noise step is the one part deliberately not
     // reproduced: it can't be baked in (this image is upscaled on the way to
     // the screen, so it would land as blotches rather than dither), and the
-    // alternative — a noise tile drawn live over the backdrop — is a
+    // alternative - a noise tile drawn live over the backdrop - is a
     // full-screen texture that also shows as grain over the desktop whenever
     // there's no wallpaper baked to sit under it. The banding it would have
     // hidden is accepted instead.
@@ -334,15 +334,15 @@ Singleton {
     // Sigma is niri's radius in *output* pixels. On a fractionally scaled
     // output the compositor hands anyone not speaking wp-fractional-scale a
     // rounded wl_output scale (niri reports 2 for a 1.25x output, which is
-    // what a ShellScreen's devicePixelRatio — and a window's, until its
-    // surface is mapped — comes back as), so dividing by that lands the blur
+    // what a ShellScreen's devicePixelRatio - and a window's, until its
+    // surface is mapped - comes back as), so dividing by that lands the blur
     // a long way off. A mapped surface is told the real fractional scale, so
     // that is what gets measured. See XrayScaleProbe.
     readonly property real xraySigma: 19.17
     // Baked at a quarter of the output's logical resolution. A blur this
     // wide leaves nothing that a quarter-rate sampling can't carry: against
     // the same blur done at full output resolution, the quarter-size bake
-    // scaled back up measures 55dB PSNR — visually identical, at a sixteenth
+    // scaled back up measures 55dB PSNR - visually identical, at a sixteenth
     // of the magick run, the file size, the decode and the texture upload.
     readonly property int xrayScale: 4
     readonly property size xraySize: {
@@ -352,9 +352,9 @@ Singleton {
         return Qt.size(Math.max(1, Math.round(s.width / root.xrayScale)), Math.max(1, Math.round(s.height / root.xrayScale)));
     }
     // output pixels per logical pixel, 0 until measured (see
-    // XrayScaleProbe). Nothing bakes until it resolves — baking a whole
+    // XrayScaleProbe). Nothing bakes until it resolves - baking a whole
     // wallpaper folder at the wrong sigma and then again at the right one
-    // is minutes of pointless work — but it always resolves, to 1 if the
+    // is minutes of pointless work - but it always resolves, to 1 if the
     // measurement can't be made.
     property real xrayOutputScale: 0
     // the blur as it applies to the baked image rather than to the screen:
@@ -370,7 +370,7 @@ Singleton {
         const w = root.list.find(x => x.path === Settings.currentWallpaper);
         return w ? w.blur : "";
     }
-    // What the backdrop actually draws — xrayBlur, but only ever picked up
+    // What the backdrop actually draws - xrayBlur, but only ever picked up
     // while the launcher is down. Applying a wallpaper leaves the launcher
     // open on the picker, where the tiles hide the backdrop; the swap only
     // becomes visible as the UI fades out on the way to closing, which reads

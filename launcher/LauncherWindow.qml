@@ -35,7 +35,7 @@ PanelWindow {
 
     // The reveal circle is a client-side mask over this window's own content
     // (see growMask below), so it renders identically on every compositor. Only
-    // the screen it is measured against is this window's business — the
+    // the screen it is measured against is this window's business - the
     // geometry derived from it lives on LauncherState, which the panes read.
     Binding {
         target: LauncherState
@@ -84,7 +84,7 @@ PanelWindow {
                 host.resetEntrance();
         }
         // Panes replay their entrance animation off onPaneChanged, which only
-        // fires on an actual value change — reopening onto the same pane the
+        // fires on an actual value change - reopening onto the same pane the
         // launcher was last closed on is otherwise a no-op assignment, so the
         // pane's opacity stays wherever the reset above left it with nothing
         // to animate it back in. Round-trip through a dead value so the
@@ -154,23 +154,23 @@ PanelWindow {
     // statically, for as long as the window is open. Requesting a
     // region at all is what flips background-effect into "on request"
     // on niri, which then defaults its own xray-through-other-windows
-    // behavior on too — so only ask when "Background blur" is actually
+    // behavior on too - so only ask when "Background blur" is actually
     // set to "compositor" ("xray", the non-protocol mode, draws a
-    // blurred wallpaper behind the launcher itself instead — see
+    // blurred wallpaper behind the launcher itself instead - see
     // xrayBackdrop below).
     //
     // The other modes ask for a 1px region rather than for nothing at
     // all, which is not the same thing: a compositor-side rule that
     // turns blur on for this surface (niri layer-rule background-effect,
     // for one) applies to the whole surface when the client never speaks
-    // the protocol, and then blurs behind the client-side fake as well —
+    // the protocol, and then blurs behind the client-side fake as well -
     // the wasted work is invisible under an opaque fake, but it does
     // show wherever the surface is still transparent (outside the grow
     // circle, mid-animation). A region confines it to one pixel.
     BackgroundEffect.blurRegion: Settings.bgBlur !== "compositor" ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
     // Clipped to the output, which is not cosmetic. A Region is rasterised as
-    // one span per scanline, and this ellipse is as tall as it is wide — several
-    // screens' worth by the end of the reveal — so most of the spans it costs to
+    // one span per scanline, and this ellipse is as tall as it is wide - several
+    // screens' worth by the end of the reveal - so most of the spans it costs to
     // build, commit and re-blur on every frame of the animation describe circle
     // that is nowhere near the screen. Intersecting them away lights exactly the
     // same pixels and measurably steadies the reveal: over five reveals, frame
@@ -178,7 +178,7 @@ PanelWindow {
     // 1-in-265. That matters because the edge's position error is its velocity
     // times the frame-time error, and mid-reveal it is moving ~14px per ms.
     //
-    // `intersection` goes on the *child* — it says how that region combines with
+    // `intersection` goes on the *child* - it says how that region combines with
     // its parent. On the parent it silently does nothing, the ellipse unions
     // instead, and the whole screen blurs.
     Region {
@@ -262,20 +262,20 @@ PanelWindow {
             property: "reveal"
             from: 0
             to: 1
-            // Only visible in "grow" styles — unused by "fade"/"none".
+            // Only visible in "grow" styles - unused by "fade"/"none".
             duration: Anim.launch(520)
             // Starts at moderate velocity (no ease-in dead zone where the
             // dot seems stuck, no Out-style explosion), settles gently.
             //
             // The constraint here isn't feel, it's edge travel: the radius
             // scales with this value, so peak velocity is how far the circle's
-            // edge jumps between two frames — and a hard edge stops reading as
+            // edge jumps between two frames - and a hard edge stops reading as
             // motion once that runs far past the animation's own average,
             // strobing as separate arcs instead. So what matters is the ratio of
             // peak to average, which is a property of the curve alone. The
             // previous one ([0.33, 0.15, 0.2, 1.0], its control points crossed
             // over in x) peaked at 2.53x average and then crawled its last 5%
-            // over 30% of the duration — a lurch followed by a stall. This keeps
+            // over 30% of the duration - a lurch followed by a stall. This keeps
             // the same moderate start and gentle settle at a 1.52x peak, with no
             // dead tail.
             easing.type: Easing.BezierSpline
@@ -303,7 +303,7 @@ PanelWindow {
                 // tighter one: this covers the whole radius in 320ms rather than
                 // 520, so its average is already the higher of the two. InQuad
                 // put its peak (2x average) on the very last frame, which is
-                // exactly the wrong place — the collapse skipped just as it
+                // exactly the wrong place - the collapse skipped just as it
                 // vanished. This peaks at 1.35x, mid-animation.
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: [0.4, 0.2, 0.55, 0.75, 1.0, 1.0]
@@ -332,14 +332,14 @@ PanelWindow {
     // ---------- actions ----------
     // Launch through gtk-launch (GLib): quickshell's own Exec parser
     // follows the desktop-entry spec strictly, where single quotes are
-    // not quoting characters — entries like `Exec=kitty bash -lc '...'`
+    // not quoting characters - entries like `Exec=kitty bash -lc '...'`
     // get split mid-quote and crash on startup. GLib parses shell-style
     // (like every GTK-based launcher), and also honors Path= and
     // DBusActivatable. Falls back to the entry's own execute() if
     // gtk-launch can't find the id.
     property var launchEntry: null
     // recordLaunch() bumps the entry's score, which LauncherState.matches (sorted
-    // by launchCount) reactively re-sorts on — bumping it immediately
+    // by launchCount) reactively re-sorts on - bumping it immediately
     // visibly reshuffles the grid while the close animation is still
     // fading it out. Held here and only recorded once fadeOut actually
     // hides the window (see its ScriptAction below), so the re-sort
@@ -360,7 +360,7 @@ PanelWindow {
         pendingRecordEntry = entry;
         launchEntry = entry;
         // The launched app inherits gtk-launch's stdio, i.e. this Process's
-        // pipes — which close once gtk-launch exits, so chatty apps
+        // pipes - which close once gtk-launch exits, so chatty apps
         // (flatpaks especially) would SIGPIPE on their next log line and
         // die seconds after launch. Point stdio at /dev/null and give the
         // app its own session; setsid -w keeps gtk-launch's exit code for
@@ -375,7 +375,7 @@ PanelWindow {
     // variant from, so committing it up front would retheme the whole
     // shell around a wallpaper that never reached the screen. That's the
     // reason the command runs as a tracked Process rather than an
-    // execDetached — its exit code is the deciding signal.
+    // execDetached - its exit code is the deciding signal.
     property var pendingWall: null
     property var queuedWall: null
     Process {
@@ -403,8 +403,8 @@ PanelWindow {
             }
         }
     }
-    // Commands that never exit — a foreground swaybg/mpvpaper rather than
-    // a daemon client like awww/swww — would otherwise hold the commit
+    // Commands that never exit - a foreground swaybg/mpvpaper rather than
+    // a daemon client like awww/swww - would otherwise hold the commit
     // forever. Anything that genuinely fails (missing binary, bad
     // arguments) does so in milliseconds, so a command still alive this
     // long has taken effect and is simply staying resident: commit it and
@@ -423,15 +423,15 @@ PanelWindow {
         pendingWall = wall;
         // $WALL and $BLUR are exported for the command to template with.
         // $BLUR is the cached blurred variant the scan already resolved
-        // for this wallpaper — the same image the launcher's own backdrop
+        // for this wallpaper - the same image the launcher's own backdrop
         // draws, or the user's <stem>blurred.<ext> where they've supplied
         // one. Empty until the background pass has generated it (a few
         // seconds on a cold cache, see Wallpapers' scan), which is why commands
         // that use it should guard for that.
         // setsid -w keeps this a tracked child in every way that matters
         // (it waits, and reports the command's own exit code) while giving
-        // the command its own session, so a resident setter — mpvpaper,
-        // a foreground swaybg — outlives the daemon exactly as it did
+        // the command its own session, so a resident setter - mpvpaper,
+        // a foreground swaybg - outlives the daemon exactly as it did
         // under the execDetached this replaced, instead of being torn down
         // with quickshell. Stdio goes to /dev/null for the reason spelled
         // out on appLaunch: a resident child left holding this Process's
@@ -465,7 +465,7 @@ PanelWindow {
         if (wallApply.running) {
             // a newer pick supersedes one still in flight: drop the wrapper
             // (its wallpaper is no longer the one wanted) and start the new
-            // command from onExited. Only the wrapper is signalled — a
+            // command from onExited. Only the wrapper is signalled - a
             // resident setter is off in its own session, left for the
             // user's own command to replace as it always was
             queuedWall = wall;
@@ -490,7 +490,7 @@ PanelWindow {
         // fits the thumb cap (480x640): the thumb (built with magick's
         // "only shrink if larger" >) IS the full-res image there, so
         // decoding again would just swap the Image source to identical
-        // pixels — and any source change makes QML clear the current
+        // pixels - and any source change makes QML clear the current
         // pixmap and reload async, flashing blank for no visual gain.
         const d = (clip.dims || "").split("x");
         const iw = parseInt(d[0]) || 0;
@@ -620,10 +620,10 @@ PanelWindow {
     //
     // Sized to match the surface (not just the circle) so MultiEffect
     // maps mask <-> source pixel-for-pixel instead of stretching a small
-    // texture across the whole surface — which holds for both the items
+    // texture across the whole surface - which holds for both the items
     // that mask against it, since both fill the window. Kept genuinely
     // visible (not visible: false) and layered explicitly, since an
-    // invisible item's layer never actually renders — a huge offset is
+    // invisible item's layer never actually renders - a huge offset is
     // what keeps it off the real screen instead.
     Item {
         id: growMask
@@ -653,7 +653,7 @@ PanelWindow {
         anchors.fill: parent
         opacity: 0
         // "grow" styles: clip content itself into the growing circle
-        // instead of relying on compositor blur to fake one — renders
+        // instead of relying on compositor blur to fake one - renders
         // identically on every compositor.
         layer.enabled: LauncherState.growMode
         layer.effect: MultiEffect {
@@ -677,12 +677,12 @@ PanelWindow {
                 id: backdropArea
                 anchors.fill: parent
                 property real wheelAcc: 0
-                // swipe-left/right cycles panes — same cyclePane() the
+                // swipe-left/right cycles panes - same cyclePane() the
                 // Tab/Shift+Tab keybinds drive. swipe-up/down instead
                 // pages through the current pane's grid (apps/clips/
-                // wallpaper tiles), one full page of tiles at a time — see
+                // wallpaper tiles), one full page of tiles at a time - see
                 // LauncherState.pageMove(). Over the windows wallpaper carousel's own
-                // bounds specifically (background gaps between its cells —
+                // bounds specifically (background gaps between its cells -
                 // the cells' own swipe handling is on the carousel's cell), left/right
                 // instead drags the carousel live (LauncherState.carouselDragTo()) and
                 // commits whole slots on release (LauncherState.carouselDragEnd(), a
@@ -692,7 +692,7 @@ PanelWindow {
                 //
                 // The edge swipes (power/reboot shade, swipe-to-go-back)
                 // below are tracked the exact same way, in this same
-                // MouseArea, instead of with sibling DragHandlers — a
+                // MouseArea, instead of with sibling DragHandlers - a
                 // DragHandler tried that first, but it competes with this
                 // MouseArea for the same touch grab, and on a layer-shell
                 // surface that race is genuinely unreliable: logged
@@ -702,9 +702,9 @@ PanelWindow {
                 // for no reason visible at the QML level. Mouse input
                 // never showed this because it doesn't go through the
                 // same touch grab arbitration. Routing everything through
-                // this MouseArea's own press/move/release — already
+                // this MouseArea's own press/move/release - already
                 // proven reliable for pane-cycle/page-move/carousel above
-                // — removes the race entirely instead of trying to win it.
+                // - removes the race entirely instead of trying to win it.
                 readonly property bool onCarousel: LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid"
                 property real pressX: 0
                 property real pressY: 0
@@ -713,15 +713,15 @@ PanelWindow {
                 property bool vertTracking: false
                 property bool carouselTracking: false
                 property bool edgePress: false
-                // same idea as edgePress, but the right edge specifically —
+                // same idea as edgePress, but the right edge specifically -
                 // left alone here so backTracking below can pull the
                 // swipe-to-go-back pill out instead of this being treated
                 // as a pane-cycle swipe
                 property bool rightEdgePress: false
                 // power/reboot notification-shade-style edge drag: starts
                 // once a press begins inside the top/bottom edgeSwipeZone
-                // strip, same as edgePress above, or — once a prompt is
-                // already armed — from anywhere, since at that point the
+                // strip, same as edgePress above, or - once a prompt is
+                // already armed - from anywhere, since at that point the
                 // whole screen belongs to it (dragZone gets pinned to
                 // whichever prompt is armed, ignoring where this press
                 // landed; see onPressed below)
@@ -732,7 +732,7 @@ PanelWindow {
                 // keep working while a power/reboot prompt is armed so
                 // there's always a touch-reachable way to let go of it (a
                 // tap already works via onClicked below, but the edge-back
-                // swipe is the gesture people reach for instinctively) —
+                // swipe is the gesture people reach for instinctively) -
                 // LauncherState.goBack() checks powerArmed/rebootArmed first, so a
                 // completed swipe here disarms instead of navigating.
                 property bool backTracking: false
@@ -740,7 +740,7 @@ PanelWindow {
                 onClicked: mouse => {
                     if (LauncherState.powerArmed || LauncherState.rebootArmed) {
                         // MouseArea's clicked doesn't care how far the
-                        // pointer traveled between press and release — a
+                        // pointer traveled between press and release - a
                         // horizontal swipe lands here too (the power/reboot
                         // DragHandler only tracks the y axis, so it never
                         // grabs a horizontal drag and steals it away from
@@ -766,7 +766,7 @@ PanelWindow {
                     edgePress = mouse.y <= LauncherState.edgeSwipeZone || mouse.y >= height - LauncherState.edgeSwipeZone;
                     rightEdgePress = mouse.x >= width - LauncherState.edgeSwipeZone;
                     // while a power/reboot prompt is armed, every gesture on
-                    // screen belongs to it (see powerRebootTracking below) —
+                    // screen belongs to it (see powerRebootTracking below) -
                     // pane/grid navigation and the carousel flick sit out
                     // entirely so they can't fire alongside it
                     const carousel = wallpapersPage.carousel;
@@ -778,7 +778,7 @@ PanelWindow {
                     powerRebootTracking = Settings.gesturesEnabled() && (LauncherState.promptOpen || edgePress);
                     if (powerRebootTracking) {
                         // an armed prompt pins the zone to itself regardless
-                        // of where on screen this press landed — only a
+                        // of where on screen this press landed - only a
                         // fresh, unarmed edge press still needs to look at
                         // the touch position to decide which prompt (if
                         // either) it's arming
@@ -789,7 +789,7 @@ PanelWindow {
                         LauncherState.powerDragging = LauncherState.dragZone === "top";
                         LauncherState.rebootDragging = LauncherState.dragZone === "bottom";
                         // only fold in the live raw values when actually
-                        // continuing an already-armed prompt's drag — a
+                        // continuing an already-armed prompt's drag - a
                         // fresh, unarmed edge press must start from a clean
                         // baseline. powerRaw/rebootRaw spring back to 0 over
                         // Anim.menu(320)ms on disarm (Behavior enabled once
@@ -907,7 +907,7 @@ PanelWindow {
 
         // Custom pages: one host per enabled upload. Bound to
         // Settings.uploadedPages directly (not LauncherState.orderedPages) for
-        // the same delegate-stability reason the Pages settings row is —
+        // the same delegate-stability reason the Pages settings row is -
         // membership only changes on upload/trash/disk sync, never on a pure
         // reorder.
         Repeater {
@@ -970,7 +970,7 @@ PanelWindow {
         focus: true
 
         // typing from the clock jumps into whatever's next in the cycle
-        // order — custom pages included, not just the built-in three:
+        // order - custom pages included, not just the built-in three:
         // now that a page can read pibble.searchText (see PageContext)
         // there's no reason to skip past one looking for a built-in.
         // The text itself isn't touched here; it's already sitting in
@@ -991,7 +991,7 @@ PanelWindow {
 
         Keys.onPressed: event => {
             // keybind capture (settings): record which keys are down and
-            // the latest chord name they spell, but don't save yet — the
+            // the latest chord name they spell, but don't save yet - the
             // bind only commits once every held key is released, so a
             // chord like Ctrl+S can be pressed as a whole instead of
             // firing the instant Ctrl (or S) lands.
@@ -1041,7 +1041,7 @@ PanelWindow {
                 return;
             }
             if (ks === (kb.exit ?? "Escape")) {
-                // layered: expanded clip -> settings -> whole app — see
+                // layered: expanded clip -> settings -> whole app - see
                 // LauncherState.goBack(), also used by the right-edge swipe gesture
                 LauncherState.goBack();
                 event.accepted = true;
@@ -1081,7 +1081,7 @@ PanelWindow {
         Keys.onReleased: event => {
             // keybind capture: commit the last chord seen while keys
             // were down, but only once every key of it has come back up
-            // — releasing the modifier first (or the main key first)
+            // - releasing the modifier first (or the main key first)
             // both land here, so either release order works.
             if (LauncherState.capturingBind) {
                 event.accepted = true;
@@ -1133,7 +1133,7 @@ PanelWindow {
         onTriggered: {
             LauncherState.wallpaperWarmTick = currentFrame;
             // thumbnails first (one per frame), then the pane's cells
-            // (one per frame — each ClippingRectangle is an offscreen
+            // (one per frame - each ClippingRectangle is an offscreen
             // render target and costs a chunk of frame time to create)
             if (currentFrame > Wallpapers.list.length + LauncherState.wallpaperPageSize + 4)
                 LauncherState.warmingWallpapers = false;
@@ -1147,7 +1147,7 @@ PanelWindow {
         // from the warm-up frames: show everything on the very first
         // frame. (firstFrames still runs for cache warming; the
         // zero-duration fadeIn it triggers just re-sets these same
-        // values.) Gated on noneMode, not the grid tile animStyle —
+        // values.) Gated on noneMode, not the grid tile animStyle -
         // fadeIn's duration comes from Anim.launch()/noneMode, so checking
         // animStyle here let a "none" grid style with a real launch
         // animation snap reveal/opacity to 1 for a frame and then have
@@ -1189,7 +1189,7 @@ PanelWindow {
     // app icons have warmed (LauncherState.warmedOnce), then release them one per frame
     // (LauncherState.clipWarmTick) so a batch of thumbs still can't burst the reader
     // thread ahead of the icons. Once warmed, the gate stays open and
-    // clips decode freely as their thumbs land — the icons are cached by
+    // clips decode freely as their thumbs land - the icons are cached by
     // then, so there is nothing left to starve. LauncherState.clipWarmTick is not reset
     // per open for the same reason.
     FrameAnimation {

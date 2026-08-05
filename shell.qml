@@ -1,3 +1,19 @@
+// pibble - a desktop shell for wlr-layer-shell compositors.
+// Copyright (C) 2026 Kian Blakley
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <https://www.gnu.org/licenses/>.
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -8,20 +24,19 @@ import "root:/launcher"
 import "root:/services"
 import "root:/startup"
 
-// pibble — a desktop shell for wlr-layer-shell compositors.
-//
 // This file is only the wiring: it binds the three persisted stores to disk,
 // puts up the four windows, and exposes the IPC the `pibble` script talks to.
 // Everything else lives under:
 //
 //   config/    persisted settings and what the settings UI knows about them
-//   services/  the shell's data sources — theme, wallpapers, clipboard, apps…
+//   services/  the shell's data sources - theme, wallpapers, clipboard, apps…
 //   ui/        reusable settings controls, and the custom-page contract
 //   launcher/  the launcher window, its state, and one file per pane
 //   flyouts/   the volume and notification OSDs
 //   startup/   invisible surfaces that only exist to warm caches or measure
 //
-// See CLAUDE.md for the layer rules that keep those directories acyclic.
+// Those layers only ever point one way - launcher/flyouts → ui → services →
+// config - which is what keeps the directories acyclic.
 ShellRoot {
     id: root
 
@@ -45,7 +60,7 @@ ShellRoot {
     XrayScaleProbe {}
 
     // The shell runs as a persistent daemon; the launcher window is toggled
-    // over IPC — `qs -p <repo> ipc call launcher toggle`, which is what the
+    // over IPC - `qs -p <repo> ipc call launcher toggle`, which is what the
     // `pibble` script wraps.
     IpcHandler {
         target: "launcher"
@@ -54,7 +69,7 @@ ShellRoot {
         // `pibble toggle <page>`. Closed: opens straight onto that page. Open
         // and already showing it: closes, so re-pressing the same page's
         // keybind acts like a normal toggle. Open and showing something else:
-        // switches to it and stays open — a different page's keybind reads as
+        // switches to it and stays open - a different page's keybind reads as
         // "take me there", not "close everything".
         function toggle(page: string): void {
             const target = LauncherState.resolvePageArg(page);

@@ -32,12 +32,11 @@ Singleton {
         return Quickshell.iconPath(name, true);
     }
 
-    // codepoints looked up by hand from Material Symbols' own cmap — Private
+    // codepoints looked up by hand from Material Symbols' own cmap - Private
     // Use Area codepoints carry no standard meaning outside this font.
     readonly property string sun: "\ue430"
     readonly property string cloud: "\ue2bd"
     readonly property string cloudRain: "\uf176"
-    readonly property string cloudSnow: "\ue810"
     readonly property string cloudStorm: "\uebdb"
     readonly property string snowflake: "\ued5b"
     readonly property string bolt: "\uea0b"
@@ -52,7 +51,6 @@ Singleton {
     readonly property string plus: "\uf710"
     readonly property string trash: "\ue872"
     readonly property string batteryLow: "\uf251"
-    readonly property string download: "\ue171"
     readonly property string chevronLeft: "\ue5cb"
     readonly property string chevronRight: "\ue5cc"
     readonly property string deployedCodeAlert: "\uf5f2"

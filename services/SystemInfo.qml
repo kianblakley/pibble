@@ -15,7 +15,7 @@ Singleton {
     }
 
     // Single persistent, self-cleaning cache root for everything pibble
-    // generates — separate from the source directories so deleting a wallpaper
+    // generates - separate from the source directories so deleting a wallpaper
     // or a clip scrolling past clipsMax can be detected and swept on the next
     // scan. Three directories, one per kind of generated file: thumbnails/ and
     // blurred/ (both per wallpaper, see Wallpapers) and clips/.

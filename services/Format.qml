@@ -35,7 +35,7 @@ Singleton {
     // CSS subset doesn't reliably support the rgba()/alpha-channel color
     // syntax, so translucency for the clip search highlight is faked by
     // blending toward the panel's dark surface color instead of an actual
-    // alpha channel — this always renders as a flat, well-supported #rrggbb
+    // alpha channel - this always renders as a flat, well-supported #rrggbb
     // value.
     function mixColor(a: color, b: color, t: real): string {
         return "#" + Format.mixChannel(a.r, b.r, t) + Format.mixChannel(a.g, b.g, t) + Format.mixChannel(a.b, b.b, t);

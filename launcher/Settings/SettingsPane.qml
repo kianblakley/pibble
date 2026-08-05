@@ -10,7 +10,7 @@ Item {
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -20,12 +20,12 @@ Item {
     }
 
     // built-ins first, then one slot per custom page that opts
-    // into a settings tab (see LauncherState.customSettingsTabs) — in
+    // into a settings tab (see LauncherState.customSettingsTabs) - in
     // whatever order those pages themselves loaded in
     readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
     // LauncherWindow's customPages Repeater's model is Settings.uploadedPages itself,
     // reassigned wholesale (a fresh array) on every toggle/
-    // upload/trash/rescan — since it's a plain JS-array model,
+    // upload/trash/rescan - since it's a plain JS-array model,
     // that recreates every delegate, not just the one that
     // changed. For the split of a frame that a custom tab's
     // host is mid-recreate, LauncherState.customSettingsTabs (which reads
@@ -33,7 +33,7 @@ Item {
     // resolvedTabIndex briefly goes -1. Snapping tabIndex to 0 in that
     // window used to yank every filmstrip pane (see the
     // `Behavior on x` below and the built-in tabs' copies) over
-    // to tab 0 and spring it back once the tab reappears — the
+    // to tab 0 and spring it back once the tab reappears - the
     // "settings flies across the screen" glitch. Holding the
     // last good index instead means the recreate is invisible:
     // nothing here moves until there's a real index to move to.
@@ -75,7 +75,7 @@ Item {
         // custom pages' tabs come and go as they're toggled in
         // Settings > Pages, but LauncherState.customSettingsTabs updates by
         // wholesale reassignment (see its own comment) and a plain
-        // Repeater has no enter/exit transition for that — so tab
+        // Repeater has no enter/exit transition for that - so tab
         // entries are staged here instead: a new id gets one fade-in
         // pass, a dropped id is kept around (fading out) until
         // staleTabSweep sweeps it for real. Built-in tabs are always
@@ -211,7 +211,7 @@ Item {
         // moves the pane, shorter pages stay top-aligned
         height: Math.max(generalTab.height, pagesTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
         // tallest of any custom tab's content column, recomputed
-        // whenever one loads/resizes — 0 (a no-op in the Math.max
+        // whenever one loads/resizes - 0 (a no-op in the Math.max
         // above) when there are none
         readonly property real customTabsMaxHeight: {
             let m = 0;
@@ -255,11 +255,11 @@ Item {
                 readonly property int slideIndex: root.tabOrder.indexOf(modelData.pageId)
                 x: 20 + (slideIndex - root.tabIndex) * 840
                 // a freshly-appearing tab's slideIndex starts at -1 for
-                // one tick — LauncherState.customSettingsTabs (which this
+                // one tick - LauncherState.customSettingsTabs (which this
                 // Repeater's model is) picks up the page's newly-
                 // loaded settingsTab a moment before
                 // root.tabOrder, which derives from it, has
-                // recomputed to include this pageId — so x's first
+                // recomputed to include this pageId - so x's first
                 // real value briefly parks off-screen left before
                 // jumping to its actual off-screen-right slot once
                 // slideIndex corrects. With the Behavior live for that
@@ -278,7 +278,7 @@ Item {
                 }
                 spacing: 14
 
-                // the page's own Component — declared inside its
+                // the page's own Component - declared inside its
                 // file, so it resolves `pibble`/getSetting/etc via
                 // that file's own scope, same as any other child of
                 // its root item would

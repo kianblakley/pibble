@@ -5,8 +5,8 @@ import "root:/ui"
 // One slide of the settings filmstrip. `root.slideIndex` is where this tab sits in
 // SettingsPane.tabOrder and `root.activeIndex` which slide is showing; the two
 // together are the whole of the horizontal tab transition.
-// General: the settings the launcher and both flyouts share — animations,
-// blur, type, theme — closing with the build identity.
+// General: the settings the launcher and both flyouts share - animations,
+// blur, type, theme - closing with the build identity.
 Column {
     id: root
 
