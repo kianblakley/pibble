@@ -4,31 +4,31 @@
 
 | Clock |
 |---|
-| ![Clock](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clock.png) |
+| ![Clock](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/clock.png) |
 
 | App drawer |
 |---|
-| ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/appdrawer.png) |
+| ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/appdrawer.png) |
 
 | Wallpaper selector |
 |---|
-| ![Wallpaper selector](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/wallpaperselector.png) |
+| ![Wallpaper selector](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/wallpaperselector.png) |
 
 | Clipboard history |
 |---|
-| ![Clipboard history](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/clipboardhistory.png) |
+| ![Clipboard history](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/clipboardhistory.png) |
 
 | Flyouts |
 |---|
-| ![Flyouts](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/flyouts.png) |
+| ![Flyouts](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/flyouts.png) |
 
 | Settings |
 |---|
-| ![Settings](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/settings.png) |
+| ![Settings](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/settings.png) |
 
 | Power button |
 |---|
-| ![Power button](https://raw.githubusercontent.com/kianblakley/pibble/assets/assets/powerbutton.png) |
+| ![Power button](https://raw.githubusercontent.com/kianblakley/pibble/dev/assets/powerbutton.png) |
 
 ## Installation
 
