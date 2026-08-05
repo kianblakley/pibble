@@ -1,0 +1,301 @@
+import QtQuick
+import "root:/launcher"
+import "root:/services"
+
+// The settings pane: a header of tab links over a horizontal filmstrip of
+// tab columns. Every tab is laid out at once and slid sideways rather than
+// loaded on demand, so switching tabs never reflows the pane.
+Item {
+    id: root
+
+    // Called on every launcher open. A pane keeps whatever opacity its last
+    // entrance animation ended at, so it has to be put back *before* the pane
+    // change that restarts that animation — otherwise the restart is clobbered
+    // right back to 0.004 by a reset running after it. Invisible with a real
+    // duration (the animation keeps writing opacity every frame regardless) but
+    // it leaves the pane stuck dim when the tile style is "none" and the
+    // restart completes synchronously.
+    function resetEntrance(): void {
+        root.opacity = 0.004;
+    }
+
+    // built-ins first, then one slot per custom page that opts
+    // into a settings tab (see LauncherState.customSettingsTabs) — in
+    // whatever order those pages themselves loaded in
+    readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
+    // LauncherWindow's customPages Repeater's model is Settings.uploadedPages itself,
+    // reassigned wholesale (a fresh array) on every toggle/
+    // upload/trash/rescan — since it's a plain JS-array model,
+    // that recreates every delegate, not just the one that
+    // changed. For the split of a frame that a custom tab's
+    // host is mid-recreate, LauncherState.customSettingsTabs (which reads
+    // pageItem off those delegates) loses that tab, so
+    // resolvedTabIndex briefly goes -1. Snapping tabIndex to 0 in that
+    // window used to yank every filmstrip pane (see the
+    // `Behavior on x` below and the built-in tabs' copies) over
+    // to tab 0 and spring it back once the tab reappears — the
+    // "settings flies across the screen" glitch. Holding the
+    // last good index instead means the recreate is invisible:
+    // nothing here moves until there's a real index to move to.
+    readonly property int resolvedTabIndex: tabOrder.indexOf(LauncherState.settingsTab)
+    property int tabIndex: 0
+    onResolvedTabIndexChanged: if (resolvedTabIndex >= 0)
+        tabIndex = resolvedTabIndex
+    anchors.centerIn: parent
+    width: 860
+    height: 26 + header.height + 18 + tabViewport.height + 26
+    transform: Translate {
+        y: LauncherState.powerPull - LauncherState.rebootPull
+    }
+    opacity: 0.004
+    visible: LauncherState.pane === "settings"
+    Connections {
+        target: LauncherState
+        function onPaneChanged() {
+            if (LauncherState.pane === "settings")
+                enterAnim.restart();
+        }
+    }
+    ParallelAnimation {
+        id: enterAnim
+        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: Anim.menu(200); easing.type: Easing.OutCubic }
+        NumberAnimation { target: root; property: "scale"; from: 0.9; to: 1; duration: Anim.menu(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+        NumberAnimation { target: root; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.menu(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+    }
+
+    // header: title + underlined tab links, left-aligned
+    Item {
+        id: header
+        width: 780
+        height: 58
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 26
+
+        // custom pages' tabs come and go as they're toggled in
+        // Settings > Pages, but LauncherState.customSettingsTabs updates by
+        // wholesale reassignment (see its own comment) and a plain
+        // Repeater has no enter/exit transition for that — so tab
+        // entries are staged here instead: a new id gets one fade-in
+        // pass, a dropped id is kept around (fading out) until
+        // staleTabSweep sweeps it for real. Built-in tabs are always
+        // present and never animate.
+        property var stagedTabs: [
+            { id: "general", label: "General", custom: false, phase: "in" },
+            { id: "pages", label: "Pages", custom: false, phase: "in" },
+            { id: "keybindings", label: "Navigation", custom: false, phase: "in" },
+            { id: "flyouts", label: "Flyouts", custom: false, phase: "in" }
+        ]
+        function reconcileTabs() {
+            const desired = LauncherState.customSettingsTabs;
+            const desiredLabel = {};
+            for (const t of desired)
+                desiredLabel[t.pageId] = t.label;
+            const seen = {};
+            const next = [];
+            for (const t of stagedTabs) {
+                if (!t.custom) {
+                    next.push(t);
+                    continue;
+                }
+                seen[t.id] = true;
+                if (t.id in desiredLabel)
+                    next.push({ id: t.id, label: desiredLabel[t.id], custom: true, phase: "in" });
+                else if (t.phase === "exiting")
+                    next.push(t);
+                else {
+                    next.push({ id: t.id, label: t.label, custom: true, phase: "exiting" });
+                    staleTabSweep.restart();
+                }
+            }
+            for (const t of desired) {
+                if (!seen[t.pageId])
+                    next.push({ id: t.pageId, label: t.label, custom: true, phase: "entering" });
+            }
+            stagedTabs = next;
+        }
+        Component.onCompleted: reconcileTabs()
+        Connections {
+            target: LauncherState
+            function onCustomSettingsTabsChanged() { header.reconcileTabs(); }
+        }
+        // generous over tabFadeOut's duration so a tab that just
+        // started exiting is guaranteed to have finished fading
+        Timer {
+            id: staleTabSweep
+            interval: Anim.menu(260)
+            onTriggered: {
+                const next = header.stagedTabs.filter(t => t.phase !== "exiting");
+                if (next.length !== header.stagedTabs.length)
+                    header.stagedTabs = next;
+            }
+        }
+
+        Text {
+            text: "SETTINGS"
+            color: Theme.muted
+            font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13); letterSpacing: 3 }
+        }
+        Row {
+            anchors.bottom: parent.bottom
+            spacing: 26
+
+            Repeater {
+                model: header.stagedTabs
+
+                Item {
+                    id: tabLink
+                    required property var modelData
+                    readonly property bool active: LauncherState.settingsTab === modelData.id
+                    width: tabLinkText.implicitWidth
+                    height: 24
+                    opacity: modelData.phase === "entering" ? 0 : 1
+
+                    Component.onCompleted: {
+                        if (modelData.phase === "entering")
+                            tabFadeIn.start();
+                        else if (modelData.phase === "exiting")
+                            tabFadeOut.start();
+                    }
+                    NumberAnimation {
+                        id: tabFadeIn
+                        target: tabLink
+                        property: "opacity"
+                        to: 1
+                        duration: Anim.menu(220)
+                        easing.type: Easing.OutCubic
+                    }
+                    NumberAnimation {
+                        id: tabFadeOut
+                        target: tabLink
+                        property: "opacity"
+                        to: 0
+                        duration: Anim.menu(220)
+                        easing.type: Easing.OutCubic
+                    }
+
+                    Text {
+                        id: tabLinkText
+                        text: tabLink.modelData.label
+                        color: tabLink.active ? Theme.fg : Theme.muted
+                        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
+                    }
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 2
+                        radius: 1
+                        color: Theme.accent
+                        opacity: tabLink.active ? 1 : 0
+                        Behavior on opacity {
+                            NumberAnimation { duration: Anim.menu(150); easing.type: Easing.OutCubic }
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: LauncherState.settingsTab = tabLink.modelData.id
+                    }
+                }
+            }
+        }
+    }
+
+    Item {
+        id: tabViewport
+        clip: true
+        width: 820
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: header.bottom
+        anchors.topMargin: 18
+        // constant height (tallest page): switching tabs never
+        // moves the pane, shorter pages stay top-aligned
+        height: Math.max(generalTab.height, pagesTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
+        // tallest of any custom tab's content column, recomputed
+        // whenever one loads/resizes — 0 (a no-op in the Math.max
+        // above) when there are none
+        readonly property real customTabsMaxHeight: {
+            let m = 0;
+            for (let i = 0; i < customTabs.count; i++) {
+                const c = customTabs.itemAt(i);
+                if (c)
+                    m = Math.max(m, c.height);
+            }
+            return m;
+        }
+
+
+        GeneralTab {
+            id: generalTab
+            slideIndex: 0
+            activeIndex: root.tabIndex
+        }
+        PagesTab {
+            id: pagesTab
+            slideIndex: 1
+            activeIndex: root.tabIndex
+        }
+        NavigationTab {
+            id: navigationTab
+            slideIndex: 2
+            activeIndex: root.tabIndex
+        }
+        FlyoutsTab {
+            id: flyoutsTab
+            slideIndex: 3
+            activeIndex: root.tabIndex
+        }
+
+        Repeater {
+            id: customTabs
+            model: LauncherState.customSettingsTabs
+
+            Column {
+                id: customTab
+                required property var modelData
+                readonly property int slideIndex: root.tabOrder.indexOf(modelData.pageId)
+                x: 20 + (slideIndex - root.tabIndex) * 840
+                // a freshly-appearing tab's slideIndex starts at -1 for
+                // one tick — LauncherState.customSettingsTabs (which this
+                // Repeater's model is) picks up the page's newly-
+                // loaded settingsTab a moment before
+                // root.tabOrder, which derives from it, has
+                // recomputed to include this pageId — so x's first
+                // real value briefly parks off-screen left before
+                // jumping to its actual off-screen-right slot once
+                // slideIndex corrects. With the Behavior live for that
+                // correction, it animates the whole ~4200px hop,
+                // sweeping straight through the visible viewport
+                // (the "page content flying across the screen" bug).
+                // Qt.callLater defers arming the Behavior past that
+                // initial settle, so only genuine later tab switches
+                // (root.tabIndex changing, not this one-time
+                // slideIndex correction) animate.
+                property bool animateX: false
+                Component.onCompleted: Qt.callLater(() => customTab.animateX = true)
+                Behavior on x {
+                    enabled: customTab.animateX
+                    NumberAnimation { duration: Anim.menu(420); easing.type: Easing.OutCubic }
+                }
+                spacing: 14
+
+                // the page's own Component — declared inside its
+                // file, so it resolves `pibble`/getSetting/etc via
+                // that file's own scope, same as any other child of
+                // its root item would
+                Loader {
+                    sourceComponent: customTab.modelData.component
+                }
+            }
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        propagateComposedEvents: true
+        onPressed: mouse => {
+            if (LauncherState.capturingBind)
+                LauncherState.cancelCapture();
+            mouse.accepted = false;
+        }
+    }
+}
