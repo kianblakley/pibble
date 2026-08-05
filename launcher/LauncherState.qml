@@ -687,13 +687,13 @@ Singleton {
     // Release: dx/vx (total drag distance, release velocity px/s,
     // signed) decide how many whole slots to commit — a slow short drag
     // moves roughly one slot; a fast flick carries further, as if the
-    // released velocity kept translating the strip for another ~150ms,
+    // released velocity kept translating the strip for another ~280ms,
     // same feel as a native flick-scroll. Whatever slot the live drag
     // landed on mid-step eases the rest of the way there (or back to the
     // start, if the drag didn't carry far enough to commit) once the
     // Behavior above is re-enabled.
     function carouselDragEnd(dx: real, vx: real) {
-        const carried = Math.abs(dx) + Math.abs(vx) * 0.15;
+        const carried = Math.abs(dx) + Math.abs(vx) * 0.28;
         if (carried >= 24) {
             const steps = Math.max(1, Math.round(carried / root.carouselSlotSpacing));
             moveCarousel((dx < 0 ? 1 : -1) * steps);
