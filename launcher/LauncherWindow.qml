@@ -168,13 +168,31 @@ PanelWindow {
     // show wherever the surface is still transparent (outside the grow
     // circle, mid-animation). A region confines it to one pixel.
     BackgroundEffect.blurRegion: Settings.bgBlur !== "compositor" ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
+    // Clipped to the output, which is not cosmetic. A Region is rasterised as
+    // one span per scanline, and this ellipse is as tall as it is wide — several
+    // screens' worth by the end of the reveal — so most of the spans it costs to
+    // build, commit and re-blur on every frame of the animation describe circle
+    // that is nowhere near the screen. Intersecting them away lights exactly the
+    // same pixels and measurably steadies the reveal: over five reveals, frame
+    // time went from 1.28ms to 0.77ms sd and frames over 10ms from 10-in-265 to
+    // 1-in-265. That matters because the edge's position error is its velocity
+    // times the frame-time error, and mid-reveal it is moving ~14px per ms.
+    //
+    // `intersection` goes on the *child* — it says how that region combines with
+    // its parent. On the parent it silently does nothing, the ellipse unions
+    // instead, and the whole screen blurs.
     Region {
         id: growRegion
-        shape: RegionShape.Ellipse
-        x: LauncherState.originX - LauncherState.revealBlurDiameter / 2
-        y: LauncherState.originY - LauncherState.revealBlurDiameter / 2
-        width: LauncherState.revealBlurDiameter
-        height: LauncherState.revealBlurDiameter
+        width: LauncherState.screenWidth
+        height: LauncherState.screenHeight
+        Region {
+            intersection: Intersection.Intersect
+            shape: RegionShape.Ellipse
+            x: LauncherState.originX - LauncherState.revealBlurDiameter / 2
+            y: LauncherState.originY - LauncherState.revealBlurDiameter / 2
+            width: LauncherState.revealBlurDiameter
+            height: LauncherState.revealBlurDiameter
+        }
     }
     Region {
         id: fadeBlurRegion

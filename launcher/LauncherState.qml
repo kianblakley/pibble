@@ -68,20 +68,23 @@ Singleton {
     // protocol treats as blur-the-whole-surface — a full-screen blur flash.
     readonly property int revealDiameter: Math.max(1, Math.ceil(2 * root.maxRevealRadius * root.reveal))
     // What the compositor blur region asks for (see LauncherWindow's
-    // growRegion), deliberately smaller than the circle the mask draws. The mask
-    // cuts content at the exact geometric edge, but the region is rasterised
-    // outward — so at equal diameters the region pokes out from under the
-    // content as a ring of blurred, saturated backdrop wearing none of the
-    // launcher's dim. That reads as a bright rim riding the edge, and it is what
-    // made the reveal look like it was stepping rather than moving.
+    // growRegion), deliberately smaller than the circle the mask draws. At equal
+    // diameters the region pokes out from under the content as a ring of
+    // blurred, saturated backdrop wearing none of the launcher's dim, which
+    // reads as a bright rim riding the edge.
     //
-    // The overshoot measured proportional to the radius (~0.13% of it), not a
-    // fixed pixel or two, which is why a constant inset only cleaned up the
-    // small end of the animation: 0.4% of the diameter, with a ~3x margin over
-    // what was measured, plus 2px for the plain integer rounding on top. Small
-    // enough that the unblurred sliver it trades for stays under notice — a few
-    // pixels wide mid-animation, and off-screen entirely by the time the circle
-    // is at full size.
+    // The two are not the same circle even though they share a diameter: the
+    // region is a true ellipse, while the mask is a Rectangle whose `radius`
+    // Qt tessellates at a capped 18 segments a corner — a 72-gon, inscribed, so
+    // it sits ~0.1% of the radius *inside* nominal at each segment's midpoint.
+    // (Measured: an isolated Rectangle circle's edge has a dominant 72-per-
+    // revolution harmonic, and its area is short of a true disc by the 0.13% a
+    // 72-gon predicts.) That is a proportional error, not a fixed pixel or two,
+    // which is why a constant inset only ever cleaned up the small end of the
+    // animation. 0.4% of the diameter gives a ~3x margin over it, plus 2px for
+    // integer rounding. Small enough that the unblurred sliver it trades for
+    // stays under notice — a few pixels mid-animation, and off-screen entirely
+    // by the time the circle is at full size.
     readonly property int revealBlurDiameter: Math.max(1, root.revealDiameter - Math.ceil(root.revealDiameter * 0.004) - 2)
 
     // Raised for the things that need the window's own item tree or a child
