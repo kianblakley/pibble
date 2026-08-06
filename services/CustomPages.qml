@@ -35,7 +35,17 @@ Singleton {
     // import the launcher it feeds.
     signal discovered(var addedIds)
 
-    function rescan(): void {
+    // `enableNew` is what the Pages tab's own picker passes: a page the user
+    // just went and chose arrives switched on, where one dropped into
+    // custom-pages behind pibble's back still arrives unchecked. Sticky until
+    // a scan actually completes rather than cleared by the next rescan, since
+    // the Pages tab rescans on a timer while it's open and would otherwise
+    // wipe the intent (and cancel the in-flight scan) a moment after the copy
+    // set it.
+    property bool enableAdded: false
+    function rescan(enableNew: bool): void {
+        if (enableNew)
+            enableAdded = true;
         scan.running = false;
         scan.running = true;
     }
@@ -81,13 +91,17 @@ Singleton {
                 const existing = Settings.uploadedPages ?? [];
                 const stillPresent = existing.filter(u => foundNames.includes(u.filename));
                 const knownNames = stillPresent.map(u => u.filename);
+                const enableNew = root.enableAdded;
+                root.enableAdded = false;
                 const added = found.filter(e => !knownNames.includes(e.name)).map(e => ({
                     id: "folder:" + e.name,
                     label: e.name,
                     filename: e.name,
                     broken: e.kind === "X",
                     path: root.dir + "/" + e.name,
-                    on: false
+                    // a broken folder has nothing to load, so it stays off
+                    // however it arrived - same rule toggleUploadedPage keeps
+                    on: enableNew && e.kind !== "X"
                 }));
                 const merged = stillPresent.concat(added);
                 if (JSON.stringify(merged) !== JSON.stringify(existing)) {
@@ -110,7 +124,9 @@ Singleton {
                     // only fire once each - same as a real page, this
                     // fires off `added`, not off however many broken rows
                     // still exist on every later rescan.
-                    const goodAdded = added.filter(u => !u.broken);
+                    // only the ones that arrived unchecked: a page the picker
+                    // just switched on has nothing left to go and enable
+                    const goodAdded = added.filter(u => !u.broken && !u.on);
                     const brokenAdded = added.filter(u => u.broken);
                     if (goodAdded.length && Settings.alertEnabled("actions")) {
                         const body = goodAdded.length === 1

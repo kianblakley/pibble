@@ -139,9 +139,9 @@ Item {
     // copies the folder picked via the "add a page" row
     // into pibble/custom-pages (gitignored, since it's
     // user content, not shell code) and rescans - the
-    // row shows up unchecked once the scan picks the
-    // new folder up, the same path an outside drag-
-    // and-drop into that folder would take. Kept under
+    // same path an outside drag-and-drop into that
+    // folder takes, except that the row it produces
+    // arrives already checked. Kept under
     // its own name (not stamped with a timestamp)
     // unless that name's already taken, in which case
     // it gets the usual "name (2)" treatment instead of
@@ -182,8 +182,10 @@ Item {
     Process {
         id: folderCopy
         onExited: exitCode => {
+            // enabled on arrival: picking a folder here is already the user
+            // saying they want the page (see CustomPages.rescan)
             if (exitCode === 0)
-                CustomPages.rescan();
+                CustomPages.rescan(true);
         }
     }
     Process {

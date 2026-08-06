@@ -277,6 +277,17 @@ PanelWindow {
         }
         LauncherState.customSettingsTabs = tabs;
     }
+    // A page *leaving* never goes through a host's onLoaded: trashing its row
+    // or switching it off just destroys the delegate (or its Loader's item),
+    // so without this its tab outlived it until the next daemon start. Every
+    // one of those paths writes uploadedPages, and the delegates are still
+    // standing when it changes, hence the deferred call.
+    Connections {
+        target: Settings
+        function onUploadedPagesChanged(): void {
+            Qt.callLater(root.syncSettingsTabs);
+        }
+    }
 
 
     anchors {
