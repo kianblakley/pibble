@@ -62,7 +62,39 @@ PanelWindow {
         // its own backingWindowVisible guard and the map fires it as before.
         if (root.shown)
             root.startReveal();
+        else
+            root.syncScreen(); // a monitor switch while it was open, deferred to here
     }
+    // Which output the launcher maps onto: the one the compositor says is
+    // focused, so `pibble toggle` opens on the monitor being used rather than
+    // always on the first one (see ActiveOutput for how that's asked, and what
+    // it falls back to on a compositor that can't be).
+    //
+    // Only ever changed while the launcher is down. A layer surface's output is
+    // fixed when it's created, so assigning this destroys and remaps the window
+    // - the same teardown the `visible: true` note above is about, and mid-open
+    // it would be a visible one. A focus change while the launcher is up is
+    // therefore picked up on the next close, and the open it would have
+    // interrupted plays out on the output it started on.
+    screen: root.mappedScreen
+    // Seeded as a binding so the very first map already lands on the right
+    // output; syncScreen() replaces it with a plain value from then on, and is
+    // called once at startup (before anything can open) so the binding can't
+    // outlive the first real open.
+    property var mappedScreen: ActiveOutput.screen
+    function syncScreen(): void {
+        if (root.shown || !ActiveOutput.screen)
+            return;
+        root.mappedScreen = ActiveOutput.screen;
+    }
+    Connections {
+        target: ActiveOutput
+
+        function onScreenChanged(): void {
+            root.syncScreen();
+        }
+    }
+
     // Keeps the xray bake keyed on the output the launcher actually mapped
     // onto; Wallpapers falls back to the primary screen until this resolves.
     onScreenChanged: if (root.screen)
@@ -1314,6 +1346,7 @@ PanelWindow {
 
     Component.onCompleted: {
         input.forceActiveFocus();
+        syncScreen();
         startReveal();
     }
 }

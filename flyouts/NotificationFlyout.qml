@@ -70,6 +70,8 @@ Scope {
                 ColorAnimation { duration: 220 }
             }
 
+            // seeded here, then owned by fire() from the first card on
+            screen: ActiveOutput.screen
             visible: phase !== "hidden"
             anchors.top: true
             anchors.right: true
@@ -170,6 +172,14 @@ Scope {
             function fire(n) {
                 snapshot(n);
                 exitDir = 0;
+                // onto whichever monitor is in use. Only ever while the window
+                // is unmapped (phase is "hidden" for as long as it is, and this
+                // is the only thing that leaves it): a layer surface's output
+                // is fixed when it's created, so a card already on screen -
+                // including one being replaced in place by a same-app arrival,
+                // which never comes through here - stays where it is.
+                if (phase === "hidden" && ActiveOutput.screen)
+                    window.screen = ActiveOutput.screen;
                 phase = "appear";
                 phaseTimer.restart();
             }

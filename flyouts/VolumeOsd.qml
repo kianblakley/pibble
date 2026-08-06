@@ -43,6 +43,14 @@ Scope {
             return;
         leaving = false;
         if (!show) {
+            // onto whichever monitor is in use, and only ever while the window
+            // is still unmapped: a layer surface's output is fixed when it's
+            // created, so this can only move between showings. (Also what
+            // breaks the seeding binding on window.screen, before the first
+            // map, so a monitor switch mid-OSD can't remap it out from under
+            // the animation.)
+            if (ActiveOutput.screen)
+                window.screen = ActiveOutput.screen;
             show = true;
             // entered flips a tick later so the first frame renders the
             // hidden pose and the entry actually animates
@@ -79,6 +87,8 @@ Scope {
         id: window
         readonly property string mode: Settings.volAnim
         readonly property bool eq: Settings.volStyle !== "pill"
+        // seeded here, then owned by ping() from the first showing on
+        screen: ActiveOutput.screen
         visible: root.show || root.leaving
         anchors.bottom: true
         implicitWidth: Settings.volWidth + 8

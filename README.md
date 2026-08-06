@@ -82,6 +82,20 @@ Run `./pibble help` (or `./pibble` with no arguments) for the full command list 
 | `Ctrl+S` | Open settings |
 | `Escape` | Close the launcher |
 
+## Multiple monitors
+
+The launcher, the notification flyout and the volume OSD all follow the monitor you are actually using: each one maps onto whichever output your compositor says is focused at the moment it opens, and stays there until it closes. Nothing to configure.
+
+Asking which output is focused is compositor-specific, so it works where pibble knows how to ask:
+
+| Compositor | How |
+|---|---|
+| Niri | `$NIRI_SOCKET` event stream |
+| Hyprland | Quickshell's Hyprland IPC |
+| Sway | Quickshell's sway/i3 IPC (`$SWAYSOCK`) |
+| COSMIC, Wayfire, labwc… | `ext-workspace-v1`, wherever it's implemented - follows workspace switches, so it can lag a focus change that doesn't switch workspace |
+| Anything else | Falls back to the primary output, i.e. the behaviour before any of this |
+
 ## Namespaces
 
 Each window has a layer-shell namespace which can be used to apply background effects in your compositor's configuration file.

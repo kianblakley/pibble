@@ -372,6 +372,16 @@ Singleton {
     // is minutes of pointless work - but it always resolves, to 1 if the
     // measurement can't be made.
     property real xrayOutputScale: 0
+    // Every output measured so far, by name. The launcher follows the
+    // compositor's focused output (see LauncherWindow.syncScreen), so `screen`
+    // changes whenever it opens on a different monitor - and a different output
+    // can have a different fractional scale, which is the unit xraySigma is
+    // expressed in, so the measurement has to be made again there. Remembering
+    // it per output is what keeps moving *back* free: an unmeasured output
+    // spends a probe (~500ms) with the backdrop dropped to the live-blur
+    // fallback, since a scale of 0 is also what holds the bake back.
+    property var xrayOutputScales: ({})
+    onScreenChanged: root.xrayOutputScale = (root.screen ? root.xrayOutputScales[root.screen.name] : 0) ?? 0
     // the blur as it applies to the baked image rather than to the screen:
     // output pixels -> logical pixels -> the quarter-size image. 0 while the
     // scale is unknown, which is what holds the bake back.
@@ -416,16 +426,29 @@ Singleton {
     // pixels, which is exactly right on an unscaled output.
     readonly property bool xrayScaleWanted: (Settings.bgBlur === "xray" || Settings.wallCommand.includes("$BLUR"))
         && root.xrayOutputScale === 0 && root.screen !== null
-    function setXrayOutputScale(s) {
+    // `output` is the name of the output the measurement was taken on, which is
+    // not necessarily the one in use by the time it lands: the probe settles on
+    // a debounce (see XrayScaleProbe), and the launcher can move to another
+    // monitor inside that window.
+    function setXrayOutputScale(s, output) {
         // a bad measurement (a surface that never mapped, a screen that
         // resized mid-measure) must still resolve to something, or nothing
         // would ever bake
-        root.xrayOutputScale = s > 0.1 ? s : 1;
+        const scale = s > 0.1 ? s : 1;
+        // mutated in place deliberately - nothing binds to the map, it is only
+        // ever read back on a screen change
+        if (output)
+            root.xrayOutputScales[output] = scale;
+        // a measurement for an output that is no longer the one in use is worth
+        // filing but not applying; the probe is already re-running against the
+        // current one, and adopting this would bake the folder at its sigma
+        if (!output || !root.screen || output === root.screen.name)
+            root.xrayOutputScale = scale;
     }
     Timer {
         id: xrayScaleTimeout
         interval: 3000
         running: root.xrayScaleWanted
-        onTriggered: root.setXrayOutputScale(1)
+        onTriggered: root.setXrayOutputScale(1, root.screen ? root.screen.name : "")
     }
 }
