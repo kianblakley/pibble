@@ -42,6 +42,9 @@ PanelWindow {
     // 5120x2160 growMask layer.
     //
     // Worth knowing on a box that also wants its VRAM for something else.
+    //
+    // Assigned false for one beat by syncScreen(), which is the only thing that
+    // ever unmaps this - see there for why a monitor switch has to.
     visible: true
     // Mapped but closed: the surface exists only to hold its own scene graph,
     // so it has to behave as if it were not there at all - see the
@@ -71,11 +74,14 @@ PanelWindow {
     // it falls back to on a compositor that can't be).
     //
     // Only ever changed while the launcher is down. A layer surface's output is
-    // fixed when it's created, so assigning this destroys and remaps the window
+    // fixed when it's created, so moving output destroys and remaps the window
     // - the same teardown the `visible: true` note above is about, and mid-open
     // it would be a visible one. A focus change while the launcher is up is
     // therefore picked up on the next close, and the open it would have
     // interrupted plays out on the output it started on.
+    //
+    // Never assigned directly for the same reason; syncScreen() is what moves
+    // it, and it moves in two steps.
     screen: root.mappedScreen
     // Seeded as a binding so the very first map already lands on the right
     // output; syncScreen() replaces it with a plain value from then on, and is
@@ -85,7 +91,56 @@ PanelWindow {
     function syncScreen(): void {
         if (root.shown || !ActiveOutput.screen)
             return;
+        if (root.mappedScreen === ActiveOutput.screen) {
+            // Already there, so nothing to remap - but the assignment still
+            // has to happen, since a plain assignment is what drops the seed
+            // binding whether or not the value changes, and the startup call
+            // is here for exactly that.
+            root.mappedScreen = ActiveOutput.screen;
+            return;
+        }
+        // Unmapped first, and the new output taken on a later tick, rather than
+        // assigned straight over the top. Assigning `screen` alone builds the
+        // new wl_surface *before* it tears the old one down, and the two
+        // overlapping is what loses compositor blur across a monitor switch:
+        // Quickshell's BackgroundEffect holds one ext_background_effect_surface
+        // per attached window and only makes a new one when it is holding none,
+        // so on the overlap it either keeps the one bound to the dying surface
+        // (no protocol object for the new one, ever) or makes one and then has
+        // the old surface's teardown destroy it. Either way the region requests
+        // land nowhere and the launcher opens unblurred until the daemon is
+        // restarted. Unmapping first means the old surface is gone - and the
+        // effect object with it - before the new one exists, which is the case
+        // Quickshell does handle.
+        //
+        // The scene graph this drops is the same one the `screen` assignment
+        // would have dropped anyway (a new surface means a new backing window
+        // either way), so it costs a rebuild that was already being paid, off
+        // screen, with the launcher closed.
+        root.visible = false;
+        remap.restart();
+    }
+    // The gap the unmap needs: Qt destroys the wl_surface off the event loop,
+    // not inside setVisible, so the new output has to be taken after that has
+    // had a chance to run. Any interval does, since it only has to be a later
+    // tick - kept short because the window is unmapped for the whole of it.
+    Timer {
+        id: remap
+        interval: 16
+        onTriggered: root.finishRemap()
+    }
+    function finishRemap(): void {
         root.mappedScreen = ActiveOutput.screen;
+        root.visible = true;
+    }
+    // An open() landing inside that gap must not open onto an unmapped window,
+    // so it takes the pending remap immediately instead of waiting out the
+    // timer. A no-op the rest of the time, when there is no remap in flight.
+    function flushRemap(): void {
+        if (!remap.running)
+            return;
+        remap.stop();
+        root.finishRemap();
     }
     Connections {
         target: ActiveOutput
@@ -117,6 +172,7 @@ PanelWindow {
 
     function open(targetPane: string): void {
         fadeOut.stop(); // reopening mid-dismiss is allowed
+        root.flushRemap();
         root.resetState(targetPane);
         root.shown = true;
         input.forceActiveFocus();
@@ -312,6 +368,7 @@ PanelWindow {
     // back exactly where the exit animation left off instead of at the
     // home pane
     function reopenAfterDialog(): void {
+        root.flushRemap();
         LauncherState.exiting = false;
         root.revealStarted = false;
         LauncherState.reveal = 0;
