@@ -30,6 +30,32 @@ export_icon_theme() {
     [ -n "$theme" ] && export QS_ICON_THEME="$theme"
 }
 
+# Same problem as export_icon_theme, for fonts: an empty Settings.fontFamily
+# ("system default") just leaves Qt's font.family unset, and a bare
+# layer-shell client doesn't reliably get the desktop portal's font settings
+# the way a normal session app would, so it falls back to fontconfig's raw
+# per-request matching instead of one coherent system font. Read GTK's
+# monospace font here instead and hand it to Theme.fontFamily as the
+# fallback when no explicit choice is set.
+export_font_family() {
+    shell_id=$(printf '%s' "$repo/shell.qml" | md5sum | cut -d' ' -f1)
+    settings="$HOME/.local/state/quickshell/by-shell/$shell_id/settings.json"
+    font=$(sed -n 's/.*"fontFamily": *"\([^"]*\)".*/\1/p' "$settings" 2>/dev/null | head -1)
+    if [ -z "$font" ]; then
+        font=$(gsettings get org.gnome.desktop.interface monospace-font-name 2>/dev/null | tr -d "'")
+        # gsettings' value usually carries a trailing point size ("JetBrains
+        # Mono 11"), but not always (a name-only value is valid too) -
+        # Theme.fontFamily wants a bare family name, so only strip the last
+        # word if it's actually a number
+        last="${font##* }"
+        case "$last" in
+        '' | *[!0-9]*) ;;
+        *) font="${font% *}" ;;
+        esac
+    fi
+    [ -n "$font" ] && export QS_FONT_FAMILY="$font"
+}
+
 # Native dialogs (e.g. the settings file picker) only route through
 # xdg-desktop-portal - showing the user's actual configured picker instead
 # of Qt's generic built-in QML fallback - if told to via this platform
@@ -144,6 +170,7 @@ start)
     # never start a second daemon
     running_pids >/dev/null && exit 0
     export_icon_theme
+    export_font_family
     export_native_dialogs
     export_render_loop
     exec qs -p "$repo"
@@ -159,6 +186,7 @@ restart)
         sleep 0.1
     done
     export_icon_theme
+    export_font_family
     export_native_dialogs
     export_render_loop
     setsid -f qs -p "$repo" >/dev/null 2>&1
@@ -173,6 +201,7 @@ toggle)
     # daemon not running: start it, then retry through the same toggle call
     # so a page argument still lands on the freshly-opened launcher
     export_icon_theme
+    export_font_family
     export_native_dialogs
     export_render_loop
     setsid -f qs -p "$repo" >/dev/null 2>&1

@@ -81,7 +81,12 @@ Singleton {
     // card surface behind both flyouts
     readonly property color flyoutSurface: "#0c0c10"
 
-    readonly property string fontFamily: Settings.fontFamily
+    // "" (system default) falls back to the GTK monospace font the `pibble`
+    // script resolved into QS_FONT_FAMILY at startup (see export_font_family) -
+    // Qt's own font.family: "" resolution isn't reliable in a bare
+    // layer-shell session, the same problem export_icon_theme works around
+    // for icons.
+    readonly property string fontFamily: Settings.fontFamily || Quickshell.env("QS_FONT_FAMILY") || ""
 
     function fontSize(px: int): int {
         return Math.round(px * Settings.fontScale);
