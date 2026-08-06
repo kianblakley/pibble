@@ -63,10 +63,14 @@ PanelWindow {
         // instead. A no-op the rest of the time: on the unmapped path the
         // window has not mapped yet at this point, so startReveal() bails on
         // its own backingWindowVisible guard and the map fires it as before.
-        if (root.shown)
+        if (root.shown) {
             root.startReveal();
-        else
+        } else {
+            // arm the flush that gets this close's surface state committed (see
+            // idleFlushTicks)
+            root.idleFlushTicks = 0;
             root.syncScreen(); // a monitor switch while it was open, deferred to here
+        }
     }
     // Which output the launcher maps onto: the one the compositor says is
     // focused, so `pibble toggle` opens on the monitor being used rather than
@@ -175,6 +179,23 @@ PanelWindow {
         root.flushRemap();
         root.resetState(targetPane);
         root.shown = true;
+        // Reopening mid-dismiss is the one path where `shown` is already true
+        // here, so the assignment above is a no-op and onShownChanged - the
+        // only thing that starts the reveal now that the surface stays mapped -
+        // never fires. Left to that alone, the launcher sat open (exclusive
+        // keyboard focus, no input mask, so it swallowed every key and click)
+        // with reveal and content.opacity both parked at the 0 resetState just
+        // put them at, drawing nothing at all. The one thing still visible was
+        // the compositor blur region, which is only off while surfaceIdle: at
+        // reveal 0 it sits at its 1px floor, leaving one blurred
+        // wallpaper-coloured pixel at the reveal origin (measured (22,0,55)
+        // against a (29,29,29) desktop, in the corner under grow-top-left) for
+        // as long as the invisible launcher stayed "open" - and it stayed open
+        // until the user pressed the keybind again, having seen nothing happen.
+        // Calling it here covers that; the guard inside
+        // makes it a no-op on the ordinary path, where onShownChanged has
+        // already run it.
+        root.startReveal();
         input.forceActiveFocus();
         // fresh data per open: the clipboard and the wallpaper folder both
         // change between opens
@@ -347,10 +368,41 @@ PanelWindow {
         // (measured: (193,129,60) against a (29,29,32) desktop). Out here the
         // compositor clips it away entirely while the client still speaks the
         // protocol, which is the only thing the region was ever for.
-        x: -8
+        //
+        // The `x` jitter is the resend described below; -8 and -9 are equally
+        // off the surface, so it only exists to make the region change.
+        x: -8 - (root.idleFlushTicks % 2)
         y: -8
         width: 1
         height: 1
+    }
+    // Asking once, at the moment the launcher closes, does not reliably land.
+    // The blur region is double-buffered surface state (ext-background-effect:
+    // "applied on the next wl_surface.commit"), and a close is the one moment
+    // with no next frame: `shown` is cleared by a ScriptAction in the same
+    // animation tick that draws the collapse's last frame, and a mapped-but-idle
+    // surface - which this now is for the rest of the daemon's life, rather than
+    // unmapping - never renders again on its own. So the switch to noBlurRegion
+    // above sometimes never reached the compositor, which then went on blurring
+    // whatever it had a frame earlier: a ~15px quarter-disc of wallpaper sitting
+    // at the reveal origin (a dot in the corner under grow-top-left, in the
+    // middle of the screen under grow-center) until the next open, which is the
+    // only thing that made the surface draw again. Measured 2-3 in every 25
+    // closes; "fade" and "none" have no collapse to shrink it, so what they can
+    // strand is the whole screen's worth.
+    //
+    // Asking again on each of the next few frames fixes it: 0 in 25 closes with
+    // four resends, which is margin - the failures only ever missed by a frame.
+    // Nothing here is ever on screen and the region itself never changes shape;
+    // it is the same 1px sliver, moved a pixel sideways to make Quickshell
+    // re-send it. The same beat also carries the input mask and the
+    // keyboard-focus mode, which are double-buffered for the same reason.
+    property int idleFlushTicks: 0
+    Timer {
+        interval: 16
+        repeat: true
+        running: root.surfaceIdle && root.idleFlushTicks < 4
+        onTriggered: root.idleFlushTicks++
     }
     // ---------- exit / intro ----------
     function exit(): void {
@@ -374,6 +426,11 @@ PanelWindow {
         LauncherState.reveal = 0;
         content.opacity = 0;
         root.shown = true;
+        // Same reason as in open(): the dialog is only handed the screen once
+        // the exit animation has finished, so this normally reopens a closed
+        // launcher - but a toggle while the dialog held it leaves `shown`
+        // already true, and then nothing else would replay the entrance.
+        root.startReveal();
         input.forceActiveFocus();
     }
 

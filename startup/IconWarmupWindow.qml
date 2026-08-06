@@ -37,8 +37,22 @@ Scope {
             WlrLayershell.namespace: "pibble-warmup"
             mask: Region {} // click-through, takes no input
 
+            // Held off the window rather than filling it. These are 1px icons,
+            // but they are 1px of *drawn icon* in the top-left corner of the
+            // screen: one bright dot (measured (207,94,213) against a (29,29,29)
+            // desktop) for the first 30 seconds of every daemon run, which is
+            // exactly the window `pibble toggle` opens in when the toggle was
+            // what started the daemon. Nothing here needs to be on screen - the
+            // decode is what is being paid for, and that happens as soon as the
+            // items have a window and a source, wherever they sit. Kept visible
+            // and full-strength (an offset, not `visible: false` or a near-zero
+            // opacity) so nothing about how they load changes; the same
+            // dodge growMask uses in LauncherWindow.
             Item {
-                anchors.fill: parent
+                x: -100000
+                y: -100000
+                width: 1
+                height: 1
                 Repeater {
                     model: Apps.warmOrder
                     Image {
