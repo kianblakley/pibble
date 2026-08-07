@@ -1409,8 +1409,30 @@ PanelWindow {
     // Pre-decode app icons and wallpaper thumbnails while idle, so the
     // drawer's first appearance doesn't stall on cold image loads. The
     // sources/sourceSizes match the visible tiles exactly for cache hits.
+    //
+    // Held off the window rather than at its origin. These are 1px items, but
+    // with preload on they now render for the daemon's whole life, and 1px of
+    // *drawn icon* in the top-left corner of an idle surface is a visible dot.
+    // Nothing here needs to be on screen - building the items is the point -
+    // so they sit where growMask sits.
     Item {
-        visible: LauncherState.warmingApps
+        x: -100000
+        y: -100000
+        // `visible` is what gets an item's scene-graph nodes built and its
+        // textures uploaded; merely existing does nothing, which is why the
+        // surface staying mapped (preload) doesn't warm anything on its own.
+        // Gated on warmingApps alone, this whole 170-item tree was therefore
+        // built on the first open's second frame: a measured 72ms stall
+        // landing between the toggle and the reveal, so the first open started
+        // its animation at +71ms against +2-18ms for every one after it.
+        // Built at daemon start instead, where the same work is invisible, the
+        // first open starts at +5ms and daemon start grows an 82ms stall.
+        //
+        // Only where the surface is already mapped, though: with preload off
+        // there is nothing to build into while the launcher is down, and Qt
+        // drops the lot on every close regardless, so there this stays what it
+        // was - a warm pass that runs during the open it belongs to.
+        visible: Settings.preload || LauncherState.warmingApps
         opacity: 0.004
         Repeater {
             model: Apps.warmOrder

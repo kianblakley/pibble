@@ -395,22 +395,51 @@ Singleton {
         const w = root.list.find(x => x.path === Settings.currentWallpaper);
         return w ? w.blur : "";
     }
-    // What the backdrop actually draws - xrayBlur, but only ever picked up
-    // while the launcher is down. Applying a wallpaper leaves the launcher
-    // open on the picker, where the tiles hide the backdrop; the swap only
-    // becomes visible as the UI fades out on the way to closing, which reads
-    // as the backdrop changing out from under the exit animation.
-    property string xrayShown: ""
-    function syncXrayShown() {
-        // ...unless there is nothing on screen to swap *from*, which is the
-        // whole of the first session after a daemon restart: the bake for the
-        // current wallpaper only lands part-way into that first open, and
-        // holding it back until the launcher closes left the entire open
-        // drawing the live-blur fallback instead.
-        if (!root.launcherShown || root.xrayShown === "")
-            root.xrayShown = root.xrayBlur;
+    // Everything the backdrop could draw, best first: the bake, or - until
+    // there is one - the raw wallpaper for the launcher to blur live. That
+    // fallback is only worth naming once a scan that was actually looking for
+    // the current backdrops has come back without one (see scanKey); before
+    // that it is just a full-size wallpaper decode that the bake replaces
+    // moments later.
+    readonly property string xrayWant: {
+        if (Settings.bgBlur !== "xray")
+            return "";
+        if (root.xrayBlur !== "")
+            return root.xrayBlur;
+        return root.scanKey === root.xrayCacheKey ? root.matugenSource : "";
     }
-    onXrayBlurChanged: root.syncXrayShown()
+    // What the backdrop actually draws, and whether that is the raw wallpaper
+    // - i.e. whether the launcher has to blur it itself.
+    property string xrayShown: ""
+    property bool xrayShownLive: false
+    function syncXrayShown() {
+        // Only ever swapped while the launcher is down. Two things move it,
+        // and neither is watchable mid-open:
+        //
+        //   - applying a wallpaper leaves the launcher open on the picker,
+        //     where the tiles hide the backdrop, so the swap only shows as the
+        //     UI fades out on the way to closing - which reads as the backdrop
+        //     changing out from under the exit animation.
+        //   - the output scale resolving (see XrayScaleProbe, ~1.4s after a
+        //     daemon start, and later than that with Settings.preload on)
+        //     re-keys every cache entry, walking xrayWant through "" and then
+        //     a bake that still has to be decoded. An Image drops what it is
+        //     showing the moment its source changes, so on a first open caught
+        //     inside that window it is a backdrop-shaped hole under the reveal
+        //     - measured 600ms of nothing at all, the decode being that slow
+        //     against a first open's busy GUI thread.
+        //
+        // Drawing nothing is the one thing worse than swapping late, so an
+        // empty backdrop takes whatever is going immediately: on a cold cache
+        // the alternative is a whole first open with no backdrop at all. Same
+        // for a backdrop nobody is looking at, which is what the mode being
+        // off makes this.
+        if (root.launcherShown && root.xrayShown !== "" && Settings.bgBlur === "xray")
+            return;
+        root.xrayShownLive = root.xrayWant !== "" && root.xrayBlur === "";
+        root.xrayShown = root.xrayWant;
+    }
+    onXrayWantChanged: root.syncXrayShown()
     // Everything the baked files are named after. A new output geometry or
     // scale (or switching the mode on at all) changes every name, so the
     // scan has to run again to generate the new ones and sweep the old.

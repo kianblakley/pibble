@@ -58,7 +58,7 @@ Item {
     readonly property real bgBlurSaturation: 0.5
     // no baked file for the current wallpaper yet, so the wallpaper is
     // being blurred live below
-    readonly property bool liveBlur: Settings.bgBlur === "xray" && Wallpapers.xrayShown === ""
+    readonly property bool liveBlur: Wallpapers.xrayShownLive
     Image {
         id: xrayBg
         anchors.fill: parent
@@ -72,7 +72,13 @@ Item {
         // above) only ever applies to the fallback.
         anchors.margins: root.liveBlur ? -root.bgBlurMax : 0
         fillMode: Image.PreserveAspectCrop
-        // Deliberately keyed on the setting and not on this item's
+        // Which file this is - and, just as importantly, when it is
+        // allowed to change - is Wallpapers' call: an Image blanks
+        // the moment its source moves, so a swap timed wrong is a
+        // hole in the backdrop rather than a new picture (see
+        // syncXrayShown).
+        //
+        // Deliberately keyed on that and not on this item's
         // `visible`: Item.visible reads *effective* visibility, so a
         // binding on it goes false every time the window hides,
         // which dropped the loaded pixmap and made the next open
@@ -80,20 +86,12 @@ Item {
         // a fraction of the way into the reveal (measured at ~30ms
         // for the baked image, far worse for the raw wallpaper).
         // Held loaded across opens instead.
-        //
-        // The raw wallpaper is only worth decoding once a scan that
-        // was actually looking for the current backdrops has come
-        // back without one; before that it is just a full-size
-        // wallpaper decode that the baked path replaces moments
-        // later.
-        source: Settings.bgBlur !== "xray" ? ""
-            : (Wallpapers.xrayShown !== "" ? "file://" + Wallpapers.xrayShown
-                : (Wallpapers.scanKey === Wallpapers.xrayCacheKey ? Wallpapers.matugenSource : ""))
+        source: Wallpapers.xrayShown !== "" ? "file://" + Wallpapers.xrayShown : ""
         asynchronous: true
         // the baked backdrop is small and reused across every open,
         // so it is worth keeping decoded; the raw wallpaper the
         // fallback loads is not
-        cache: Wallpapers.xrayShown !== ""
+        cache: !root.liveBlur
         layer.enabled: root.liveBlur
         layer.effect: MultiEffect {
             blurEnabled: true
