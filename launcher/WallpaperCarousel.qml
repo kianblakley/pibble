@@ -522,6 +522,24 @@ Item {
         videoSource = centerWall.path;
         videoAbsStep = LauncherState.carouselStep;
     }
+    // Same ± totalSlots wrap the cells' own rebalance() applies to
+    // absStep (see cell.rebalance above), kept in sync here too: without
+    // it, videoAbsStep is the one position on this whole strip that
+    // never gets recycled, so a slot it drifted off from during a fast
+    // scroll stays on the books forever and can wrap back into view
+    // later - by then some other cell owns that geometric spot, and the
+    // stale player would paint the old video's frame over its content
+    // instead of staying retired off-screen like every real cell does.
+    function rebalanceVideo() {
+        while (root.videoAbsStep - LauncherState.carouselAnim > root.restSpan + 1)
+            root.videoAbsStep -= root.totalSlots;
+        while (root.videoAbsStep - LauncherState.carouselAnim < -(root.restSpan + 1))
+            root.videoAbsStep += root.totalSlots;
+    }
+    Connections {
+        target: LauncherState
+        function onCarouselAnimChanged() { root.rebalanceVideo(); }
+    }
     // videoSource === centerWall.path holds off the handover for
     // the frame or two after a switch between two videos, while
     // the player still has the previous file open.
