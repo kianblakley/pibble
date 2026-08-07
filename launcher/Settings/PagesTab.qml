@@ -278,5 +278,7 @@ Column {
 
     SettingRow { key: "clipsMax"; label: "Clipboard entries" }
 
+    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
+
 }
 

@@ -590,11 +590,14 @@ Item {
                 live: root.videoShowing
                 // Only while the launcher is down, so the file
                 // opens land with nothing on screen to stutter
-                // rather than inside a slide - the same reason
-                // pibble-warmup decodes theme SVGs at startup. The
-                // style check keeps the grid's own pool from
-                // opening the same files a second time over.
-                warming: Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                // rather than inside a slide - measured, an open
+                // landing in a slide freezes the GUI thread for
+                // ~700ms on first sight of a file. The style check
+                // keeps the grid's own pool from opening the same
+                // files a second time over. Settings.preload off
+                // trades that freeze back for the ~150MiB per video
+                // this holds.
+                warming: Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
                 // exactly the box - and therefore exactly the crop
                 // - the centered cell's still Image uses at rank 0,
                 // parallax included: without it the video would sit

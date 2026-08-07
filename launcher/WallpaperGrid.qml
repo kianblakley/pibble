@@ -338,10 +338,12 @@ Item {
                 live: root.videoShowing
                 // Only while the launcher is down, so the file opens land with
                 // nothing on screen to stutter rather than inside a
-                // navigation - the same reason pibble-warmup decodes theme
-                // SVGs at startup. The style check keeps the carousel's own
-                // pool from opening the same files a second time over.
-                warming: Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                // navigation - measured, an open landing in a navigation
+                // freezes the GUI thread for ~700ms on first sight of a file.
+                // The style check keeps the carousel's own pool from opening
+                // the same files a second time over. Settings.preload off
+                // trades that freeze back for the ~150MiB per video this holds.
+                warming: Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
             }
         }
         // the tile's own 1px stroke is underneath this overlay, so redraw it

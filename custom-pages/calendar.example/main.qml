@@ -271,7 +271,7 @@ Item {
                         // last clicked is ringed instead, so the two read as
                         // different things (and stack on the same cell)
                         color: isToday ? root.pibble.fillActive : (cellArea.containsMouse ? root.pibble.fill : "transparent")
-                        border.width: isSelected ? 2 : 0
+                        border.width: isSelected ? 1 : 0
                         border.color: root.pibble.accent
 
                         Text {

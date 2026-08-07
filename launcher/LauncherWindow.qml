@@ -18,34 +18,38 @@ PanelWindow {
     id: root
 
     property bool shown: false
-    // Mapped for the life of the daemon, not just while open. Unmapping makes
-    // Qt drop this window's scene graph and every texture in it, so the next
-    // open has to rebuild the lot on the GUI thread before it can draw a frame
-    // - which is exactly the stall that ate the start of the reveal. Measured
-    // per open, after a throwaway open so the one-time build isn't counted:
+    // With Settings.preload on, mapped for the life of the daemon rather than
+    // just while open. Unmapping makes Qt drop this window's scene graph and
+    // every texture in it, so the next open has to rebuild the lot on the GUI
+    // thread before it can draw a frame - which is exactly the stall that ate
+    // the start of the reveal. Measured per open, after a throwaway open so the
+    // one-time build isn't counted:
     //
     //                      unmapped on close        kept mapped
     //   compositor blur    72-102ms, 2 stalls       0ms (one 36ms outlier)
-    //   xray blur          148-161ms, 1 stall       0ms
+    //   xray blur          159-170ms, 1 stall       0ms, plus a 41-65ms
+    //                                               close stall on ~half
     //
     // Identical on all four panes; the pane only decides how much there is to
     // rebuild, not whether the rebuild happens.
     //
     // What it holds is the whole window, every pane at once - the panes are
     // direct children, never Loaders, so their item trees always existed; what
-    // survives a close now is their scene-graph nodes and, mostly, their GPU
+    // survives a close is their scene-graph nodes and, mostly, their GPU
     // textures. That is not free, and the bill is in VRAM rather than RSS:
     // measured with nvidia-smi against this process, closed, having visited all
-    // four panes, ~812MiB against ~341MiB when the surface unmaps instead, plus
-    // ~86MB of RSS. Roughly 240MiB of the gap is there from daemon start before
+    // four panes, 823MiB against 341MiB when the surface unmaps instead, plus
+    // ~66MiB of RSS. Roughly 240MiB of the gap is there from daemon start before
     // any pane is opened, which is the surface's own full-screen buffers and the
     // 5120x2160 growMask layer.
     //
-    // Worth knowing on a box that also wants its VRAM for something else.
+    // That ~482MiB is what Settings.preload buys back when it's off, at the cost
+    // of the stall above on every single open.
     //
-    // Assigned false for one beat by syncScreen(), which is the only thing that
-    // ever unmaps this - see there for why a monitor switch has to.
-    visible: true
+    // Assigned false for one beat by syncScreen(), which is the only other thing
+    // that unmaps this - see there for why a monitor switch has to, and note it
+    // has to restore this as a *binding*, not a plain true.
+    visible: Settings.preload || root.shown
     // Mapped but closed: the surface exists only to hold its own scene graph,
     // so it has to behave as if it were not there at all - see the
     // keyboardFocus, mask and content bindings that read this.
@@ -135,7 +139,12 @@ PanelWindow {
     }
     function finishRemap(): void {
         root.mappedScreen = ActiveOutput.screen;
-        root.visible = true;
+        // Restored as a binding, not a plain `true`: `visible` tracks
+        // Settings.preload, and a bare assignment here would sever that for the
+        // rest of the session - the surface would then stay mapped even after
+        // preload was switched off, silently making the setting a no-op for
+        // anyone who had ever changed monitors.
+        root.visible = Qt.binding(() => Settings.preload || root.shown);
     }
     // An open() landing inside that gap must not open onto an unmapped window,
     // so it takes the pending remap immediately instead of waiting out the
@@ -1415,41 +1424,14 @@ PanelWindow {
             }
         }
     }
-    // clipboard image thumbnails, decoded as the scan lands and pinned
-    // so clip page flips hit the pixmap cache instead of re-decoding.
-    // The thumbs are downscaled on disk at generation time (see
-    // Clipboard's thumbnail pass), so these decodes are cheap and no longer starve the
-    // app-icon decodes sharing the single QML image reader thread.
-    //
-    // Safeguard: on the cold first open, hold the clip decodes until the
-    // app icons have warmed (LauncherState.warmedOnce), then release them one per frame
-    // (LauncherState.clipWarmTick) so a batch of thumbs still can't burst the reader
-    // thread ahead of the icons. Once warmed, the gate stays open and
-    // clips decode freely as their thumbs land - the icons are cached by
-    // then, so there is nothing left to starve. LauncherState.clipWarmTick is not reset
-    // per open for the same reason.
-    FrameAnimation {
-        running: LauncherState.warmedOnce && LauncherState.clipWarmTick <= Clipboard.entries.length
-        onTriggered: LauncherState.clipWarmTick = currentFrame
-    }
-    Item {
-        visible: false
-        Repeater {
-            model: Clipboard.entries
-            Image {
-                required property int index
-                required property var modelData
-                width: 1
-                height: 1
-                asynchronous: true
-                fillMode: Image.PreserveAspectFit
-                sourceSize: Qt.size(480, 640)
-                source: LauncherState.warmedOnce && LauncherState.clipWarmTick > index
-                        && modelData.image === true && modelData.thumb
-                        ? "file://" + modelData.thumb : ""
-            }
-        }
-    }
+    // No clipboard-thumbnail warm pass. One used to live here, holding every
+    // cached clip thumb decoded at 480x640 for the life of the daemon so page
+    // flips would hit the pixmap cache. Measured at 120 clips it cost ~264MiB
+    // of RSS and bought nothing: identical open stalls, zero stalls paging
+    // through the grid either way, and the same proportion of the grid painted
+    // 180ms after a flip. The thumbs are already downscaled on disk (see
+    // Clipboard's thumbnail pass), so the on-demand decode the tiles do is
+    // cheap enough not to need pre-warming.
     Item {
         visible: LauncherState.warmingWallpapers
         opacity: 0.004

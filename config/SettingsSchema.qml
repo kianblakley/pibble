@@ -93,6 +93,8 @@ Singleton {
             return Settings.singleClickActivate ? "on" : "off";
         case "hiddenMenuAnimations":
             return Settings.hiddenMenuAnimations ? "on" : "off";
+        case "preload":
+            return Settings.preload ? "on" : "off";
         case "fontFamily":
             return Settings.fontFamily || "system default";
         case "iconTheme":
@@ -152,6 +154,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = !Settings.hiddenMenuAnimations;
+            break;
+        case "preload":
+            Settings.preload = !Settings.preload;
             break;
         case "fontFamily":
             // "" (system default) is a real choice, so it heads the list
@@ -260,6 +265,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = true;
+            break;
+        case "preload":
+            Settings.preload = true;
             break;
         case "gestures":
             Settings.gestures = true;

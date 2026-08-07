@@ -33,7 +33,7 @@ import "root:/startup"
 //   ui/        reusable settings controls, and the custom-page contract
 //   launcher/  the launcher window, its state, and one file per pane
 //   flyouts/   the volume and notification OSDs
-//   startup/   invisible surfaces that only exist to warm caches or measure
+//   startup/   invisible surfaces that only exist to measure the output
 //
 // Those layers only ever point one way - launcher/flyouts → ui → services →
 // config - which is what keeps the directories acyclic.
@@ -56,7 +56,6 @@ ShellRoot {
     VolumeOsd {}
     NotificationFlyout {}
 
-    IconWarmupWindow {}
     XrayScaleProbe {}
 
     // The shell runs as a persistent daemon; the launcher window is toggled

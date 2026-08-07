@@ -148,7 +148,6 @@ Singleton {
     property bool warmedOnce: false
     property bool wallpapersWarmedOnce: false
     property int wallpaperWarmTick: 0
-    property int clipWarmTick: 0
 
     // Tab cycles the enabled panes; the settings pane sits outside the
     // cycle (opened via the corner button or Ctrl+S).

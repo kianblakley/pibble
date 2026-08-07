@@ -100,6 +100,30 @@ JsonAdapter {
     // through the tool we'd query
     property string currentWallpaper: ""
 
+    // Do the expensive work up front and hold onto the result, rather than
+    // deferring it to the moment it is needed. One switch over the two places
+    // that trade memory for latency, because the trade is the same shape in
+    // both and nobody wants to reason about them separately:
+    //
+    //   - the launcher surface stays mapped while closed (LauncherWindow's
+    //     `visible`), so a close doesn't drop the scene graph and every texture
+    //     in it. This buys *latency*, not smoothness: the rebuild lands before
+    //     the first drawn frame, so the reveal is equally smooth either way, it
+    //     just starts later. Measured end to end, five opens each - time from
+    //     the IPC call to the first frame that draws anything: 49ms on, 153ms
+    //     off; to the reveal finishing, 565ms on, 685ms off. Costs ~482MiB of
+    //     VRAM held for the daemon's life. Because it shows up as uniform
+    //     latency rather than a visible hitch, it is easy to miss without an A/B.
+    //   - every video wallpaper's player is opened while the launcher is down
+    //     (WallpaperVideoPool's `warming`). This one is unmissable: a 666ms
+    //     GUI-thread freeze the first time the selection lands on a video when
+    //     off, 0 when on, against ~150MiB of RSS per video wallpaper.
+    //
+    // Off is deferral, not a cap: the pool still keeps a player once something
+    // has opened it, so browsing every video ends up at the same memory having
+    // paid the freeze for each. It only saves what is never looked at.
+    property bool preload: true
+
     property real dimOpacity: 0.4
     property string launchAnimation: "grow-top-left"
     // how the launcher blurs whatever's behind it - "off", real compositor blur
