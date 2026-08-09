@@ -2,9 +2,6 @@
     pibble
 </h1>
 
-<!-- TODO: embed the demo video here once it's filmed, e.g.
-[![pibble demo](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
--->
 ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png)
 
 ## Features
