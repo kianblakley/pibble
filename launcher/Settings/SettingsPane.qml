@@ -10,7 +10,7 @@ Item {
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -20,12 +20,12 @@ Item {
     }
 
     // built-ins first, then one slot per custom page that opts
-    // into a settings tab (see LauncherState.customSettingsTabs) — in
+    // into a settings tab (see LauncherState.customSettingsTabs) - in
     // whatever order those pages themselves loaded in
     readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
     // LauncherWindow's customPages Repeater's model is Settings.uploadedPages itself,
     // reassigned wholesale (a fresh array) on every toggle/
-    // upload/trash/rescan — since it's a plain JS-array model,
+    // upload/trash/rescan - since it's a plain JS-array model,
     // that recreates every delegate, not just the one that
     // changed. For the split of a frame that a custom tab's
     // host is mid-recreate, LauncherState.customSettingsTabs (which reads
@@ -33,7 +33,7 @@ Item {
     // resolvedTabIndex briefly goes -1. Snapping tabIndex to 0 in that
     // window used to yank every filmstrip pane (see the
     // `Behavior on x` below and the built-in tabs' copies) over
-    // to tab 0 and spring it back once the tab reappears — the
+    // to tab 0 and spring it back once the tab reappears - the
     // "settings flies across the screen" glitch. Holding the
     // last good index instead means the recreate is invisible:
     // nothing here moves until there's a real index to move to.
@@ -75,7 +75,7 @@ Item {
         // custom pages' tabs come and go as they're toggled in
         // Settings > Pages, but LauncherState.customSettingsTabs updates by
         // wholesale reassignment (see its own comment) and a plain
-        // Repeater has no enter/exit transition for that — so tab
+        // Repeater has no enter/exit transition for that - so tab
         // entries are staged here instead: a new id gets one fade-in
         // pass, a dropped id is kept around (fading out) until
         // staleTabSweep sweeps it for real. Built-in tabs are always
@@ -113,6 +113,7 @@ Item {
                     next.push({ id: t.pageId, label: t.label, custom: true, phase: "entering" });
             }
             stagedTabs = next;
+            Qt.callLater(header.settleScroll);
         }
         Component.onCompleted: reconcileTabs()
         Connections {
@@ -131,70 +132,246 @@ Item {
             }
         }
 
+        // index of the tab currently pinned to tabViewport's left edge -
+        // tabRow slides behind the fixed clip as this changes (see its
+        // `Behavior on x`) rather than the viewport itself moving, so
+        // scrollIndex is always exactly on a tab boundary and the
+        // leftmost visible tab is never partially cut off
+        property int scrollIndex: 0
+        readonly property real windowX: {
+            const it = tabRepeater.itemAt(scrollIndex);
+            return it ? it.x : 0;
+        }
+        readonly property bool canScrollLeft: scrollIndex > 0
+        readonly property bool canScrollRight: tabRow.width - windowX > tabRowViewport.width
+        // one tab at a time, never a whole page - the arrow reveals
+        // exactly the next/previous tab rather than jumping by however
+        // many happen to fit
+        function scrollBy(delta: int): void {
+            const next = scrollIndex + delta;
+            if (next < 0 || next >= stagedTabs.length)
+                return;
+            if (delta > 0 && !canScrollRight)
+                return;
+            scrollIndex = next;
+        }
+        // clamps scrollIndex back into range after stagedTabs changes
+        // shrink it (a custom tab toggled off) or shift widths (a
+        // relabel), then makes sure the active tab is still on screen -
+        // jumping it to become the new leftmost tab if not, which by
+        // definition always fits
+        function settleScroll() {
+            if (!stagedTabs.length) {
+                scrollIndex = 0;
+                return;
+            }
+            if (scrollIndex >= stagedTabs.length)
+                scrollIndex = stagedTabs.length - 1;
+            while (scrollIndex > 0) {
+                const it = tabRepeater.itemAt(scrollIndex);
+                if (!it) {
+                    Qt.callLater(header.settleScroll);
+                    return;
+                }
+                if (tabRow.width - it.x > tabRowViewport.width)
+                    break;
+                scrollIndex -= 1;
+            }
+            header.ensureActiveTabVisible();
+        }
+        // keyboard tab-cycling (LauncherState.cyclePane) can land on a
+        // custom tab that's scrolled out of view - clicking the arrows
+        // never touches this (see their onPressed), only a selection
+        // change arriving some other way does
+        function ensureActiveTabVisible() {
+            const idx = stagedTabs.findIndex(t => t.id === LauncherState.settingsTab);
+            if (idx < 0)
+                return;
+            if (idx < scrollIndex) {
+                scrollIndex = idx;
+                return;
+            }
+            const it = tabRepeater.itemAt(idx);
+            if (!it) {
+                Qt.callLater(header.ensureActiveTabVisible);
+                return;
+            }
+            if (it.x + it.width - windowX > tabRowViewport.width)
+                scrollIndex = idx;
+        }
+        Connections {
+            target: LauncherState
+            function onSettingsTabChanged() { header.ensureActiveTabVisible(); }
+        }
+
         Text {
             text: "SETTINGS"
             color: Theme.muted
             font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13); letterSpacing: 3 }
         }
-        Row {
+
+        Item {
+            id: tabRowArea
+            anchors.left: parent.left
+            anchors.right: parent.right
             anchors.bottom: parent.bottom
-            spacing: 26
+            height: 24
 
-            Repeater {
-                model: header.stagedTabs
+            Item {
+                id: tabRowViewport
+                clip: true
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                // inset by rightArrow's own 24px box plus an 8px gap
+                // (the same spacing SettingRow uses between its own
+                // controls) so a clipped tab label stops short of the
+                // arrow with real breathing room, not flush against it
+                width: parent.width - 24 - 8
 
-                Item {
-                    id: tabLink
-                    required property var modelData
-                    readonly property bool active: LauncherState.settingsTab === modelData.id
-                    width: tabLinkText.implicitWidth
-                    height: 24
-                    opacity: modelData.phase === "entering" ? 0 : 1
-
-                    Component.onCompleted: {
-                        if (modelData.phase === "entering")
-                            tabFadeIn.start();
-                        else if (modelData.phase === "exiting")
-                            tabFadeOut.start();
-                    }
-                    NumberAnimation {
-                        id: tabFadeIn
-                        target: tabLink
-                        property: "opacity"
-                        to: 1
-                        duration: Anim.menu(220)
-                        easing.type: Easing.OutCubic
-                    }
-                    NumberAnimation {
-                        id: tabFadeOut
-                        target: tabLink
-                        property: "opacity"
-                        to: 0
-                        duration: Anim.menu(220)
-                        easing.type: Easing.OutCubic
+                Row {
+                    id: tabRow
+                    x: -header.windowX
+                    spacing: 26
+                    // the fixed clip stays put and the tabs slide behind
+                    // it instead, so paging reads as the tabs moving
+                    // rather than the window jumping
+                    Behavior on x {
+                        NumberAnimation { duration: Anim.menu(280); easing.type: Easing.OutCubic }
                     }
 
-                    Text {
-                        id: tabLinkText
-                        text: tabLink.modelData.label
-                        color: tabLink.active ? Theme.fg : Theme.muted
-                        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
-                    }
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        width: parent.width
-                        height: 2
-                        radius: 1
-                        color: Theme.accent
-                        opacity: tabLink.active ? 1 : 0
-                        Behavior on opacity {
-                            NumberAnimation { duration: Anim.menu(150); easing.type: Easing.OutCubic }
+                    Repeater {
+                        id: tabRepeater
+                        model: header.stagedTabs
+
+                        Item {
+                            id: tabLink
+                            required property var modelData
+                            readonly property bool active: LauncherState.settingsTab === modelData.id
+                            width: tabLinkText.implicitWidth
+                            height: 24
+                            opacity: modelData.phase === "entering" ? 0 : 1
+
+                            Component.onCompleted: {
+                                if (modelData.phase === "entering")
+                                    tabFadeIn.start();
+                                else if (modelData.phase === "exiting")
+                                    tabFadeOut.start();
+                            }
+                            NumberAnimation {
+                                id: tabFadeIn
+                                target: tabLink
+                                property: "opacity"
+                                to: 1
+                                duration: Anim.menu(220)
+                                easing.type: Easing.OutCubic
+                            }
+                            NumberAnimation {
+                                id: tabFadeOut
+                                target: tabLink
+                                property: "opacity"
+                                to: 0
+                                duration: Anim.menu(220)
+                                easing.type: Easing.OutCubic
+                            }
+
+                            Text {
+                                id: tabLinkText
+                                text: tabLink.modelData.label
+                                color: tabLink.active ? Theme.fg : Theme.muted
+                                font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
+                            }
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: 2
+                                radius: 1
+                                color: Theme.accent
+                                opacity: tabLink.active ? 1 : 0
+                                Behavior on opacity {
+                                    NumberAnimation { duration: Anim.menu(150); easing.type: Easing.OutCubic }
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: LauncherState.settingsTab = tabLink.modelData.id
+                            }
                         }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: LauncherState.settingsTab = tabLink.modelData.id
-                    }
+                }
+            }
+
+            // same 24x24 box + centered-glyph convention as
+            // ui/ResetButton.qml (just without its background), so the
+            // glyph's own optical center lands exactly where every
+            // ResetButton's does rather than flush against the row's
+            // literal edge. Sits outside tabRowViewport entirely, in
+            // the margin header leaves against the pane's own edge,
+            // rather than overlapping the clipped tabs - so the
+            // leftmost tab is always flush left against the viewport's
+            // own edge with nothing reserved for this to fade in over
+            Item {
+                id: leftArrow
+                anchors.right: tabRowViewport.left
+                anchors.verticalCenter: tabRowViewport.verticalCenter
+                width: 24
+                height: 24
+                opacity: header.canScrollLeft ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Anim.menu(180); easing.type: Easing.OutCubic }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    // Icons.family's glyph sits lower in its em-box
+                    // than Theme.fontFamily's does at the same
+                    // pixelSize, so centering both boxes on the same
+                    // line still reads as the icon sitting low against
+                    // the label text next to it
+                    anchors.verticalCenterOffset: -2
+                    text: Icons.chevronLeft
+                    color: leftArrowHover.containsMouse ? Theme.fg : Theme.muted
+                    font { family: Icons.family; pixelSize: Theme.fontSize(13) }
+                }
+                MouseArea {
+                    id: leftArrowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: header.canScrollLeft
+                    onClicked: header.scrollBy(-1)
+                }
+            }
+            // right edge flush with parent.right, exactly matching
+            // where a SettingRow's own ResetButton sits (ResetButton's
+            // parent Row is anchored the same way against its 780-wide
+            // row) - and tabRowViewport is inset by this box's own
+            // width, so a cut-off tab label never renders underneath it
+            Item {
+                id: rightArrow
+                anchors.right: parent.right
+                anchors.verticalCenter: tabRowViewport.verticalCenter
+                width: 24
+                height: 24
+                opacity: header.canScrollRight ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Anim.menu(180); easing.type: Easing.OutCubic }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: -2
+                    text: Icons.chevronRight
+                    color: rightArrowHover.containsMouse ? Theme.fg : Theme.muted
+                    font { family: Icons.family; pixelSize: Theme.fontSize(13) }
+                }
+                MouseArea {
+                    id: rightArrowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: header.canScrollRight
+                    onClicked: header.scrollBy(1)
                 }
             }
         }
@@ -211,7 +388,7 @@ Item {
         // moves the pane, shorter pages stay top-aligned
         height: Math.max(generalTab.height, pagesTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
         // tallest of any custom tab's content column, recomputed
-        // whenever one loads/resizes — 0 (a no-op in the Math.max
+        // whenever one loads/resizes - 0 (a no-op in the Math.max
         // above) when there are none
         readonly property real customTabsMaxHeight: {
             let m = 0;
@@ -255,11 +432,11 @@ Item {
                 readonly property int slideIndex: root.tabOrder.indexOf(modelData.pageId)
                 x: 20 + (slideIndex - root.tabIndex) * 840
                 // a freshly-appearing tab's slideIndex starts at -1 for
-                // one tick — LauncherState.customSettingsTabs (which this
+                // one tick - LauncherState.customSettingsTabs (which this
                 // Repeater's model is) picks up the page's newly-
                 // loaded settingsTab a moment before
                 // root.tabOrder, which derives from it, has
-                // recomputed to include this pageId — so x's first
+                // recomputed to include this pageId - so x's first
                 // real value briefly parks off-screen left before
                 // jumping to its actual off-screen-right slot once
                 // slideIndex corrects. With the Behavior live for that
@@ -278,7 +455,7 @@ Item {
                 }
                 spacing: 14
 
-                // the page's own Component — declared inside its
+                // the page's own Component - declared inside its
                 // file, so it resolves `pibble`/getSetting/etc via
                 // that file's own scope, same as any other child of
                 // its root item would

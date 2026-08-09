@@ -10,7 +10,7 @@ import "root:/config"
 //
 // pibble is its own notification server, so its alerts are ordinary
 // notify-send calls that arrive back through NotificationServer like any other
-// app's — there is no separate internal path that could drift from the real one.
+// app's - there is no separate internal path that could drift from the real one.
 Singleton {
     id: root
 
@@ -19,14 +19,14 @@ Singleton {
     // Internal errors. Always the generic alert glyph (see glyphFor) so every
     // pibble-raised error reads the same at a glance. Auto-dismisses like any
     // other pibble alert, on the flyout's normal Settings.notifTimeout (no -t
-    // override — expire_timeout -1, "let the server/flyout decide").
+    // override - expire_timeout -1, "let the server/flyout decide").
     function error(summary: string, body: string): void {
         if (!Settings.alertEnabled("errors"))
             return;
         Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "dialog-error", summary, body]);
     }
 
-    // A required external tool isn't installed — distinct from error() (both
+    // A required external tool isn't installed - distinct from error() (both
     // gated separately in Settings and rendered with a different glyph/color,
     // see glyphFor and NotificationFlyout.snapshot) since a missing dependency
     // is an environment gap, not something pibble itself failed at.
@@ -52,10 +52,10 @@ Singleton {
     // Fires from a video wallpaper's MediaPlayer.onErrorOccurred (grid tile and
     // carousel preview both wire into this) rather than a startup probe: the
     // QtMultimedia QML module can still import fine with no working backend
-    // installed (its plugins are a separate runtime dependency) — playback only
+    // installed (its plugins are a separate runtime dependency) - playback only
     // actually fails once a MediaPlayer tries to open a file. Distinct from the
     // "ffmpeg not found" alert in Wallpapers, which is about the ffmpeg CLI used
-    // to generate thumbnails/blur — this one is QtMultimedia's own playback
+    // to generate thumbnails/blur - this one is QtMultimedia's own playback
     // backend, missing/broken independent of whether that CLI is installed.
     // Once-per-session, not once-per-tile, since every video tile would
     // otherwise re-report the same cause.
@@ -113,7 +113,7 @@ Singleton {
             return Icons.copy;
         // wallpaper-changed rides a real thumbnail in image-path (see
         // LauncherWindow.commitWallpaper), which clobbers -i's icon name the
-        // same way an image clip's "Copied to clipboard" does above — same
+        // same way an image clip's "Copied to clipboard" does above - same
         // keyword fallback instead of the exact-name switch case
         if (lower.includes("wallpaper"))
             return Icons.wallpaperSlideshow;
@@ -129,11 +129,11 @@ Singleton {
         let image = String(n.image ?? "");
         // The bare freedesktop icon name (e.g. "dialog-error"), kept separate
         // from icon/image above which carry whatever's actually displayable (a
-        // resolved path or image provider URL) — used only for glyphFor's
+        // resolved path or image provider URL) - used only for glyphFor's
         // classification below. notify-send's -i flag does *not* populate the
         // app_icon D-Bus argument (confirmed via dbus-monitor): libnotify routes
         // it through the "image-path" hint instead, which arrives here as
-        // n.image, not n.appIcon — so appIcon is empty for every
+        // n.image, not n.appIcon - so appIcon is empty for every
         // notify-send-style call pibble itself makes, and the real name only
         // recovers below once the image://icon/ prefix is stripped off.
         let iconName = String(n.appIcon ?? "");
@@ -161,7 +161,7 @@ Singleton {
             }
         }
         // some senders (e.g. Discord) omit the app name and icon but set the
-        // desktop-entry hint — recover both from the entry
+        // desktop-entry hint - recover both from the entry
         const entryId = String(n.desktopEntry ?? "");
         let appName = String(n.appName ?? "");
         // pibble replay (see Notifier.fireReplay) always sends "REPLAY" as its own
@@ -206,14 +206,14 @@ Singleton {
 
     // ---------- replay ----------
 
-    // Raw fields only — enough to rebuild a faithful notify-send call. Anything
+    // Raw fields only - enough to rebuild a faithful notify-send call. Anything
     // display-derived (glyph, resolved icon/image URLs, own/app labels) is
     // deliberately left out: replaying re-sends the original notification and
     // lets the live pipeline derive all of that itself, the same way it would
     // for a first arrival. icon/image get the same slot-swap classification
     // viewOf does (some senders put a file path in appIcon, or route everything
-    // through image as an "image://icon/NAME" pseudo-URL) but keep raw values —
-    // a bare icon name or file path — since these feed notify-send's -i/-h flags
+    // through image as an "image://icon/NAME" pseudo-URL) but keep raw values -
+    // a bare icon name or file path - since these feed notify-send's -i/-h flags
     // directly on replay, not a QML Image source.
     readonly property int replayCapacity: 5
     function remember(n): void {
@@ -255,11 +255,11 @@ Singleton {
     // notification's own icon/image/urgency, rather than a separate "replay"
     // rendering path: the re-sent notification lands in
     // NotificationServer.onNotification -> NotificationFlyout.accept() exactly
-    // like any live one, so it animates and dismisses identically — a genuine
+    // like any live one, so it animates and dismisses identically - a genuine
     // replay, not a second UI that can drift from the first. The sender identity
     // is always the literal "REPLAY" (not the original app), so repeated presses
-    // always land in the flyout's own same-app "replace in-place" path — see
-    // accept()'s appKey comparisons — regardless of which app each replayed
+    // always land in the flyout's own same-app "replace in-place" path - see
+    // accept()'s appKey comparisons - regardless of which app each replayed
     // notification originally came from, and so a live notification from the
     // real sender never collides with it. The original sender rides along in the
     // desktop-entry hint purely so viewOf can show "<original> - <n> ago" on the

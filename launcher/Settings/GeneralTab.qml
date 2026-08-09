@@ -5,8 +5,8 @@ import "root:/ui"
 // One slide of the settings filmstrip. `root.slideIndex` is where this tab sits in
 // SettingsPane.tabOrder and `root.activeIndex` which slide is showing; the two
 // together are the whole of the horizontal tab transition.
-// General: the settings the launcher and both flyouts share — animations,
-// blur, type, theme — closing with the build identity.
+// General: the settings the launcher and both flyouts share - animations,
+// blur, type, theme - closing with the build identity.
 Column {
     id: root
 
@@ -20,8 +20,8 @@ Column {
 
     spacing: 14
 
+    SettingRow { key: "preload"; label: "Preload content"; hint: "stores large content in memory between toggles to improve performance" }
     SettingRow { key: "launchAnimation"; label: "Launch animation" }
-    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
     SettingRow {
         key: "bgBlur"
         label: "Background blur"

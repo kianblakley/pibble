@@ -14,7 +14,7 @@ Singleton {
         return !!d && d.ready && d.isLaptopBattery;
     }
     // PendingCharge covers charge-limited/topping-off devices (e.g. a
-    // threshold-charging laptop sitting at its cap while plugged in) —
+    // threshold-charging laptop sitting at its cap while plugged in) -
     // still "plugged in and not draining" for every purpose this drives
     // (accent color, the charging glyph, suppressing low-battery alerts),
     // even though UPower won't call it "Charging"

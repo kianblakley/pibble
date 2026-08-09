@@ -11,7 +11,7 @@ Item {
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -103,7 +103,7 @@ Item {
                                 // from the clock sets the query and only *then*
                                 // switches pane (see input.onTextChanged), so
                                 // every non-match is ghosted one statement
-                                // before the drawer becomes visible — playing
+                                // before the drawer becomes visible - playing
                                 // the exit here would run it in full view,
                                 // flashing the whole unfiltered page in and back
                                 // out on top of the entrance. Drop straight to
@@ -170,7 +170,7 @@ Item {
                                 }
                                 // TapHandler (not a plain MouseArea) so a
                                 // completed swipe below doesn't also
-                                // register as a click — same tap-vs-drag
+                                // register as a click - same tap-vs-drag
                                 // split the wallpaper carousel's the carousel's cell uses
                                 TapHandler {
                                     enabled: cell.filled
@@ -183,7 +183,7 @@ Item {
                                 }
                                 // lets a pane-cycle/page swipe start with the
                                 // finger/cursor right on the icon, instead of
-                                // only working over the gaps between tiles —
+                                // only working over the gaps between tiles -
                                 // same DragHandler-alongside-TapHandler split
                                 // the carousel's cell uses for the carousel, just forwarding
                                 // into the shared dominant-axis dispatch

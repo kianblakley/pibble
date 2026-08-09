@@ -9,7 +9,7 @@ import "root:/services"
 // in-flight state of every gesture.
 //
 // Split out of LauncherWindow so a pane can be its own file and still read the
-// state it renders — without either reaching into the window's item tree or
+// state it renders - without either reaching into the window's item tree or
 // having that state threaded down through half a dozen properties. The window
 // keeps everything that genuinely needs its item tree or a child process
 // (launching, applying a wallpaper, decoding a clip) and drives those through
@@ -26,7 +26,7 @@ Singleton {
 
     // Which shape the open/close animation takes. "grow" styles reveal a circle
     // that expands to cover the screen; "fade" cross-fades content opacity
-    // instead; "none" skips the reveal entirely — and must not be treated as
+    // instead; "none" skips the reveal entirely - and must not be treated as
     // "grow" just because it isn't "fade". The circle's geometry needs the
     // window's own screen, so that part stays on LauncherWindow.
     readonly property bool fadeMode: Settings.launchAnimation === "fade"
@@ -57,7 +57,7 @@ Singleton {
     readonly property real originX: root.originFraction[0] * root.screenWidth
     readonly property real originY: root.originFraction[1] * root.screenHeight
     // Radius needed to cover the farthest screen corner from the origin. At
-    // reveal=1 that corner sits exactly on the circle — a zero-width
+    // reveal=1 that corner sits exactly on the circle - a zero-width
     // mathematical tangent that the mask's antialiasing/threshold softening
     // turns into a visibly rounded notch (all four corners for grow-center,
     // since they're equidistant; just the farthest one otherwise). A small
@@ -65,7 +65,7 @@ Singleton {
     // grazing it.
     readonly property real maxRevealRadius: 1.02 * Math.max(Math.hypot(root.originX, root.originY), Math.hypot(root.screenWidth - root.originX, root.originY), Math.hypot(root.originX, root.screenHeight - root.originY), Math.hypot(root.screenWidth - root.originX, root.screenHeight - root.originY))
     // Clamped to 1px: an empty region reads as "no region set", which the blur
-    // protocol treats as blur-the-whole-surface — a full-screen blur flash.
+    // protocol treats as blur-the-whole-surface - a full-screen blur flash.
     readonly property int revealDiameter: Math.max(1, Math.ceil(2 * root.maxRevealRadius * root.reveal))
     // What the compositor blur region asks for (see LauncherWindow's
     // growRegion), deliberately smaller than the circle the mask draws. At equal
@@ -75,7 +75,7 @@ Singleton {
     //
     // The two are not the same circle even though they share a diameter: the
     // region is a true ellipse, while the mask is a Rectangle whose `radius`
-    // Qt tessellates at a capped 18 segments a corner — a 72-gon, inscribed, so
+    // Qt tessellates at a capped 18 segments a corner - a 72-gon, inscribed, so
     // it sits ~0.1% of the radius *inside* nominal at each segment's midpoint.
     // (Measured: an isolated Rectangle circle's edge has a dominant 72-per-
     // revolution harmonic, and its area is short of a true disc by the 0.13% a
@@ -83,7 +83,7 @@ Singleton {
     // which is why a constant inset only ever cleaned up the small end of the
     // animation. 0.4% of the diameter gives a ~3x margin over it, plus 2px for
     // integer rounding. Small enough that the unblurred sliver it trades for
-    // stays under notice — a few pixels mid-animation, and off-screen entirely
+    // stays under notice - a few pixels mid-animation, and off-screen entirely
     // by the time the circle is at full size.
     readonly property int revealBlurDiameter: Math.max(1, root.revealDiameter - Math.ceil(root.revealDiameter * 0.004) - 2)
 
@@ -129,7 +129,7 @@ Singleton {
     property string query: ""
 
     // The carousel's slot pitch, needed by drag maths here and by the carousel
-    // view itself — declared here so the gesture code doesn't have to reach
+    // view itself - declared here so the gesture code doesn't have to reach
     // into the item that happens to draw it.
     readonly property int carouselSlotSpacing: 262
 
@@ -148,25 +148,24 @@ Singleton {
     property bool warmedOnce: false
     property bool wallpapersWarmedOnce: false
     property int wallpaperWarmTick: 0
-    property int clipWarmTick: 0
 
     // Tab cycles the enabled panes; the settings pane sits outside the
     // cycle (opened via the corner button or Ctrl+S).
     property string pane: "clock"
     // every id the Pages settings row can show: the four built-in
     // panes, any uploaded custom pages, and "__add_folder__" (the
-    // add-a-page row — a real, reorderable member of this list so it
+    // add-a-page row - a real, reorderable member of this list so it
     // drags like everything else, but not a real page: the Pages tab's
     // pageOn/pageToggle/etc. special-case it).
     // Deliberately reads only Settings.uploadedPages, never
     // Settings.pageOrder, so its value (and object identity) stays put
-    // across a pure reorder — that's what the settings row's Repeater
+    // across a pure reorder - that's what the settings row's Repeater
     // binds its model to, since rebinding a Repeater's model to a new
     // array/object each time destroys and recreates every delegate.
     // Recreating mid-drag severs the DragHandler's grab after one step,
     // and recreating on every property change (rather than genuine
-    // add/remove) skips the position Behavior, so reorders — including
-    // a Reset — never animate. Membership only actually changes on
+    // add/remove) skips the position Behavior, so reorders - including
+    // a Reset - never animate. Membership only actually changes on
     // upload/trash/disk sync, so this binding is stable the rest of
     // the time.
     readonly property var pageIds: {
@@ -174,8 +173,8 @@ Singleton {
         // custom pages before the built-in four: this is what the
         // "missing id" top-up in orderedPages below falls back to
         // whenever it has to place one without a captured position
-        // (see there), so the default order — before anything's ever
-        // been dragged — has custom pages at the front
+        // (see there), so the default order - before anything's ever
+        // been dragged - has custom pages at the front
         return (Settings.uploadedPages ?? []).map(u => u.id).concat(def, ["__add_folder__"]);
     }
     // display order for the Pages settings row, layered on top of
@@ -183,12 +182,12 @@ Singleton {
     // enabled subset for Tab's cycle order, so dragging a row here
     // reorders the cycle too. The "missing id" top-up loop below is a
     // fallback for ids this doesn't already have an opinion on (should
-    // rarely trigger — CustomPages' scan normally captures a new page's
+    // rarely trigger - CustomPages' scan normally captures a new page's
     // position itself, splicing it in right after the add row, i.e.
     // ahead of the built-in four); if it does fire, it appends in
     // pageIds order, which is custom pages first, so still front-
     // leaning rather than landing at the very bottom.
-    // "__add_folder__" is pinned to the top unconditionally —
+    // "__add_folder__" is pinned to the top unconditionally -
     // stripped out of whatever Settings.pageOrder says and put back at the
     // front every time, not just defaulted there once, since it isn't
     // draggable (see the pageRow DragHandler's `enabled:
@@ -222,7 +221,7 @@ Singleton {
     function toggleUploadedPage(id: string) {
         const uploaded = Settings.uploadedPages ?? [];
         const u = uploaded.find(x => x.id === id);
-        // a broken page (folder missing main.qml — see CustomPages' scan) has
+        // a broken page (folder missing main.qml - see CustomPages' scan) has
         // nothing to load; its row exists so it can be seen and
         // trashed, not toggled on
         if (!u || u.broken)
@@ -235,7 +234,7 @@ Singleton {
         Settings.save();
     }
     // cycle order: the four built-ins (gated by Settings.pages) plus any
-    // enabled custom page, in orderedPages' relative order — a custom
+    // enabled custom page, in orderedPages' relative order - a custom
     // page's position among the Pages settings rows is exactly where it
     // sits in Tab's cycle too.
     readonly property var activePanes: {
@@ -256,7 +255,7 @@ Singleton {
     // internal ids read as abbreviations. The ids themselves stay short:
     // they're settings keys (Settings.pages/pageOrder), so renaming them
     // would orphan every existing config. Old-name keybinds keep working
-    // anyway — "walls"/"clips" match activePanes directly in resolvePageArg
+    // anyway - "walls"/"clips" match activePanes directly in resolvePageArg
     // below and never reach this map.
     readonly property var pageArgAliases: ({
         wallpapers: "walls",
@@ -264,7 +263,7 @@ Singleton {
     })
     // `pibble toggle <page>` accepts a custom page's bare filename (what
     // `pibble help` lists, e.g. "counter") as well as its real, prefixed
-    // id ("folder:counter") — the prefix is internal namespacing (see
+    // id ("folder:counter") - the prefix is internal namespacing (see
     // CustomPages.dir/CustomPages' scan) that a CLI user shouldn't have to know
     // or type. Falls through unresolved for built-in ids and "settings",
     // which already match activePanes directly. A custom page wins over the
@@ -280,7 +279,7 @@ Singleton {
     readonly property bool drawerOpen: root.pane === "apps"
 
     // A page discovered on disk defaults to the front of the list, directly
-    // under the pinned add row, rather than the back — custom pages sit ahead
+    // under the pinned add row, rather than the back - custom pages sit ahead
     // of the built-in four. A scan that added nothing still writes the order
     // back, which is what drops ids for pages that have since vanished.
     Connections {
@@ -299,7 +298,7 @@ Singleton {
     // ---------- clock line layout ----------
     // fixed layout, not user-reorderable: battery+weather always
     // combine onto one shared line at the bottom (if either is ticked).
-    // date sits directly against the clock — above it when anything
+    // date sits directly against the clock - above it when anything
     // else is also showing (so it reads as a header line over the
     // whole block), otherwise below it (just the two of them).
     // Settings.clockShow just controls per-item visibility.
@@ -336,7 +335,7 @@ Singleton {
         cancelCapture();
         expandedClip = null;
         // leaving a page resets its selection back to the first item, so
-        // returning to it later doesn't resume wherever it was left —
+        // returning to it later doesn't resume wherever it was left -
         // set directly rather than relying on root.query = "" above to
         // reset `selected` via onMatchesChanged, which is a no-op (no
         // change signal) whenever the filter was already empty, i.e.
@@ -350,7 +349,7 @@ Singleton {
     }
 
     // Entering a pane replays its tile stagger; the clock has no tiles. Also
-    // tells Clipboard whether its alerts have anywhere to land — a scan runs on
+    // tells Clipboard whether its alerts have anywhere to land - a scan runs on
     // every launcher open, but a cliphist problem is only worth reporting while
     // the user is actually looking at the clips pane.
     onPaneChanged: {
@@ -393,40 +392,40 @@ Singleton {
     // keybind) arms the "power off?" prompt; Enter then powers off,
     // anything else (Escape, a click, another key) lets go. Dragging up
     // from inside the bottom edgeSwipeZone does the same, arming a
-    // "reboot?" prompt instead — same physics, opposite sign, mirrored
+    // "reboot?" prompt instead - same physics, opposite sign, mirrored
     // geometry. Outside either zone the vertical drag belongs to pane
     // navigation instead (see the MouseArea above).
     // shared with the right-edge swipe-to-go-back drag too (see
     // rightEdgePress below)
     readonly property real edgeSwipeZone: 80
-    // true while either prompt is armed — every navigation gesture on
+    // true while either prompt is armed - every navigation gesture on
     // screen (pane cycling, page paging, carousel scrolling) stands down
-    // for it, see bgArea.onPressed and the carousel's cell's handlers below — except
+    // for it, see bgArea.onPressed and the carousel's cell's handlers below - except
     // the edge-swipe-back gesture, which stays live on purpose so it can
     // dismiss the prompt (see bgArea.backTracking and root.goBack())
     readonly property bool promptOpen: powerArmed || rebootArmed
-    property string dragZone: "none" // "top" | "bottom" | "none" — which edge (if any) the in-flight drag started in
+    property string dragZone: "none" // "top" | "bottom" | "none" - which edge (if any) the in-flight drag started in
     property bool powerDragging: false
     property real dragGrabY: 0
     property real powerRaw: 0 // raw downward drag distance (finger travel)
     property bool powerArmed: false
     readonly property real powerThreshold: 300
     readonly property real powerProgress: Math.min(1, powerRaw / powerThreshold)
-    // how gradually powerPull's resistance ramps up — bigger means more
+    // how gradually powerPull's resistance ramps up - bigger means more
     // "give" (the curve stays closer to linear for longer before it
     // starts noticeably fighting the finger). Tune this alone for feel;
     // powerRingScale below re-derives to compensate, so the resting
     // depth never has to be re-tuned alongside it
     readonly property real powerPullDecay: 400
-    // content shift lags the finger with increasing resistance — same
+    // content shift lags the finger with increasing resistance - same
     // curve whether raw is coming straight off the finger (live drag)
     // or being eased by the Behavior below (keybind / release rebound)
     readonly property real powerPull: 170 * (1 - Math.exp(-powerRaw / powerPullDecay))
     // powerPull's own value once raw reaches the threshold, at the
-    // *live* powerPullDecay — used below to derive powerRingScale
+    // *live* powerPullDecay - used below to derive powerRingScale
     readonly property real powerPullAtThreshold: 170 * (1 - Math.exp(-powerThreshold / powerPullDecay))
     // the ring's resting depth (pull*2.6 - 200) back when the curve
-    // used the original decay of 260 — fixed regardless of
+    // used the original decay of 260 - fixed regardless of
     // powerPullDecay so retuning the drag's "give" never moves the
     // settled/rebounded position
     readonly property real powerRestDepth: 170 * (1 - Math.exp(-powerThreshold / 260)) * 2.6 - 200
@@ -451,7 +450,7 @@ Singleton {
     }
     // the power keybind plays the pull animation (the powerRaw Behavior
     // animates the ride down) straight into the armed pose: Enter powers
-    // off, anything else lets go — same as completing the drag by hand
+    // off, anything else lets go - same as completing the drag by hand
     function playPower() {
         powerArmed = true;
         powerRaw = powerThreshold;
@@ -467,7 +466,7 @@ Singleton {
     readonly property real rebootThreshold: 300
     readonly property real rebootProgress: Math.min(1, rebootRaw / rebootThreshold)
     // mirror of powerPullDecay/powerPull/powerPullAtThreshold/
-    // powerRestDepth/powerRingScale above — see the comments there
+    // powerRestDepth/powerRingScale above - see the comments there
     readonly property real rebootPullDecay: 400
     readonly property real rebootPull: 170 * (1 - Math.exp(-rebootRaw / rebootPullDecay))
     readonly property real rebootPullAtThreshold: 170 * (1 - Math.exp(-rebootThreshold / rebootPullDecay))
@@ -501,7 +500,7 @@ Singleton {
     // edgeSwipeZone strip pulls a small pill in from the edge (see
     // backPill, near powerRing/rebootRing below, for how it's drawn;
     // bgArea's backTracking for the drag itself). Unlike
-    // swipe-to-power/reboot above there's no separate arm/confirm step —
+    // swipe-to-power/reboot above there's no separate arm/confirm step -
     // releasing past backThreshold fires goBack() immediately, same as
     // Android's own edge-back gesture, since going back is cheap and
     // reversible (worst case you just reopen whatever you left).
@@ -509,13 +508,13 @@ Singleton {
     property bool backDragging: false
     property real backRaw: 0 // raw leftward drag distance from the right edge (finger travel)
     // scene Y the drag actually started at (set once per drag, in
-    // bgArea's onPressed) — backPill spawns there instead of
+    // bgArea's onPressed) - backPill spawns there instead of
     // always centering vertically, same as Android's edge-back pill
     property real backGrabY: 0
     readonly property real backThreshold: 70
     readonly property real backProgress: Math.min(1, backRaw / backThreshold)
     // backPill (see below, near powerRing/rebootRing) is a fixed 56px
-    // circle — same size as the corner settings button it copies — so
+    // circle - same size as the corner settings button it copies - so
     // the resistance curve tracks the finger 1:1 up to that, then
     // resists further travel once fully out, same diminishing-returns
     // curve as powerPull/rebootPull above, applied only to the overshoot
@@ -525,7 +524,7 @@ Singleton {
         enabled: !root.backDragging
         NumberAnimation { duration: Anim.menu(240); easing.type: Easing.OutCubic }
     }
-    // same layered order the Escape keybind used to inline directly —
+    // same layered order the Escape keybind used to inline directly -
     // it now just calls this: let go of an armed power/reboot prompt,
     // else collapse an expanded clip, else back out of settings to
     // whatever pane opened it, else close the launcher outright. The
@@ -579,7 +578,7 @@ Singleton {
         // or dropping entries out from under it as the query changes reads
         // as chaos (tiles teleporting to unrelated slots every keystroke).
         // It keeps Wallpapers.list's natural order/contents always, and
-        // typing instead jumps the selection to the best match — see
+        // typing instead jumps the selection to the best match - see
         // jumpCarousel(), driven from input.onTextChanged.
         if (Settings.wallpaperStyle !== "grid")
             return Wallpapers.list;
@@ -635,7 +634,7 @@ Singleton {
             let delta = ((best - wallpaperSelected) % count + count) % count;
             if (delta > count / 2)
                 delta -= count;
-            // order matches moveCarousel — see its comment
+            // order matches moveCarousel - see its comment
             carouselStep += delta;
             wallpaperSelected = best;
         }
@@ -678,14 +677,14 @@ Singleton {
     // call), so the strip tracks the finger 1:1 while dragging, same as
     // the power/reboot pull tracks raw drag distance while *Dragging is
     // true above. carouselStep itself is untouched until release
-    // (carouselDragEnd) commits whole slots — dragging alone never
+    // (carouselDragEnd) commits whole slots - dragging alone never
     // changes the selection.
     function carouselDragTo(dx: real) {
         carouselDragging = true;
         carouselAnim = carouselStep - dx / root.carouselSlotSpacing;
     }
     // Release: dx/vx (total drag distance, release velocity px/s,
-    // signed) decide how many whole slots to commit — a slow short drag
+    // signed) decide how many whole slots to commit - a slow short drag
     // moves roughly one slot; a fast flick carries further, as if the
     // released velocity kept translating the strip for another ~280ms,
     // same feel as a native flick-scroll. Whatever slot the live drag
@@ -785,7 +784,7 @@ Singleton {
             return 0;
         return ((sel + dir) % count + count) % count;
     }
-    // Down walks the entire column — through every page — before hopping
+    // Down walks the entire column - through every page - before hopping
     // to the top of the next column; Up mirrors it.
     function vMove(sel: int, count: int, cols: int, rows: int, dir: int): int {
         if (!count)
@@ -852,7 +851,7 @@ Singleton {
         }
     }
     // Jumps a whole page at a time (dir: 1 next, -1 previous), keeping
-    // the same row/col within the new page where possible — same "next
+    // the same row/col within the new page where possible - same "next
     // screenful" feel as a phone home screen, rather than landing on
     // whatever cell vMove's row-by-row walk would stop at.
     function pageJump(sel: int, count: int, pageSize: int, dir: int): int {
@@ -888,7 +887,7 @@ Singleton {
     // Shared dominant-axis swipe dispatch: a completed drag's total
     // travel decides pane-cycling (horizontal) vs paging (vertical), one
     // or the other never both. Used by the per-tile DragHandlers (tiles
-    // grab their own presses, so bgArea never sees those drags) — bgArea
+    // grab their own presses, so bgArea never sees those drags) - bgArea
     // keeps its own inline copy since it additionally has to gate each
     // axis independently on where the press started (edge zone, over the
     // wallpaper carousel), which a shared single dx/dy call can't express
@@ -928,11 +927,11 @@ Singleton {
     // chord has been released (not on the initial keydown), matching a
     // real "record a shortcut" UX. captureLive always reflects the most
     // recent key event: a bare modifier (Ctrl alone) shows and can still
-    // be replaced or extended by whatever's pressed next — pressing a
+    // be replaced or extended by whatever's pressed next - pressing a
     // different key switches to that key, holding a modifier and then
     // pressing a real key extends it into "Ctrl+S". Release-time decides
     // whether the final value is actually a complete, saveable chord (a
-    // bare modifier alone never is — see bareModifierLabels below).
+    // bare modifier alone never is - see bareModifierLabels below).
     property string capturingBind: ""
     property string captureLive: ""
     property var captureHeldKeys: []
@@ -966,7 +965,7 @@ Singleton {
         ]);
         let name = special.get(event.key);
         // whether name came from the raw, layout/shift-independent key
-        // code (true for everything below) rather than event.text —
+        // code (true for everything below) rather than event.text -
         // only the text fallback already bakes Shift into the character
         let fromText = false;
         if (!name && event.key >= Qt.Key_F1 && event.key <= Qt.Key_F35)

@@ -2,7 +2,7 @@ import QtQuick
 import "root:/services"
 
 // One arrow of a ‹ value › stepper. Uses the icon font rather than a text
-// glyph — ‹ › sit at different baselines/widths across UI fonts, which
+// glyph - ‹ › sit at different baselines/widths across UI fonts, which
 // misaligned the stepper depending on the user's chosen font.
 Rectangle {
     id: root

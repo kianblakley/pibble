@@ -26,7 +26,7 @@ Column {
     // to reorder the cycle (topmost is the home pane). Vertical
     // list rather than a horizontal chip row so it can hold an
     // arbitrary number of uploaded pages (see below) without
-    // running out of width — grows with the page count up to
+    // running out of width - grows with the page count up to
     // 6 rows (including the "add a page" row), then scrolls.
 
     PageList {}
@@ -277,6 +277,8 @@ Column {
     }
 
     SettingRow { key: "clipsMax"; label: "Clipboard entries" }
+
+    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
 
 }
 

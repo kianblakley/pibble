@@ -8,7 +8,7 @@ import "root:/services"
 //
 // It has to be a real (1x1, click-through, invisible) window rather than the
 // screen's own devicePixelRatio: only a mapped surface is told the *fractional*
-// scale (wp-fractional-scale-v1), which is the number the blur needs — 1.25
+// scale (wp-fractional-scale-v1), which is the number the blur needs - 1.25
 // against a screen and a never-shown window that both report the rounded 2.
 // The surface goes away the moment the number lands.
 //
@@ -17,7 +17,7 @@ import "root:/services"
 // back to that: asking for a screencopy frame makes Quickshell bind a second
 // wl_output, and the compositor then sends every one of this process's surfaces
 // a wl_surface.enter naming an output Qt did not bind and cannot resolve, which
-// poisons Qt's per-surface screen bookkeeping for the rest of the session — the
+// poisons Qt's per-surface screen bookkeeping for the rest of the session - the
 // next surface to leave an output (i.e. the first time the launcher closes)
 // segfaults inside QWaylandWindow::handleScreensChanged. That reproduced on
 // every `pibble toggle` against a cold daemon.
@@ -25,10 +25,15 @@ Scope {
     id: root
 
     property real measured: 0
+    // Which output `measured` was taken on. The probe follows the launcher
+    // between monitors (both ride Wallpapers.screen), and the debounce below is
+    // long enough for that to happen mid-measurement, so the number has to say
+    // where it came from - see Wallpapers.setXrayOutputScale.
+    property string measuredOn: ""
 
     // A freshly created surface reports 1, then the output's rounded integer
     // scale, and only lands on the fractional scale a few milliseconds later,
-    // so publish on a debounce rather than latching the first value — the whole
+    // so publish on a debounce rather than latching the first value - the whole
     // wallpaper folder gets baked against whatever this resolves to. Publishing
     // is also what unloads the window below (it clears xrayScaleWanted), which
     // is why the timer sits outside the LazyLoader: it has to outlive what it
@@ -37,7 +42,7 @@ Scope {
     Timer {
         id: settle
         interval: 500
-        onTriggered: Wallpapers.setXrayOutputScale(root.measured)
+        onTriggered: Wallpapers.setXrayOutputScale(root.measured, root.measuredOn)
     }
 
     LazyLoader {
@@ -59,14 +64,18 @@ Scope {
 
             // seeded here as well as on change, since an unscaled output can
             // map at 1 and never report anything different
-            Component.onCompleted: {
+            function report(): void {
                 root.measured = probe.devicePixelRatio;
+                root.measuredOn = probe.screen ? probe.screen.name : "";
                 settle.restart();
             }
-            onDevicePixelRatioChanged: {
-                root.measured = probe.devicePixelRatio;
-                settle.restart();
-            }
+
+            Component.onCompleted: probe.report()
+            onDevicePixelRatioChanged: probe.report()
+            // moving to another output is a fresh measurement, not a continuation
+            // of the last one: the fractional scale it reports may well be the
+            // same number, in which case nothing else here would fire at all
+            onScreenChanged: probe.report()
         }
     }
 }

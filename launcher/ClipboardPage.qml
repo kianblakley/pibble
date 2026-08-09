@@ -13,7 +13,7 @@ Item {
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -141,7 +141,7 @@ Item {
                                         // pane before switching to it): drop
                                         // straight to hidden, clearing shownClip
                                         // by hand since springOut's onStopped
-                                        // below isn't the one doing it — see
+                                        // below isn't the one doing it - see
                                         // AppsPage's identical branch
                                         springOut.stop();
                                         tile.opacity = 0;
@@ -363,7 +363,7 @@ Item {
                                 // clear shownClip once the tile is actually gone, not just
                                 // invisible: tileH (and so this cell's visible/height) is
                                 // derived from shownClip, so leaving it set would keep this
-                                // cell's slot permanently reserved in the masonry column —
+                                // cell's slot permanently reserved in the masonry column -
                                 // stale layout space a later "no matches" state reads as
                                 // tiles still being there. Guarded by filled: a re-match
                                 // arriving mid-exit already called .stop() on us via the
@@ -400,7 +400,7 @@ Item {
     // Fades in only once the last exiting tile has fully sprung out
     // (Anim.tile(240), matching springOut) instead of popping in on
     // top of tiles still animating away. wantShow is a plain
-    // reactive binding (always correct for the *current* query) —
+    // reactive binding (always correct for the *current* query) -
     // debouncedShow just delays acting on it by one springOut's
     // worth of time, via a Timer that restarts/cancels on every
     // change instead of an imperative restart()/stop() pair racing

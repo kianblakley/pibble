@@ -33,11 +33,13 @@ Singleton {
     //
     // One blurred image serves both uses: the launcher's own backdrop in
     // "xray" mode and the $BLUR the wallpaper command gets (see
-    // applyWallpaper) — they're the same picture, so they're the same file.
+    // applyWallpaper) - they're the same picture, so they're the same file.
     property var list: []
+    // raw stdout of the scan `list` was last built from; see where it's compared
+    property string lastScanText: ""
     // xrayCacheKey as of the last scan that landed. Only when it matches the
     // current one do the entries say anything about the backdrops the
-    // launcher is actually after — before that (a scan from before the
+    // launcher is actually after - before that (a scan from before the
     // output scale resolved, say) a missing entry means "not looked for
     // yet", not "not there".
     property string scanKey: ""
@@ -54,7 +56,7 @@ Singleton {
     // Started a tick late: this is called from change handlers on the very
     // properties the scan's own command binding reads (see xrayCacheKey), and
     // a binding is only guaranteed to have caught up by the time the next one
-    // reads it — flipping `running` inline reliably ran the scan against the
+    // reads it - flipping `running` inline reliably ran the scan against the
     // previous geometry.
     function rescan(): void {
         scan.running = false;
@@ -73,7 +75,7 @@ Singleton {
         id: scan
         running: true
         // the xray parameters this run went looking for, captured at spawn
-        // rather than read back when it finishes — the two can differ by a
+        // rather than read back when it finishes - the two can differ by a
         // whole scan (the output scale resolving is exactly that case), and
         // reading it late would claim a stale result was current
         property string scanKey: ""
@@ -108,7 +110,7 @@ Singleton {
                 bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
                 # a video source can't stand in as its own thumbnail (unlike
                 # a fresh image/gif, which the Image element can decode
-                # directly) — leave thumb blank until the async pass below
+                # directly) - leave thumb blank until the async pass below
                 # generates a real frame
                 thumb="$PWD/$f" blur=""
                 case "\${ext,,}" in mp4) thumb="" ;; esac
@@ -123,6 +125,7 @@ Singleton {
             onStreamFinished: {
                 root.scanKey = scan.scanKey;
                 if (text.trim() === "NODIR") {
+                    root.lastScanText = text;
                     root.list = [];
                     if (root.lastMissingDir !== root.dir) {
                         root.lastMissingDir = root.dir;
@@ -135,12 +138,24 @@ Singleton {
                     const p = l.split("|");
                     return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
-                root.list = walls;
+                // Reassigning this array invalidates every tile's model entry,
+                // which tears each delegate down and rebuilds it - re-creating
+                // its ClippingRectangle render target and re-uploading its
+                // thumbnail texture. A scan runs on every launcher open, and
+                // the folder is almost never different between two of them, so
+                // that cost was being paid mid-reveal for an identical result.
+                // The scan's raw output is the canonical form of everything
+                // `walls` is derived from, so an unchanged one means an
+                // unchanged model: keep the existing array and its delegates.
+                if (text !== root.lastScanText) {
+                    root.lastScanText = text;
+                    root.list = walls;
+                }
                 // Generate missing thumbnails (a full 5K image standing in as
                 // its own thumbnail costs ~100ms to decode+upload) and blurred
                 // variants in the background; the next scan picks them up and
                 // applying never has to blur synchronously. Also sweeps cache
-                // entries whose source wallpaper is gone — runs every scan
+                // entries whose source wallpaper is gone - runs every scan
                 // (not just when something's missing) so deletions get cleaned
                 // up promptly.
                 //
@@ -163,7 +178,7 @@ Singleton {
                 // launcher keeps falling back (a sharp thumbnail-less video
                 // tile, a live-blurred backdrop). Comparing against the last
                 // set of missing entries is what keeps a cache that *can't*
-                // be filled — no ImageMagick — from scanning on a loop: it
+                // be filled - no ImageMagick - from scanning on a loop: it
                 // only re-arms while the set is still shrinking.
                 const missing = walls.filter(w => w.thumb === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
                 if (missing !== "" && missing !== root.generationMissing)
@@ -271,7 +286,7 @@ Singleton {
                         # blur lands at the sigma it was baked for. The crop
                         # rounds to a whole pixel of an image a quarter of the
                         # screen's size, which measures ~3 output pixels below
-                        # the compositor's blur of the same wallpaper —
+                        # the compositor's blur of the same wallpaper -
                         # deliberately left as is.
                         if [ "$needblur" = "1" ] && command -v magick >/dev/null 2>&1; then
                             bsrc="$f"
@@ -306,27 +321,27 @@ Singleton {
     // thing being blurred and it almost never changes, so blurring it once
     // and reusing the result is free from then on. Live blur, by contrast,
     // pays a shader compile plus a screen-sized offscreen pass on the first
-    // frame after the layer surface maps — long enough to watch the backdrop
+    // frame after the layer surface maps - long enough to watch the backdrop
     // turn up late behind a grow reveal. The same file is what a wallpaper
     // command gets as $BLUR (see LauncherWindow.applyWallpaper).
     //
     // The kernel is cloned from niri's defaults (`blur { passes 3; offset 3;
-    // noise 0.02; saturation 1.5 }`). Its dual kawase chain — 3 downsample
+    // noise 0.02; saturation 1.5 }`). Its dual kawase chain - 3 downsample
     // then 3 upsample passes, each tapping at `offset` halves of a
     // destination pixel with the 5/8-tap kernels in
-    // src/render_helpers/shaders/blur_{down,up}.frag — has an impulse
+    // src/render_helpers/shaders/blur_{down,up}.frag - has an impulse
     // response indistinguishable from a gaussian of sigma 19.17: simulating
     // the chain and blurring a hard edge with `-blur 0x19.17` both spread it
     // over exactly 50px, 10% to 90%. So one gaussian is the whole chain.
     //
     // Saturation is niri's postprocess step: a mix toward Rec.709 luma,
     // applied to the blurred result in the same non-linear sRGB the blur
-    // itself runs in (its textures are plain 8-bit ABGR, no linearization) —
+    // itself runs in (its textures are plain 8-bit ABGR, no linearization) -
     // which is what -color-matrix does here, and why nothing converts to
     // linear light first. Niri's noise step is the one part deliberately not
     // reproduced: it can't be baked in (this image is upscaled on the way to
     // the screen, so it would land as blotches rather than dither), and the
-    // alternative — a noise tile drawn live over the backdrop — is a
+    // alternative - a noise tile drawn live over the backdrop - is a
     // full-screen texture that also shows as grain over the desktop whenever
     // there's no wallpaper baked to sit under it. The banding it would have
     // hidden is accepted instead.
@@ -334,15 +349,15 @@ Singleton {
     // Sigma is niri's radius in *output* pixels. On a fractionally scaled
     // output the compositor hands anyone not speaking wp-fractional-scale a
     // rounded wl_output scale (niri reports 2 for a 1.25x output, which is
-    // what a ShellScreen's devicePixelRatio — and a window's, until its
-    // surface is mapped — comes back as), so dividing by that lands the blur
+    // what a ShellScreen's devicePixelRatio - and a window's, until its
+    // surface is mapped - comes back as), so dividing by that lands the blur
     // a long way off. A mapped surface is told the real fractional scale, so
     // that is what gets measured. See XrayScaleProbe.
     readonly property real xraySigma: 19.17
     // Baked at a quarter of the output's logical resolution. A blur this
     // wide leaves nothing that a quarter-rate sampling can't carry: against
     // the same blur done at full output resolution, the quarter-size bake
-    // scaled back up measures 55dB PSNR — visually identical, at a sixteenth
+    // scaled back up measures 55dB PSNR - visually identical, at a sixteenth
     // of the magick run, the file size, the decode and the texture upload.
     readonly property int xrayScale: 4
     readonly property size xraySize: {
@@ -352,11 +367,21 @@ Singleton {
         return Qt.size(Math.max(1, Math.round(s.width / root.xrayScale)), Math.max(1, Math.round(s.height / root.xrayScale)));
     }
     // output pixels per logical pixel, 0 until measured (see
-    // XrayScaleProbe). Nothing bakes until it resolves — baking a whole
+    // XrayScaleProbe). Nothing bakes until it resolves - baking a whole
     // wallpaper folder at the wrong sigma and then again at the right one
-    // is minutes of pointless work — but it always resolves, to 1 if the
+    // is minutes of pointless work - but it always resolves, to 1 if the
     // measurement can't be made.
     property real xrayOutputScale: 0
+    // Every output measured so far, by name. The launcher follows the
+    // compositor's focused output (see LauncherWindow.syncScreen), so `screen`
+    // changes whenever it opens on a different monitor - and a different output
+    // can have a different fractional scale, which is the unit xraySigma is
+    // expressed in, so the measurement has to be made again there. Remembering
+    // it per output is what keeps moving *back* free: an unmeasured output
+    // spends a probe (~500ms) with the backdrop dropped to the live-blur
+    // fallback, since a scale of 0 is also what holds the bake back.
+    property var xrayOutputScales: ({})
+    onScreenChanged: root.xrayOutputScale = (root.screen ? root.xrayOutputScales[root.screen.name] : 0) ?? 0
     // the blur as it applies to the baked image rather than to the screen:
     // output pixels -> logical pixels -> the quarter-size image. 0 while the
     // scale is unknown, which is what holds the bake back.
@@ -370,22 +395,51 @@ Singleton {
         const w = root.list.find(x => x.path === Settings.currentWallpaper);
         return w ? w.blur : "";
     }
-    // What the backdrop actually draws — xrayBlur, but only ever picked up
-    // while the launcher is down. Applying a wallpaper leaves the launcher
-    // open on the picker, where the tiles hide the backdrop; the swap only
-    // becomes visible as the UI fades out on the way to closing, which reads
-    // as the backdrop changing out from under the exit animation.
-    property string xrayShown: ""
-    function syncXrayShown() {
-        // ...unless there is nothing on screen to swap *from*, which is the
-        // whole of the first session after a daemon restart: the bake for the
-        // current wallpaper only lands part-way into that first open, and
-        // holding it back until the launcher closes left the entire open
-        // drawing the live-blur fallback instead.
-        if (!root.launcherShown || root.xrayShown === "")
-            root.xrayShown = root.xrayBlur;
+    // Everything the backdrop could draw, best first: the bake, or - until
+    // there is one - the raw wallpaper for the launcher to blur live. That
+    // fallback is only worth naming once a scan that was actually looking for
+    // the current backdrops has come back without one (see scanKey); before
+    // that it is just a full-size wallpaper decode that the bake replaces
+    // moments later.
+    readonly property string xrayWant: {
+        if (Settings.bgBlur !== "xray")
+            return "";
+        if (root.xrayBlur !== "")
+            return root.xrayBlur;
+        return root.scanKey === root.xrayCacheKey ? root.matugenSource : "";
     }
-    onXrayBlurChanged: root.syncXrayShown()
+    // What the backdrop actually draws, and whether that is the raw wallpaper
+    // - i.e. whether the launcher has to blur it itself.
+    property string xrayShown: ""
+    property bool xrayShownLive: false
+    function syncXrayShown() {
+        // Only ever swapped while the launcher is down. Two things move it,
+        // and neither is watchable mid-open:
+        //
+        //   - applying a wallpaper leaves the launcher open on the picker,
+        //     where the tiles hide the backdrop, so the swap only shows as the
+        //     UI fades out on the way to closing - which reads as the backdrop
+        //     changing out from under the exit animation.
+        //   - the output scale resolving (see XrayScaleProbe, ~1.4s after a
+        //     daemon start, and later than that with Settings.preload on)
+        //     re-keys every cache entry, walking xrayWant through "" and then
+        //     a bake that still has to be decoded. An Image drops what it is
+        //     showing the moment its source changes, so on a first open caught
+        //     inside that window it is a backdrop-shaped hole under the reveal
+        //     - measured 600ms of nothing at all, the decode being that slow
+        //     against a first open's busy GUI thread.
+        //
+        // Drawing nothing is the one thing worse than swapping late, so an
+        // empty backdrop takes whatever is going immediately: on a cold cache
+        // the alternative is a whole first open with no backdrop at all. Same
+        // for a backdrop nobody is looking at, which is what the mode being
+        // off makes this.
+        if (root.launcherShown && root.xrayShown !== "" && Settings.bgBlur === "xray")
+            return;
+        root.xrayShownLive = root.xrayWant !== "" && root.xrayBlur === "";
+        root.xrayShown = root.xrayWant;
+    }
+    onXrayWantChanged: root.syncXrayShown()
     // Everything the baked files are named after. A new output geometry or
     // scale (or switching the mode on at all) changes every name, so the
     // scan has to run again to generate the new ones and sweep the old.
@@ -401,16 +455,29 @@ Singleton {
     // pixels, which is exactly right on an unscaled output.
     readonly property bool xrayScaleWanted: (Settings.bgBlur === "xray" || Settings.wallCommand.includes("$BLUR"))
         && root.xrayOutputScale === 0 && root.screen !== null
-    function setXrayOutputScale(s) {
+    // `output` is the name of the output the measurement was taken on, which is
+    // not necessarily the one in use by the time it lands: the probe settles on
+    // a debounce (see XrayScaleProbe), and the launcher can move to another
+    // monitor inside that window.
+    function setXrayOutputScale(s, output) {
         // a bad measurement (a surface that never mapped, a screen that
         // resized mid-measure) must still resolve to something, or nothing
         // would ever bake
-        root.xrayOutputScale = s > 0.1 ? s : 1;
+        const scale = s > 0.1 ? s : 1;
+        // mutated in place deliberately - nothing binds to the map, it is only
+        // ever read back on a screen change
+        if (output)
+            root.xrayOutputScales[output] = scale;
+        // a measurement for an output that is no longer the one in use is worth
+        // filing but not applying; the probe is already re-running against the
+        // current one, and adopting this would bake the folder at its sigma
+        if (!output || !root.screen || output === root.screen.name)
+            root.xrayOutputScale = scale;
     }
     Timer {
         id: xrayScaleTimeout
         interval: 3000
         running: root.xrayScaleWanted
-        onTriggered: root.setXrayOutputScale(1)
+        onTriggered: root.setXrayOutputScale(1, root.screen ? root.screen.name : "")
     }
 }

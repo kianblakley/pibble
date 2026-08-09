@@ -81,7 +81,12 @@ Singleton {
     // card surface behind both flyouts
     readonly property color flyoutSurface: "#0c0c10"
 
-    readonly property string fontFamily: Settings.fontFamily
+    // "" (system default) falls back to the GTK monospace font the `pibble`
+    // script resolved into QS_FONT_FAMILY at startup (see export_font_family) -
+    // Qt's own font.family: "" resolution isn't reliable in a bare
+    // layer-shell session, the same problem export_icon_theme works around
+    // for icons.
+    readonly property string fontFamily: Settings.fontFamily || Quickshell.env("QS_FONT_FAMILY") || ""
 
     function fontSize(px: int): int {
         return Math.round(px * Settings.fontScale);
@@ -99,7 +104,7 @@ Singleton {
     // ---------- matugen (Dynamic theme) ----------
 
     // Kicked off imperatively from SettingsStore's initial load and from
-    // LauncherWindow.commitWallpaper() on every wallpaper pick — never via a
+    // LauncherWindow.commitWallpaper() on every wallpaper pick - never via a
     // `running: Settings.theme === "matugen"`-style binding. That was tried and
     // races: the settings file load is async, so Settings.currentWallpaper is
     // still "" (the adapter's blank default) when the tree is first
@@ -109,7 +114,7 @@ Singleton {
     // loses: once the load completes, `running` and `command` both react to the
     // same Settings.currentWallpaper change as sibling bindings on this
     // Process, and Qt doesn't guarantee `command` has re-evaluated to the
-    // loaded path before `running`'s flip spawns the process — so it reliably
+    // loaded path before `running`'s flip spawns the process - so it reliably
     // ran with an empty $WALL anyway. Driving both imperatively, one statement
     // after the other, forces the ordering.
     function sampleWallpaper(): void {
@@ -131,7 +136,7 @@ Singleton {
         }
 
         // samples Settings.currentWallpaper (set when a pick is committed)
-        // rather than asking the compositor what's on screen — wallCommand is a
+        // rather than asking the compositor what's on screen - wallCommand is a
         // freeform user command and may not even go through the tool we'd
         // query, so the picker's own record of what it applied is the only
         // source that's guaranteed to match

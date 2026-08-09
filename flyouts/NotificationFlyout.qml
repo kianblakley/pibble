@@ -70,6 +70,8 @@ Scope {
                 ColorAnimation { duration: 220 }
             }
 
+            // seeded here, then owned by fire() from the first card on
+            screen: ActiveOutput.screen
             visible: phase !== "hidden"
             anchors.top: true
             anchors.right: true
@@ -150,8 +152,8 @@ Scope {
                 }
                 // "default" theme tints from the app icon (else the media
                 // image); pinned themes use their accent everywhere. Own
-                // (pibble-sent) alerts never carry a real app icon — those
-                // render a synthetic glyph instead — so they only ever tint
+                // (pibble-sent) alerts never carry a real app icon - those
+                // render a synthetic glyph instead - so they only ever tint
                 // from a real image (wallpaper-changed thumbnail, an image
                 // clip's "Copied to clipboard"); glyph-only own alerts (e.g.
                 // trash, watcher notices) fall through to the theme accent
@@ -170,6 +172,14 @@ Scope {
             function fire(n) {
                 snapshot(n);
                 exitDir = 0;
+                // onto whichever monitor is in use. Only ever while the window
+                // is unmapped (phase is "hidden" for as long as it is, and this
+                // is the only thing that leaves it): a layer surface's output
+                // is fixed when it's created, so a card already on screen -
+                // including one being replaced in place by a same-app arrival,
+                // which never comes through here - stays where it is.
+                if (phase === "hidden" && ActiveOutput.screen)
+                    window.screen = ActiveOutput.screen;
                 phase = "appear";
                 phaseTimer.restart();
             }
@@ -304,7 +314,7 @@ Scope {
                         window.fire(window.queue.shift());
                 }
             }
-            // sender closed the on-screen notification — animate out
+            // sender closed the on-screen notification - animate out
             Connections {
                 target: window.current
                 ignoreUnknownSignals: true
@@ -342,7 +352,7 @@ Scope {
             // directly (reads back all-zero pixels even once Ready), and
             // Canvas.loadImage() never resolves the "itemgrabber:" URL that
             // Item.grabToImage() hands back (onImageLoaded never fires for
-            // it) — but a real file:// path loads and draws fine, so the
+            // it) - but a real file:// path loads and draws fine, so the
             // grab is saved to disk and reloaded from there. Grabbing the
             // already 26x26-decoded item keeps this cheap even when a
             // full-size screenshot arrives as notification media (loading
@@ -492,7 +502,7 @@ Scope {
                     source: window.view.own ? "" : window.view.icon
                     visible: String(source) !== ""
                 }
-                // no app icon (own or not — e.g. niri's screenshot
+                // no app icon (own or not - e.g. niri's screenshot
                 // notification carries only an image, no icon): fall back
                 // to the icon font's glyph (Icons.bell by default, see
                 // Notifier.glyphFor) instead of a fixed drawing
@@ -889,7 +899,7 @@ Scope {
                             }
 
                             // the watcher-not-running alert's only actionable
-                            // content is the setup commands in its body — a
+                            // content is the setup commands in its body - a
                             // real button, not tap-to-copy-and-vanish, so
                             // expanding it behaves like any other
                             // notification and copying is a deliberate,
@@ -1011,7 +1021,7 @@ Scope {
                     }
                 }
                 TapHandler {
-                    // a tap (not a drag) expands the clipped body — same as
+                    // a tap (not a drag) expands the clipped body - same as
                     // any other long notification, including the "watcher
                     // not running" alert (its copy button, in the expanded
                     // body, is a nested MouseArea so it grabs the press

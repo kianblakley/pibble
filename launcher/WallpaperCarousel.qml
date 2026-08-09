@@ -6,13 +6,13 @@ import "root:/services"
 // Wallpaper selector, "carousel" style: an infinite horizontal strip of
 // narrow parallax windows with the selected wallpaper always centered.
 // One shared video player stands in for whichever cell holds the selection
-// rather than one per cell — see the note above it for why.
+// rather than one per cell - see the note above it for why.
 Item {
     id: root
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -31,7 +31,7 @@ Item {
     // A count change strands the Repeater's surviving delegates:
     // their absStep was imperatively relabeled by rebalance()
     // (congruent mod the *old* totalSlots), and freshly added
-    // ones init assuming step 0 — so rebuild the whole
+    // ones init assuming step 0 - so rebuild the whole
     // contiguous window around the current selection, keeping
     // LauncherState.carouselStep congruent with LauncherState.wallpaperSelected. callLater
     // lets the Repeater finish adding/removing delegates first;
@@ -56,7 +56,7 @@ Item {
     readonly property real edgeFloor: 0.7
     readonly property real edgeRate: 0.07
     // |rank| at which the falloff above hits edgeFloor and goes
-    // constant — the boundary between the two edgeOffset
+    // constant - the boundary between the two edgeOffset
     // branches below.
     readonly property real edgeBreak: (1 - edgeFloor) / edgeRate
     // constant per-step position delta once cells are past
@@ -66,12 +66,12 @@ Item {
     // Magnitude of a cell's x offset from center, as a function
     // of |rank| (m). Plain `m * slotSpacing` (rank-linear
     // spacing) is what scale shrinking around each cell's own
-    // center visibly opens up into growing gaps — every step a
+    // center visibly opens up into growing gaps - every step a
     // cell's near edge retreats by half its own shrink *and*
     // its neighbor's, while the two centers stay slotSpacing
     // apart regardless of scale. This is the closed form of
     // "each step's cell-to-cell gap stays exactly slotSpacing -
-    // barWidth, the scale=1 gap" — solved by requiring
+    // barWidth, the scale=1 gap" - solved by requiring
     // edgeOffset(m+1) - edgeOffset(m) == slotSpacing -
     // barWidth*(scale(m) + scale(m+1))/1 for every real m (not
     // just integers, since a slide's rank is continuous and
@@ -136,12 +136,12 @@ Item {
             // drives the ring/stroke/fill selection highlight
             // below; continuous in |rank| (not isCenter's hard
             // cutoff) so it cross-fades with the slide instead
-            // of snapping — see wallCell's isSelected boolean
+            // of snapping - see wallCell's isSelected boolean
             // toggle above for how the static tiles grid does it
             readonly property real selFade: Math.max(0, 1 - Math.abs(rank) * 2)
             // the carousel is already a horizontal strip, so
             // every style's entrance drift (Anim.fromY) runs
-            // along x here instead of the grids' vertical y —
+            // along x here instead of the grids' vertical y -
             // same magnitude, just the other axis. "slide"
             // flips the sign: the grid version reads as rows
             // rising up from below, and cells sliding in from
@@ -158,7 +158,7 @@ Item {
 
             // once a cell has drifted a full step past the resting
             // buffer, relabel it to the opposite edge (±totalSlots
-            // keeps it congruent mod the ring) — by then it's
+            // keeps it congruent mod the ring) - by then it's
             // faded to 0 opacity, so the relabel is invisible
             function rebalance() {
                 while (absStep - LauncherState.carouselAnim > root.restSpan + 1)
@@ -195,7 +195,7 @@ Item {
             width: root.barWidth
             height: root.barHeight
             z: -Math.abs(rank)
-            // continuous in rank (exactly 1 at rank 0) — an
+            // continuous in rank (exactly 1 at rank 0) - an
             // isCenter branch here would snap scale mid-slide
             // the moment rank crosses 0.5. Uniform (not a
             // separate x/y scale): scaling width and height
@@ -206,7 +206,7 @@ Item {
             // opacity/rank cull below): a cell losing its wall
             // (query no longer matches, list emptied) still needs
             // to render while wrap's own opacity plays the exit
-            // spring — hard-cutting the parent to 0 here would
+            // spring - hard-cutting the parent to 0 here would
             // hide that animation entirely. A cell that's never
             // had a wall (count === 0) just stays invisible via
             // wrap's untouched initial opacity of 0.
@@ -214,7 +214,7 @@ Item {
 
             // entrance/exit spring for this window's content,
             // replayed whenever filtering changes which wallpaper
-            // it shows — same bloom/pop/fade/reveal/slide/none
+            // it shows - same bloom/pop/fade/reveal/slide/none
             // language (Settings.animStyle) and stagger the tile grids use
             property var shownWall: null
             property bool filled: false
@@ -244,7 +244,7 @@ Item {
                     if (LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid") {
                         springOut.restart();
                     } else {
-                        // filtered while the pane is off-screen — for the
+                        // filtered while the pane is off-screen - for the
                         // carousel that's a query with no match at all
                         // (LauncherState.carouselEmpty) typed from the clock,
                         // one statement before the pane switch. Same reasoning
@@ -260,7 +260,7 @@ Item {
                 // fixed size matching the parent, not
                 // anchors.fill: an anchor continuously
                 // re-asserts x/y against the parent, silently
-                // overriding the spring's writes below — same
+                // overriding the spring's writes below - same
                 // reason wallWrap/clipTile size themselves this
                 // way instead of anchoring
                 width: parent.width
@@ -276,7 +276,7 @@ Item {
                 // cross-fades smoothly between the outgoing and
                 // incoming centered card as the carousel slides,
                 // instead of popping on/off mid-transition.
-                // Anchored to parent (wrap), not thumb — same
+                // Anchored to parent (wrap), not thumb - same
                 // reason the inner stroke below is: anchoring to
                 // the ClippingRectangle sibling instead of the
                 // plain, non-clipping parent visibly jittered the
@@ -301,10 +301,10 @@ Item {
                         // scroll direction, so each window reads as
                         // a fixed frame onto a slowly-drifting
                         // backdrop. The pan is driven by the cell's
-                        // rank — bounded, unlike LauncherState.carouselAnim,
+                        // rank - bounded, unlike LauncherState.carouselAnim,
                         // whose unbounded growth would slide the
                         // backdrop out of the frame after a few
-                        // steps in one direction — and the image is
+                        // steps in one direction - and the image is
                         // wide enough to cover the whole fade range
                         // (|rank| <= halfVisible + 1; past that the
                         // cell is fully transparent, so further
@@ -316,28 +316,28 @@ Item {
                         // the pan free of seams.
                         //
                         // Video uses its cached still frame here
-                        // (Image can't decode the source file — see
+                        // (Image can't decode the source file - see
                         // the source binding below) in this same
                         // wide/panned box, so it pans exactly like
                         // every other type. The still keeps the
                         // video's own aspect rather than the tile
                         // grid's 16:9 crop (see the ffmpeg call in
                         // Wallpapers' scan), which is what lets the shared
-                        // player below hand over to it — and back —
+                        // player below hand over to it - and back -
                         // without the crop shifting.
                         width: root.barWidth + ((root.halfVisible + 1) * root.parallaxPx + 20) * 2
                         height: parent.height
                         anchors.verticalCenter: parent.verticalCenter
                         x: (parent.width - width) / 2 - cell.rank * root.parallaxPx
                         // stays visible underneath even once
-                        // animating/videoAnimating — see the matching
+                        // animating/videoAnimating - see the matching
                         // note on the grid tile's still Image
                         asynchronous: true
                         fillMode: Image.PreserveAspectCrop
                         sourceSize: Qt.size(0, root.barHeight)
                         // shownWall, not wall: wall goes null the instant
                         // the cell is filtered/emptied out, but the exit
-                        // spring below still needs something to fade —
+                        // spring below still needs something to fade -
                         // shownWall keeps the last-rendered wallpaper
                         // until a new one replaces it (see onWallChanged).
                         // A video source can't be decoded by Image at
@@ -351,7 +351,7 @@ Item {
                     // above (which already shows frame 0 of a gif) so
                     // scrolling the carousel doesn't decode a movie
                     // per window. Video is not played per cell at all
-                    // — see the single shared player below the
+                    // - see the single shared player below the
                     // Repeater.
                     // style/shown checked for the same reason the
                     // grid's tiles check them (see tileLive above):
@@ -360,7 +360,7 @@ Item {
                     //
                     // Starts as soon as this cell is the selected
                     // one and within a slot of center, rather than
-                    // waiting for the slide to stop — a gif that
+                    // waiting for the slide to stop - a gif that
                     // only came to life after the strip had already
                     // settled read as the preview lagging the
                     // navigation. Playing mid-slide is only safe
@@ -400,7 +400,7 @@ Item {
                 // width is an odd multiple of slotSpacing) and
                 // side cells have fractional edges from the rank
                 // scale, so the clip mask and an underlying
-                // border rasterize a pixel apart — the image eats
+                // border rasterize a pixel apart - the image eats
                 // the right/bottom stroke and roughens the
                 // corners (same image-over-border effect the
                 // tiles grid's WallpaperGrid stroke above works
@@ -416,7 +416,7 @@ Item {
                 }
                 // TapHandler (not a plain MouseArea) so a
                 // completed swipe below doesn't also register
-                // as a click — same tap-vs-drag split the
+                // as a click - same tap-vs-drag split the
                 // pages list's swipe-to-delete row uses.
                 TapHandler {
                     enabled: cell.wall !== null && !LauncherState.promptOpen
@@ -428,7 +428,7 @@ Item {
                     }
                 }
                 // swiping the image itself scrolls the
-                // carousel — same LauncherState.carouselDragTo()/
+                // carousel - same LauncherState.carouselDragTo()/
                 // carouselDragEnd() the background's
                 // carouselTracking gesture uses, just fed
                 // straight from the drag instead of
@@ -457,7 +457,7 @@ Item {
                 PropertyAction { target: wrap; property: "scale"; value: Anim.fromScale }
                 PropertyAction { target: wrap; property: "x"; value: cell.springFromX }
                 PropertyAction { target: wrap; property: "y"; value: cell.springFromY }
-                // cols: 1 — the carousel is a single strip, so
+                // cols: 1 - the carousel is a single strip, so
                 // "slide"'s row-based stagger (Math.floor(slot /
                 // cols) * step) should treat each tile as its own
                 // row instead of collapsing them all into row 0.
@@ -488,7 +488,7 @@ Item {
 
     // One video surface for the whole carousel, standing in for
     // whichever cell holds the selection, rather than one living
-    // inside each cell — every video's player is already open and
+    // inside each cell - every video's player is already open and
     // paused behind it (see WallpaperVideoPool), so what navigation
     // does here is only ever move this surface and start or stop
     // the player it points at, both of which are free.
@@ -510,7 +510,7 @@ Item {
     // centerRank always measures from the slot the open file
     // actually belongs to. Without this it tracked
     // LauncherState.carouselStep directly, which jumps to the
-    // *destination* slot the instant navigation starts — fine
+    // *destination* slot the instant navigation starts - fine
     // while hopping video-to-video (videoSource jumps with it),
     // but wrong leaving a video for a plain image: videoSource
     // stays put (see onCenterWallChanged), so the fading-out
@@ -522,6 +522,24 @@ Item {
         videoSource = centerWall.path;
         videoAbsStep = LauncherState.carouselStep;
     }
+    // Same ± totalSlots wrap the cells' own rebalance() applies to
+    // absStep (see cell.rebalance above), kept in sync here too: without
+    // it, videoAbsStep is the one position on this whole strip that
+    // never gets recycled, so a slot it drifted off from during a fast
+    // scroll stays on the books forever and can wrap back into view
+    // later - by then some other cell owns that geometric spot, and the
+    // stale player would paint the old video's frame over its content
+    // instead of staying retired off-screen like every real cell does.
+    function rebalanceVideo() {
+        while (root.videoAbsStep - LauncherState.carouselAnim > root.restSpan + 1)
+            root.videoAbsStep -= root.totalSlots;
+        while (root.videoAbsStep - LauncherState.carouselAnim < -(root.restSpan + 1))
+            root.videoAbsStep += root.totalSlots;
+    }
+    Connections {
+        target: LauncherState
+        function onCarouselAnimChanged() { root.rebalanceVideo(); }
+    }
     // videoSource === centerWall.path holds off the handover for
     // the frame or two after a switch between two videos, while
     // the player still has the previous file open.
@@ -530,16 +548,16 @@ Item {
     // is looking at costs the same as decoding for one they are.
     readonly property bool videoShowing: LauncherState.shown && LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
     // Rank of the slot the player stands in for: the cell
-    // videoSource belongs to (see videoAbsStep above) — the one
+    // videoSource belongs to (see videoAbsStep above) - the one
     // it's riding into on a video-to-video handover, or the one
     // it's riding off of when the next cell over isn't a video.
     // 0 at rest, ±1 at the start of a step, free-running under a
-    // drag — which is what keeps the player over its own cell
+    // drag - which is what keeps the player over its own cell
     // throughout the motion rather than over whatever happens to
     // be in the middle.
     readonly property real centerRank: videoAbsStep - LauncherState.carouselAnim
     // The shared player has no entrance spring of its own, so
-    // hold it back until the cells have finished theirs — it
+    // hold it back until the cells have finished theirs - it
     // would otherwise sit at full opacity in the center slot
     // while the cell it stands in for is still fading/sliding
     // in. Longest case: the center cell's stagger delay plus
@@ -553,7 +571,7 @@ Item {
     Item {
         id: sharedVideo
         // the same placement/scale/stacking cell derives from
-        // its own rank — see the notes there for why each is
+        // its own rank - see the notes there for why each is
         // shaped the way it is
         x: parent.width / 2 - width / 2 + Math.sign(root.centerRank) * root.edgeOffset(Math.abs(root.centerRank))
         y: 0
@@ -590,13 +608,16 @@ Item {
                 live: root.videoShowing
                 // Only while the launcher is down, so the file
                 // opens land with nothing on screen to stutter
-                // rather than inside a slide — the same reason
-                // pibble-warmup decodes theme SVGs at startup. The
-                // style check keeps the grid's own pool from
-                // opening the same files a second time over.
-                warming: Settings.wallpaperStyle !== "grid" && !LauncherState.shown
-                // exactly the box — and therefore exactly the crop
-                // — the centered cell's still Image uses at rank 0,
+                // rather than inside a slide - measured, an open
+                // landing in a slide freezes the GUI thread for
+                // ~700ms on first sight of a file. The style check
+                // keeps the grid's own pool from opening the same
+                // files a second time over. Settings.preload off
+                // trades that freeze back for the ~150MiB per video
+                // this holds.
+                warming: Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                // exactly the box - and therefore exactly the crop
+                // - the centered cell's still Image uses at rank 0,
                 // parallax included: without it the video would sit
                 // still inside its bar while everything around it
                 // panned

@@ -30,7 +30,7 @@ Singleton {
     }
 
     // Splits query on whitespace and requires every term to match somewhere in
-    // haystack independently (order doesn't matter) — the same "AND of terms"
+    // haystack independently (order doesn't matter) - the same "AND of terms"
     // approach used by fzf, Sublime's Goto Anything, and VS Code's Quick Open,
     // so "code visual" or "studio code" both find "Visual Studio Code" even
     // though the words appear in a different order than typed. Falls straight
@@ -53,11 +53,11 @@ Singleton {
     // fzf-style subsequence match for a single term: query's characters must
     // appear in haystack in order (not necessarily contiguous), scored with
     // bonuses for prefix/word-start hits and consecutive runs, penalized for
-    // gaps and overall length — the same shape of algorithm fzf, Sublime's Goto
+    // gaps and overall length - the same shape of algorithm fzf, Sublime's Goto
     // Anything, and VS Code's Quick Open use. Chosen specifically because
     // subsequence matching is monotonic in the query: matching q+c as a
     // subsequence requires matching q as a subsequence first, so typing an
-    // extra character can only narrow the result set, never grow it — unlike
+    // extra character can only narrow the result set, never grow it - unlike
     // bigram/edit-distance approaches, where an unrelated shared fragment can
     // cause a longer query to match something a shorter one didn't.
     function termScore(haystack: string, query: string): var {

@@ -18,7 +18,42 @@ PanelWindow {
     id: root
 
     property bool shown: false
-    visible: root.shown
+    // With Settings.preload on, mapped for the life of the daemon rather than
+    // just while open. Unmapping makes Qt drop this window's scene graph and
+    // every texture in it, so the next open has to rebuild the lot on the GUI
+    // thread before it can draw a frame - which is exactly the stall that ate
+    // the start of the reveal. Measured per open, after a throwaway open so the
+    // one-time build isn't counted:
+    //
+    //                      unmapped on close        kept mapped
+    //   compositor blur    72-102ms, 2 stalls       0ms (one 36ms outlier)
+    //   xray blur          159-170ms, 1 stall       0ms, plus a 41-65ms
+    //                                               close stall on ~half
+    //
+    // Identical on all four panes; the pane only decides how much there is to
+    // rebuild, not whether the rebuild happens.
+    //
+    // What it holds is the whole window, every pane at once - the panes are
+    // direct children, never Loaders, so their item trees always existed; what
+    // survives a close is their scene-graph nodes and, mostly, their GPU
+    // textures. That is not free, and the bill is in VRAM rather than RSS:
+    // measured with nvidia-smi against this process, closed, having visited all
+    // four panes, 823MiB against 341MiB when the surface unmaps instead, plus
+    // ~66MiB of RSS. Roughly 240MiB of the gap is there from daemon start before
+    // any pane is opened, which is the surface's own full-screen buffers and the
+    // 5120x2160 growMask layer.
+    //
+    // That ~482MiB is what Settings.preload buys back when it's off, at the cost
+    // of the stall above on every single open.
+    //
+    // Assigned false for one beat by syncScreen(), which is the only other thing
+    // that unmaps this - see there for why a monitor switch has to, and note it
+    // has to restore this as a *binding*, not a plain true.
+    visible: Settings.preload || root.shown
+    // Mapped but closed: the surface exists only to hold its own scene graph,
+    // so it has to behave as if it were not there at all - see the
+    // keyboardFocus, mask and content bindings that read this.
+    readonly property bool surfaceIdle: !root.shown
 
     // LauncherState and Wallpapers both need to know whether the launcher is
     // up: panes gate live decoding on it, and a wallpaper applied while it's
@@ -27,7 +62,107 @@ PanelWindow {
         LauncherState.shown = root.shown;
         Wallpapers.launcherShown = root.shown;
         Wallpapers.syncXrayShown();
+        // While the surface stays mapped, backingWindowVisible is already true
+        // and never changes again, so the reveal has to be kicked off here
+        // instead. A no-op the rest of the time: on the unmapped path the
+        // window has not mapped yet at this point, so startReveal() bails on
+        // its own backingWindowVisible guard and the map fires it as before.
+        if (root.shown) {
+            root.startReveal();
+        } else {
+            // arm the flush that gets this close's surface state committed (see
+            // idleFlushTicks)
+            root.idleFlushTicks = 0;
+            root.syncScreen(); // a monitor switch while it was open, deferred to here
+        }
     }
+    // Which output the launcher maps onto: the one the compositor says is
+    // focused, so `pibble toggle` opens on the monitor being used rather than
+    // always on the first one (see ActiveOutput for how that's asked, and what
+    // it falls back to on a compositor that can't be).
+    //
+    // Only ever changed while the launcher is down. A layer surface's output is
+    // fixed when it's created, so moving output destroys and remaps the window
+    // - the same teardown the `visible: true` note above is about, and mid-open
+    // it would be a visible one. A focus change while the launcher is up is
+    // therefore picked up on the next close, and the open it would have
+    // interrupted plays out on the output it started on.
+    //
+    // Never assigned directly for the same reason; syncScreen() is what moves
+    // it, and it moves in two steps.
+    screen: root.mappedScreen
+    // Seeded as a binding so the very first map already lands on the right
+    // output; syncScreen() replaces it with a plain value from then on, and is
+    // called once at startup (before anything can open) so the binding can't
+    // outlive the first real open.
+    property var mappedScreen: ActiveOutput.screen
+    function syncScreen(): void {
+        if (root.shown || !ActiveOutput.screen)
+            return;
+        if (root.mappedScreen === ActiveOutput.screen) {
+            // Already there, so nothing to remap - but the assignment still
+            // has to happen, since a plain assignment is what drops the seed
+            // binding whether or not the value changes, and the startup call
+            // is here for exactly that.
+            root.mappedScreen = ActiveOutput.screen;
+            return;
+        }
+        // Unmapped first, and the new output taken on a later tick, rather than
+        // assigned straight over the top. Assigning `screen` alone builds the
+        // new wl_surface *before* it tears the old one down, and the two
+        // overlapping is what loses compositor blur across a monitor switch:
+        // Quickshell's BackgroundEffect holds one ext_background_effect_surface
+        // per attached window and only makes a new one when it is holding none,
+        // so on the overlap it either keeps the one bound to the dying surface
+        // (no protocol object for the new one, ever) or makes one and then has
+        // the old surface's teardown destroy it. Either way the region requests
+        // land nowhere and the launcher opens unblurred until the daemon is
+        // restarted. Unmapping first means the old surface is gone - and the
+        // effect object with it - before the new one exists, which is the case
+        // Quickshell does handle.
+        //
+        // The scene graph this drops is the same one the `screen` assignment
+        // would have dropped anyway (a new surface means a new backing window
+        // either way), so it costs a rebuild that was already being paid, off
+        // screen, with the launcher closed.
+        root.visible = false;
+        remap.restart();
+    }
+    // The gap the unmap needs: Qt destroys the wl_surface off the event loop,
+    // not inside setVisible, so the new output has to be taken after that has
+    // had a chance to run. Any interval does, since it only has to be a later
+    // tick - kept short because the window is unmapped for the whole of it.
+    Timer {
+        id: remap
+        interval: 16
+        onTriggered: root.finishRemap()
+    }
+    function finishRemap(): void {
+        root.mappedScreen = ActiveOutput.screen;
+        // Restored as a binding, not a plain `true`: `visible` tracks
+        // Settings.preload, and a bare assignment here would sever that for the
+        // rest of the session - the surface would then stay mapped even after
+        // preload was switched off, silently making the setting a no-op for
+        // anyone who had ever changed monitors.
+        root.visible = Qt.binding(() => Settings.preload || root.shown);
+    }
+    // An open() landing inside that gap must not open onto an unmapped window,
+    // so it takes the pending remap immediately instead of waiting out the
+    // timer. A no-op the rest of the time, when there is no remap in flight.
+    function flushRemap(): void {
+        if (!remap.running)
+            return;
+        remap.stop();
+        root.finishRemap();
+    }
+    Connections {
+        target: ActiveOutput
+
+        function onScreenChanged(): void {
+            root.syncScreen();
+        }
+    }
+
     // Keeps the xray bake keyed on the output the launcher actually mapped
     // onto; Wallpapers falls back to the primary screen until this resolves.
     onScreenChanged: if (root.screen)
@@ -35,7 +170,7 @@ PanelWindow {
 
     // The reveal circle is a client-side mask over this window's own content
     // (see growMask below), so it renders identically on every compositor. Only
-    // the screen it is measured against is this window's business — the
+    // the screen it is measured against is this window's business - the
     // geometry derived from it lives on LauncherState, which the panes read.
     Binding {
         target: LauncherState
@@ -50,8 +185,26 @@ PanelWindow {
 
     function open(targetPane: string): void {
         fadeOut.stop(); // reopening mid-dismiss is allowed
+        root.flushRemap();
         root.resetState(targetPane);
         root.shown = true;
+        // Reopening mid-dismiss is the one path where `shown` is already true
+        // here, so the assignment above is a no-op and onShownChanged - the
+        // only thing that starts the reveal now that the surface stays mapped -
+        // never fires. Left to that alone, the launcher sat open (exclusive
+        // keyboard focus, no input mask, so it swallowed every key and click)
+        // with reveal and content.opacity both parked at the 0 resetState just
+        // put them at, drawing nothing at all. The one thing still visible was
+        // the compositor blur region, which is only off while surfaceIdle: at
+        // reveal 0 it sits at its 1px floor, leaving one blurred
+        // wallpaper-coloured pixel at the reveal origin (measured (22,0,55)
+        // against a (29,29,29) desktop, in the corner under grow-top-left) for
+        // as long as the invisible launcher stayed "open" - and it stayed open
+        // until the user pressed the keybind again, having seen nothing happen.
+        // Calling it here covers that; the guard inside
+        // makes it a no-op on the ordinary path, where onShownChanged has
+        // already run it.
+        root.startReveal();
         input.forceActiveFocus();
         // fresh data per open: the clipboard and the wallpaper folder both
         // change between opens
@@ -84,7 +237,7 @@ PanelWindow {
                 host.resetEntrance();
         }
         // Panes replay their entrance animation off onPaneChanged, which only
-        // fires on an actual value change — reopening onto the same pane the
+        // fires on an actual value change - reopening onto the same pane the
         // launcher was last closed on is otherwise a no-op assignment, so the
         // pane's opacity stays wherever the reset above left it with nothing
         // to animate it back in. Round-trip through a dead value so the
@@ -133,6 +286,17 @@ PanelWindow {
         }
         LauncherState.customSettingsTabs = tabs;
     }
+    // A page *leaving* never goes through a host's onLoaded: trashing its row
+    // or switching it off just destroys the delegate (or its Loader's item),
+    // so without this its tab outlived it until the next daemon start. Every
+    // one of those paths writes uploadedPages, and the delegates are still
+    // standing when it changes, hence the deferred call.
+    Connections {
+        target: Settings
+        function onUploadedPagesChanged(): void {
+            Qt.callLater(root.syncSettingsTabs);
+        }
+    }
 
 
     anchors {
@@ -146,7 +310,15 @@ PanelWindow {
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "pibble-launcher"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // Exclusive is what makes the launcher take every key while it is open, so
+    // an idle mapped surface must give it up completely - otherwise the
+    // keyboard stays captured by a launcher nobody can see.
+    WlrLayershell.keyboardFocus: root.surfaceIdle ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
+    // Likewise for pointer input: an empty region is click-through, so an idle
+    // surface can't swallow clicks meant for whatever is underneath it. Only
+    // set while idle - an open launcher wants the whole surface.
+    mask: root.surfaceIdle ? idleMask : null
+    Region { id: idleMask }
     // This is a bonus on top of the client-side circle, not what draws
     // it: wherever a compositor implements ext-background-effect-v1,
     // this blurs the same area the circle already occupies. "fade" and
@@ -154,23 +326,28 @@ PanelWindow {
     // statically, for as long as the window is open. Requesting a
     // region at all is what flips background-effect into "on request"
     // on niri, which then defaults its own xray-through-other-windows
-    // behavior on too — so only ask when "Background blur" is actually
+    // behavior on too - so only ask when "Background blur" is actually
     // set to "compositor" ("xray", the non-protocol mode, draws a
-    // blurred wallpaper behind the launcher itself instead — see
+    // blurred wallpaper behind the launcher itself instead - see
     // xrayBackdrop below).
     //
     // The other modes ask for a 1px region rather than for nothing at
     // all, which is not the same thing: a compositor-side rule that
     // turns blur on for this surface (niri layer-rule background-effect,
     // for one) applies to the whole surface when the client never speaks
-    // the protocol, and then blurs behind the client-side fake as well —
+    // the protocol, and then blurs behind the client-side fake as well -
     // the wasted work is invisible under an opaque fake, but it does
     // show wherever the surface is still transparent (outside the grow
     // circle, mid-animation). A region confines it to one pixel.
-    BackgroundEffect.blurRegion: Settings.bgBlur !== "compositor" ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
+    //
+    // A closed launcher takes that same nothing-to-blur region. The surface is
+    // mapped for the daemon's life now, so a reveal-sized region would sit
+    // there permanently at its 1px floor - drawing a blurred dot at the reveal
+    // origin with the launcher not even open.
+    BackgroundEffect.blurRegion: (root.surfaceIdle || Settings.bgBlur !== "compositor") ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
     // Clipped to the output, which is not cosmetic. A Region is rasterised as
-    // one span per scanline, and this ellipse is as tall as it is wide — several
-    // screens' worth by the end of the reveal — so most of the spans it costs to
+    // one span per scanline, and this ellipse is as tall as it is wide - several
+    // screens' worth by the end of the reveal - so most of the spans it costs to
     // build, commit and re-blur on every frame of the animation describe circle
     // that is nowhere near the screen. Intersecting them away lights exactly the
     // same pixels and measurably steadies the reveal: over five reveals, frame
@@ -178,7 +355,7 @@ PanelWindow {
     // 1-in-265. That matters because the edge's position error is its velocity
     // times the frame-time error, and mid-reveal it is moving ~14px per ms.
     //
-    // `intersection` goes on the *child* — it says how that region combines with
+    // `intersection` goes on the *child* - it says how that region combines with
     // its parent. On the parent it silently does nothing, the ellipse unions
     // instead, and the whole screen blurs.
     Region {
@@ -201,8 +378,51 @@ PanelWindow {
     }
     Region {
         id: noBlurRegion
+        // Off the surface, not at (0,0). All this region has to be is non-empty
+        // (see BackgroundEffect.blurRegion above for why asking for nothing is
+        // not the same as asking for almost nothing) - and a 1px region *inside*
+        // the surface is a genuine pixel of blurred, undimmed backdrop. That is
+        // invisible in a corner but obvious once the reveal origin is somewhere
+        // you look: with grow-center and the launcher merely idle it put one
+        // bright wallpaper-coloured pixel in the exact middle of the screen
+        // (measured: (193,129,60) against a (29,29,32) desktop). Out here the
+        // compositor clips it away entirely while the client still speaks the
+        // protocol, which is the only thing the region was ever for.
+        //
+        // The `x` jitter is the resend described below; -8 and -9 are equally
+        // off the surface, so it only exists to make the region change.
+        x: -8 - (root.idleFlushTicks % 2)
+        y: -8
         width: 1
         height: 1
+    }
+    // Asking once, at the moment the launcher closes, does not reliably land.
+    // The blur region is double-buffered surface state (ext-background-effect:
+    // "applied on the next wl_surface.commit"), and a close is the one moment
+    // with no next frame: `shown` is cleared by a ScriptAction in the same
+    // animation tick that draws the collapse's last frame, and a mapped-but-idle
+    // surface - which this now is for the rest of the daemon's life, rather than
+    // unmapping - never renders again on its own. So the switch to noBlurRegion
+    // above sometimes never reached the compositor, which then went on blurring
+    // whatever it had a frame earlier: a ~15px quarter-disc of wallpaper sitting
+    // at the reveal origin (a dot in the corner under grow-top-left, in the
+    // middle of the screen under grow-center) until the next open, which is the
+    // only thing that made the surface draw again. Measured 2-3 in every 25
+    // closes; "fade" and "none" have no collapse to shrink it, so what they can
+    // strand is the whole screen's worth.
+    //
+    // Asking again on each of the next few frames fixes it: 0 in 25 closes with
+    // four resends, which is margin - the failures only ever missed by a frame.
+    // Nothing here is ever on screen and the region itself never changes shape;
+    // it is the same 1px sliver, moved a pixel sideways to make Quickshell
+    // re-send it. The same beat also carries the input mask and the
+    // keyboard-focus mode, which are double-buffered for the same reason.
+    property int idleFlushTicks: 0
+    Timer {
+        interval: 16
+        repeat: true
+        running: root.surfaceIdle && root.idleFlushTicks < 4
+        onTriggered: root.idleFlushTicks++
     }
     // ---------- exit / intro ----------
     function exit(): void {
@@ -220,11 +440,17 @@ PanelWindow {
     // back exactly where the exit animation left off instead of at the
     // home pane
     function reopenAfterDialog(): void {
+        root.flushRemap();
         LauncherState.exiting = false;
         root.revealStarted = false;
         LauncherState.reveal = 0;
         content.opacity = 0;
         root.shown = true;
+        // Same reason as in open(): the dialog is only handed the screen once
+        // the exit animation has finished, so this normally reopens a closed
+        // launcher - but a toggle while the dialog held it leaves `shown`
+        // already true, and then nothing else would replay the entrance.
+        root.startReveal();
         input.forceActiveFocus();
     }
 
@@ -262,20 +488,20 @@ PanelWindow {
             property: "reveal"
             from: 0
             to: 1
-            // Only visible in "grow" styles — unused by "fade"/"none".
+            // Only visible in "grow" styles - unused by "fade"/"none".
             duration: Anim.launch(520)
             // Starts at moderate velocity (no ease-in dead zone where the
             // dot seems stuck, no Out-style explosion), settles gently.
             //
             // The constraint here isn't feel, it's edge travel: the radius
             // scales with this value, so peak velocity is how far the circle's
-            // edge jumps between two frames — and a hard edge stops reading as
+            // edge jumps between two frames - and a hard edge stops reading as
             // motion once that runs far past the animation's own average,
             // strobing as separate arcs instead. So what matters is the ratio of
             // peak to average, which is a property of the curve alone. The
             // previous one ([0.33, 0.15, 0.2, 1.0], its control points crossed
             // over in x) peaked at 2.53x average and then crawled its last 5%
-            // over 30% of the duration — a lurch followed by a stall. This keeps
+            // over 30% of the duration - a lurch followed by a stall. This keeps
             // the same moderate start and gentle settle at a 1.52x peak, with no
             // dead tail.
             easing.type: Easing.BezierSpline
@@ -303,7 +529,7 @@ PanelWindow {
                 // tighter one: this covers the whole radius in 320ms rather than
                 // 520, so its average is already the higher of the two. InQuad
                 // put its peak (2x average) on the very last frame, which is
-                // exactly the wrong place — the collapse skipped just as it
+                // exactly the wrong place - the collapse skipped just as it
                 // vanished. This peaks at 1.35x, mid-animation.
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: [0.4, 0.2, 0.55, 0.75, 1.0, 1.0]
@@ -332,14 +558,14 @@ PanelWindow {
     // ---------- actions ----------
     // Launch through gtk-launch (GLib): quickshell's own Exec parser
     // follows the desktop-entry spec strictly, where single quotes are
-    // not quoting characters — entries like `Exec=kitty bash -lc '...'`
+    // not quoting characters - entries like `Exec=kitty bash -lc '...'`
     // get split mid-quote and crash on startup. GLib parses shell-style
     // (like every GTK-based launcher), and also honors Path= and
     // DBusActivatable. Falls back to the entry's own execute() if
     // gtk-launch can't find the id.
     property var launchEntry: null
     // recordLaunch() bumps the entry's score, which LauncherState.matches (sorted
-    // by launchCount) reactively re-sorts on — bumping it immediately
+    // by launchCount) reactively re-sorts on - bumping it immediately
     // visibly reshuffles the grid while the close animation is still
     // fading it out. Held here and only recorded once fadeOut actually
     // hides the window (see its ScriptAction below), so the re-sort
@@ -360,7 +586,7 @@ PanelWindow {
         pendingRecordEntry = entry;
         launchEntry = entry;
         // The launched app inherits gtk-launch's stdio, i.e. this Process's
-        // pipes — which close once gtk-launch exits, so chatty apps
+        // pipes - which close once gtk-launch exits, so chatty apps
         // (flatpaks especially) would SIGPIPE on their next log line and
         // die seconds after launch. Point stdio at /dev/null and give the
         // app its own session; setsid -w keeps gtk-launch's exit code for
@@ -375,7 +601,7 @@ PanelWindow {
     // variant from, so committing it up front would retheme the whole
     // shell around a wallpaper that never reached the screen. That's the
     // reason the command runs as a tracked Process rather than an
-    // execDetached — its exit code is the deciding signal.
+    // execDetached - its exit code is the deciding signal.
     property var pendingWall: null
     property var queuedWall: null
     Process {
@@ -403,8 +629,8 @@ PanelWindow {
             }
         }
     }
-    // Commands that never exit — a foreground swaybg/mpvpaper rather than
-    // a daemon client like awww/swww — would otherwise hold the commit
+    // Commands that never exit - a foreground swaybg/mpvpaper rather than
+    // a daemon client like awww/swww - would otherwise hold the commit
     // forever. Anything that genuinely fails (missing binary, bad
     // arguments) does so in milliseconds, so a command still alive this
     // long has taken effect and is simply staying resident: commit it and
@@ -423,15 +649,15 @@ PanelWindow {
         pendingWall = wall;
         // $WALL and $BLUR are exported for the command to template with.
         // $BLUR is the cached blurred variant the scan already resolved
-        // for this wallpaper — the same image the launcher's own backdrop
+        // for this wallpaper - the same image the launcher's own backdrop
         // draws, or the user's <stem>blurred.<ext> where they've supplied
         // one. Empty until the background pass has generated it (a few
         // seconds on a cold cache, see Wallpapers' scan), which is why commands
         // that use it should guard for that.
         // setsid -w keeps this a tracked child in every way that matters
         // (it waits, and reports the command's own exit code) while giving
-        // the command its own session, so a resident setter — mpvpaper,
-        // a foreground swaybg — outlives the daemon exactly as it did
+        // the command its own session, so a resident setter - mpvpaper,
+        // a foreground swaybg - outlives the daemon exactly as it did
         // under the execDetached this replaced, instead of being torn down
         // with quickshell. Stdio goes to /dev/null for the reason spelled
         // out on appLaunch: a resident child left holding this Process's
@@ -465,7 +691,7 @@ PanelWindow {
         if (wallApply.running) {
             // a newer pick supersedes one still in flight: drop the wrapper
             // (its wallpaper is no longer the one wanted) and start the new
-            // command from onExited. Only the wrapper is signalled — a
+            // command from onExited. Only the wrapper is signalled - a
             // resident setter is off in its own session, left for the
             // user's own command to replace as it always was
             queuedWall = wall;
@@ -490,7 +716,7 @@ PanelWindow {
         // fits the thumb cap (480x640): the thumb (built with magick's
         // "only shrink if larger" >) IS the full-res image there, so
         // decoding again would just swap the Image source to identical
-        // pixels — and any source change makes QML clear the current
+        // pixels - and any source change makes QML clear the current
         // pixmap and reload async, flashing blank for no visual gain.
         const d = (clip.dims || "").split("x");
         const iw = parseInt(d[0]) || 0;
@@ -620,11 +846,19 @@ PanelWindow {
     //
     // Sized to match the surface (not just the circle) so MultiEffect
     // maps mask <-> source pixel-for-pixel instead of stretching a small
-    // texture across the whole surface — which holds for both the items
+    // texture across the whole surface - which holds for both the items
     // that mask against it, since both fill the window. Kept genuinely
     // visible (not visible: false) and layered explicitly, since an
-    // invisible item's layer never actually renders — a huge offset is
+    // invisible item's layer never actually renders - a huge offset is
     // what keeps it off the real screen instead.
+    //
+    // Dropping this layer while the launcher is closed was tried, since it is a
+    // full-screen (here 5120x2160) FBO that nothing masks against with nothing
+    // on screen. It rendered correctly and cost no open latency, but it only
+    // moved the number before the first open (590 -> 492MiB); once the launcher
+    // had been opened once, closed sat at 814MiB either way. The driver appears
+    // to keep the freed allocation in this process's pool rather than hand it
+    // back, so the saving never reaches anything else on the GPU.
     Item {
         id: growMask
         visible: true
@@ -646,14 +880,22 @@ PanelWindow {
     }
     XrayBackdrop {
         maskSource: growMask
+        // an idle mapped surface draws nothing at all (see root.surfaceIdle);
+        // the backdrop is otherwise the one thing here that is opaque on its
+        // own rather than riding content's opacity
+        visible: !root.surfaceIdle
     }
 
     Item {
         id: content
         anchors.fill: parent
+        // belt-and-braces with the opacity below, which a closed launcher
+        // already leaves at 0: `visible` is what guarantees an idle mapped
+        // surface costs the compositor nothing to composite
+        visible: !root.surfaceIdle
         opacity: 0
         // "grow" styles: clip content itself into the growing circle
-        // instead of relying on compositor blur to fake one — renders
+        // instead of relying on compositor blur to fake one - renders
         // identically on every compositor.
         layer.enabled: LauncherState.growMode
         layer.effect: MultiEffect {
@@ -677,12 +919,12 @@ PanelWindow {
                 id: backdropArea
                 anchors.fill: parent
                 property real wheelAcc: 0
-                // swipe-left/right cycles panes — same cyclePane() the
+                // swipe-left/right cycles panes - same cyclePane() the
                 // Tab/Shift+Tab keybinds drive. swipe-up/down instead
                 // pages through the current pane's grid (apps/clips/
-                // wallpaper tiles), one full page of tiles at a time — see
+                // wallpaper tiles), one full page of tiles at a time - see
                 // LauncherState.pageMove(). Over the windows wallpaper carousel's own
-                // bounds specifically (background gaps between its cells —
+                // bounds specifically (background gaps between its cells -
                 // the cells' own swipe handling is on the carousel's cell), left/right
                 // instead drags the carousel live (LauncherState.carouselDragTo()) and
                 // commits whole slots on release (LauncherState.carouselDragEnd(), a
@@ -692,7 +934,7 @@ PanelWindow {
                 //
                 // The edge swipes (power/reboot shade, swipe-to-go-back)
                 // below are tracked the exact same way, in this same
-                // MouseArea, instead of with sibling DragHandlers — a
+                // MouseArea, instead of with sibling DragHandlers - a
                 // DragHandler tried that first, but it competes with this
                 // MouseArea for the same touch grab, and on a layer-shell
                 // surface that race is genuinely unreliable: logged
@@ -702,9 +944,9 @@ PanelWindow {
                 // for no reason visible at the QML level. Mouse input
                 // never showed this because it doesn't go through the
                 // same touch grab arbitration. Routing everything through
-                // this MouseArea's own press/move/release — already
+                // this MouseArea's own press/move/release - already
                 // proven reliable for pane-cycle/page-move/carousel above
-                // — removes the race entirely instead of trying to win it.
+                // - removes the race entirely instead of trying to win it.
                 readonly property bool onCarousel: LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid"
                 property real pressX: 0
                 property real pressY: 0
@@ -713,15 +955,15 @@ PanelWindow {
                 property bool vertTracking: false
                 property bool carouselTracking: false
                 property bool edgePress: false
-                // same idea as edgePress, but the right edge specifically —
+                // same idea as edgePress, but the right edge specifically -
                 // left alone here so backTracking below can pull the
                 // swipe-to-go-back pill out instead of this being treated
                 // as a pane-cycle swipe
                 property bool rightEdgePress: false
                 // power/reboot notification-shade-style edge drag: starts
                 // once a press begins inside the top/bottom edgeSwipeZone
-                // strip, same as edgePress above, or — once a prompt is
-                // already armed — from anywhere, since at that point the
+                // strip, same as edgePress above, or - once a prompt is
+                // already armed - from anywhere, since at that point the
                 // whole screen belongs to it (dragZone gets pinned to
                 // whichever prompt is armed, ignoring where this press
                 // landed; see onPressed below)
@@ -732,7 +974,7 @@ PanelWindow {
                 // keep working while a power/reboot prompt is armed so
                 // there's always a touch-reachable way to let go of it (a
                 // tap already works via onClicked below, but the edge-back
-                // swipe is the gesture people reach for instinctively) —
+                // swipe is the gesture people reach for instinctively) -
                 // LauncherState.goBack() checks powerArmed/rebootArmed first, so a
                 // completed swipe here disarms instead of navigating.
                 property bool backTracking: false
@@ -740,7 +982,7 @@ PanelWindow {
                 onClicked: mouse => {
                     if (LauncherState.powerArmed || LauncherState.rebootArmed) {
                         // MouseArea's clicked doesn't care how far the
-                        // pointer traveled between press and release — a
+                        // pointer traveled between press and release - a
                         // horizontal swipe lands here too (the power/reboot
                         // DragHandler only tracks the y axis, so it never
                         // grabs a horizontal drag and steals it away from
@@ -766,7 +1008,7 @@ PanelWindow {
                     edgePress = mouse.y <= LauncherState.edgeSwipeZone || mouse.y >= height - LauncherState.edgeSwipeZone;
                     rightEdgePress = mouse.x >= width - LauncherState.edgeSwipeZone;
                     // while a power/reboot prompt is armed, every gesture on
-                    // screen belongs to it (see powerRebootTracking below) —
+                    // screen belongs to it (see powerRebootTracking below) -
                     // pane/grid navigation and the carousel flick sit out
                     // entirely so they can't fire alongside it
                     const carousel = wallpapersPage.carousel;
@@ -778,7 +1020,7 @@ PanelWindow {
                     powerRebootTracking = Settings.gesturesEnabled() && (LauncherState.promptOpen || edgePress);
                     if (powerRebootTracking) {
                         // an armed prompt pins the zone to itself regardless
-                        // of where on screen this press landed — only a
+                        // of where on screen this press landed - only a
                         // fresh, unarmed edge press still needs to look at
                         // the touch position to decide which prompt (if
                         // either) it's arming
@@ -789,7 +1031,7 @@ PanelWindow {
                         LauncherState.powerDragging = LauncherState.dragZone === "top";
                         LauncherState.rebootDragging = LauncherState.dragZone === "bottom";
                         // only fold in the live raw values when actually
-                        // continuing an already-armed prompt's drag — a
+                        // continuing an already-armed prompt's drag - a
                         // fresh, unarmed edge press must start from a clean
                         // baseline. powerRaw/rebootRaw spring back to 0 over
                         // Anim.menu(320)ms on disarm (Behavior enabled once
@@ -907,7 +1149,7 @@ PanelWindow {
 
         // Custom pages: one host per enabled upload. Bound to
         // Settings.uploadedPages directly (not LauncherState.orderedPages) for
-        // the same delegate-stability reason the Pages settings row is —
+        // the same delegate-stability reason the Pages settings row is -
         // membership only changes on upload/trash/disk sync, never on a pure
         // reorder.
         Repeater {
@@ -970,7 +1212,7 @@ PanelWindow {
         focus: true
 
         // typing from the clock jumps into whatever's next in the cycle
-        // order — custom pages included, not just the built-in three:
+        // order - custom pages included, not just the built-in three:
         // now that a page can read pibble.searchText (see PageContext)
         // there's no reason to skip past one looking for a built-in.
         // The text itself isn't touched here; it's already sitting in
@@ -991,7 +1233,7 @@ PanelWindow {
 
         Keys.onPressed: event => {
             // keybind capture (settings): record which keys are down and
-            // the latest chord name they spell, but don't save yet — the
+            // the latest chord name they spell, but don't save yet - the
             // bind only commits once every held key is released, so a
             // chord like Ctrl+S can be pressed as a whole instead of
             // firing the instant Ctrl (or S) lands.
@@ -1041,7 +1283,7 @@ PanelWindow {
                 return;
             }
             if (ks === (kb.exit ?? "Escape")) {
-                // layered: expanded clip -> settings -> whole app — see
+                // layered: expanded clip -> settings -> whole app - see
                 // LauncherState.goBack(), also used by the right-edge swipe gesture
                 LauncherState.goBack();
                 event.accepted = true;
@@ -1081,7 +1323,7 @@ PanelWindow {
         Keys.onReleased: event => {
             // keybind capture: commit the last chord seen while keys
             // were down, but only once every key of it has come back up
-            // — releasing the modifier first (or the main key first)
+            // - releasing the modifier first (or the main key first)
             // both land here, so either release order works.
             if (LauncherState.capturingBind) {
                 event.accepted = true;
@@ -1133,21 +1375,24 @@ PanelWindow {
         onTriggered: {
             LauncherState.wallpaperWarmTick = currentFrame;
             // thumbnails first (one per frame), then the pane's cells
-            // (one per frame — each ClippingRectangle is an offscreen
+            // (one per frame - each ClippingRectangle is an offscreen
             // render target and costs a chunk of frame time to create)
             if (currentFrame > Wallpapers.list.length + LauncherState.wallpaperPageSize + 4)
                 LauncherState.warmingWallpapers = false;
         }
     }
     function startReveal() {
-        if (root.revealStarted || !root.backingWindowVisible)
+        // `shown` is part of the guard now that the surface is mapped from
+        // daemon start: without it the entrance would play once, into a closed
+        // launcher, the moment the window first maps.
+        if (root.revealStarted || !root.shown || !root.backingWindowVisible)
             return;
         root.revealStarted = true;
         // With the launch animation off there is no reveal to protect
         // from the warm-up frames: show everything on the very first
         // frame. (firstFrames still runs for cache warming; the
         // zero-duration fadeIn it triggers just re-sets these same
-        // values.) Gated on noneMode, not the grid tile animStyle —
+        // values.) Gated on noneMode, not the grid tile animStyle -
         // fadeIn's duration comes from Anim.launch()/noneMode, so checking
         // animStyle here let a "none" grid style with a real launch
         // animation snap reveal/opacity to 1 for a frame and then have
@@ -1164,8 +1409,30 @@ PanelWindow {
     // Pre-decode app icons and wallpaper thumbnails while idle, so the
     // drawer's first appearance doesn't stall on cold image loads. The
     // sources/sourceSizes match the visible tiles exactly for cache hits.
+    //
+    // Held off the window rather than at its origin. These are 1px items, but
+    // with preload on they now render for the daemon's whole life, and 1px of
+    // *drawn icon* in the top-left corner of an idle surface is a visible dot.
+    // Nothing here needs to be on screen - building the items is the point -
+    // so they sit where growMask sits.
     Item {
-        visible: LauncherState.warmingApps
+        x: -100000
+        y: -100000
+        // `visible` is what gets an item's scene-graph nodes built and its
+        // textures uploaded; merely existing does nothing, which is why the
+        // surface staying mapped (preload) doesn't warm anything on its own.
+        // Gated on warmingApps alone, this whole 170-item tree was therefore
+        // built on the first open's second frame: a measured 72ms stall
+        // landing between the toggle and the reveal, so the first open started
+        // its animation at +71ms against +2-18ms for every one after it.
+        // Built at daemon start instead, where the same work is invisible, the
+        // first open starts at +5ms and daemon start grows an 82ms stall.
+        //
+        // Only where the surface is already mapped, though: with preload off
+        // there is nothing to build into while the launcher is down, and Qt
+        // drops the lot on every close regardless, so there this stays what it
+        // was - a warm pass that runs during the open it belongs to.
+        visible: Settings.preload || LauncherState.warmingApps
         opacity: 0.004
         Repeater {
             model: Apps.warmOrder
@@ -1179,41 +1446,14 @@ PanelWindow {
             }
         }
     }
-    // clipboard image thumbnails, decoded as the scan lands and pinned
-    // so clip page flips hit the pixmap cache instead of re-decoding.
-    // The thumbs are downscaled on disk at generation time (see
-    // Clipboard's thumbnail pass), so these decodes are cheap and no longer starve the
-    // app-icon decodes sharing the single QML image reader thread.
-    //
-    // Safeguard: on the cold first open, hold the clip decodes until the
-    // app icons have warmed (LauncherState.warmedOnce), then release them one per frame
-    // (LauncherState.clipWarmTick) so a batch of thumbs still can't burst the reader
-    // thread ahead of the icons. Once warmed, the gate stays open and
-    // clips decode freely as their thumbs land — the icons are cached by
-    // then, so there is nothing left to starve. LauncherState.clipWarmTick is not reset
-    // per open for the same reason.
-    FrameAnimation {
-        running: LauncherState.warmedOnce && LauncherState.clipWarmTick <= Clipboard.entries.length
-        onTriggered: LauncherState.clipWarmTick = currentFrame
-    }
-    Item {
-        visible: false
-        Repeater {
-            model: Clipboard.entries
-            Image {
-                required property int index
-                required property var modelData
-                width: 1
-                height: 1
-                asynchronous: true
-                fillMode: Image.PreserveAspectFit
-                sourceSize: Qt.size(480, 640)
-                source: LauncherState.warmedOnce && LauncherState.clipWarmTick > index
-                        && modelData.image === true && modelData.thumb
-                        ? "file://" + modelData.thumb : ""
-            }
-        }
-    }
+    // No clipboard-thumbnail warm pass. One used to live here, holding every
+    // cached clip thumb decoded at 480x640 for the life of the daemon so page
+    // flips would hit the pixmap cache. Measured at 120 clips it cost ~264MiB
+    // of RSS and bought nothing: identical open stalls, zero stalls paging
+    // through the grid either way, and the same proportion of the grid painted
+    // 180ms after a flip. The thumbs are already downscaled on disk (see
+    // Clipboard's thumbnail pass), so the on-demand decode the tiles do is
+    // cheap enough not to need pre-warming.
     Item {
         visible: LauncherState.warmingWallpapers
         opacity: 0.004
@@ -1235,6 +1475,7 @@ PanelWindow {
 
     Component.onCompleted: {
         input.forceActiveFocus();
+        syncScreen();
         startReveal();
     }
 }

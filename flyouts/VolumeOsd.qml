@@ -7,7 +7,7 @@ import "root:/services"
 
 // Volume OSD: a pill (or an equalizer) sliding up from the bottom edge.
 //
-// A persistent window of fixed size whose card animates inside it — always
+// A persistent window of fixed size whose card animates inside it - always
 // loaded, only mapped while showing. Mapping a pre-built window costs a frame
 // or two where a full rebuild costs far more, so rapid volume changes never
 // lag; and layer-shell margins never animate, since a margin change needs a
@@ -43,6 +43,14 @@ Scope {
             return;
         leaving = false;
         if (!show) {
+            // onto whichever monitor is in use, and only ever while the window
+            // is still unmapped: a layer surface's output is fixed when it's
+            // created, so this can only move between showings. (Also what
+            // breaks the seeding binding on window.screen, before the first
+            // map, so a monitor switch mid-OSD can't remap it out from under
+            // the animation.)
+            if (ActiveOutput.screen)
+                window.screen = ActiveOutput.screen;
             show = true;
             // entered flips a tick later so the first frame renders the
             // hidden pose and the entry actually animates
@@ -79,6 +87,8 @@ Scope {
         id: window
         readonly property string mode: Settings.volAnim
         readonly property bool eq: Settings.volStyle !== "pill"
+        // seeded here, then owned by ping() from the first showing on
+        screen: ActiveOutput.screen
         visible: root.show || root.leaving
         anchors.bottom: true
         implicitWidth: Settings.volWidth + 8
@@ -100,19 +110,31 @@ Scope {
             onTriggered: window.tick++
         }
         readonly property bool pct: Settings.volShowPercent
+        // Mute fades the wave down to the floor instead of snapping to it.
+        // Only toggles on mute/unmute (not per-tick), so this Behavior
+        // doesn't fight the "no per-bar height Behaviors" perf constraint
+        // below - it's a brief transition, not a continuous one.
+        property real muteBlend: root.muted ? 1 : 0
+        Behavior on muteBlend {
+            NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+        }
         // Half-height (px) of one sine-wave bar (mirrored above/below the
         // centre). The volume factor dominates (the wobble is a narrow
         // band on top) and the amplitude spans most of the card, so a
         // volume change reads clearly as taller/shorter bars.
         function volBarHalf(i: int, n: int): int {
-            const eff = root.muted ? 0 : root.volume * 100;
-            if (eff <= 0)
-                return 2; // 4px floor
-            // square-root response: steep below ~50% so quiet-range
-            // volume steps read clearly, flattening toward full volume
-            const v = Math.sqrt(Math.min(1, eff / 100));
-            const wobble = 0.78 + 0.22 * Math.sin(tick * 0.35 + i * 0.85 + 2);
-            return Math.round(Math.max(4, v * 84 * wobble) / 2);
+            const eff = root.volume * 100;
+            let full;
+            if (eff <= 0) {
+                full = 2; // 4px floor
+            } else {
+                // square-root response: steep below ~50% so quiet-range
+                // volume steps read clearly, flattening toward full volume
+                const v = Math.sqrt(Math.min(1, eff / 100));
+                const wobble = 0.78 + 0.22 * Math.sin(tick * 0.35 + i * 0.85 + 2);
+                full = Math.max(4, v * 84 * wobble) / 2;
+            }
+            return Math.round(full + (2 - full) * muteBlend);
         }
 
         Rectangle {
@@ -169,16 +191,23 @@ Scope {
                 text: Math.round(root.volume * 100) + "%"
                 color: root.muted ? Theme.active.muted : Theme.active.fg
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(15); weight: Font.DemiBold }
+                Behavior on color {
+                    ColorAnimation { duration: 260; easing.type: Easing.OutCubic }
+                }
             }
             readonly property real pctSpace: window.pct ? percentText.width + 16 : 0
 
-            // "pill" style: a plain level bar
+            // "pill" style: a plain level bar. Anchored directly to
+            // percentText rather than derived from card.pctSpace, so the
+            // gap to the slider is an explicit margin instead of drifting
+            // with that formula.
             Item {
                 visible: !window.eq
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.horizontalCenterOffset: -card.pctSpace / 2
-                width: parent.width - 60 - card.pctSpace
+                anchors.left: parent.left
+                anchors.leftMargin: 30
+                anchors.right: window.pct ? percentText.left : parent.right
+                anchors.rightMargin: window.pct ? 12 : 30
                 height: 8
 
                 Rectangle {
@@ -194,6 +223,9 @@ Scope {
                     Behavior on width {
                         NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
                     }
+                    Behavior on color {
+                        ColorAnimation { duration: 260; easing.type: Easing.OutCubic }
+                    }
                 }
             }
 
@@ -201,8 +233,8 @@ Scope {
             // fixed-width bars (the design's 6px) mirrored above and below
             // a horizontal centre axis, following the flyout accent colour
             // (neutral when muted / 0). The card width sets how many bars
-            // fit — resizing adds/removes bars at the design's ~26px pitch
-            // instead of stretching them — and the row still spans edge to
+            // fit - resizing adds/removes bars at the design's ~26px pitch
+            // instead of stretching them - and the row still spans edge to
             // edge like the pill's bar. No per-bar height Behaviors: the
             // ~90ms tick already paces the motion, and animating the bars
             // at 60fps kept the compositor re-blurring the backdrop every
@@ -239,6 +271,9 @@ Scope {
                             radius: 3
                             height: eqBar.half
                             color: eqBar.barColor
+                            Behavior on color {
+                                ColorAnimation { duration: 260; easing.type: Easing.OutCubic }
+                            }
                         }
                         Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -248,6 +283,9 @@ Scope {
                             height: eqBar.half
                             color: eqBar.barColor
                             opacity: 0.55
+                            Behavior on color {
+                                ColorAnimation { duration: 260; easing.type: Easing.OutCubic }
+                            }
                         }
                     }
                 }

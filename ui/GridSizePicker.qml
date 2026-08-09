@@ -7,19 +7,19 @@ import "root:/services"
 // commits it. `target` indexes SettingsSchema.gridTargets for which page's Settings
 // cols/rows properties and bounds apply. The tile canvas is always laid
 // out at SettingsSchema.pickerMaxCols × gridPickerMaxRows (the largest any
-// target needs) so switching targets never resizes it — tiles outside
+// target needs) so switching targets never resizes it - tiles outside
 // the active target's bounds just pop out, and any that come back into
 // bounds pop in, instead of the grid instantly snapping to a new shape.
 // When the walls target is showing the "windows" carousel style, each
 // bar is exactly the footprint a 1-wide × spec.maxRows-tall column of
-// tiles already occupies (same col x, same offsetY, same width) — the
+// tiles already occupies (same col x, same offsetY, same width) - the
 // row-0 tile of that column simply grows to cover the whole column
 // height while rows 1..maxRows-1 beneath it shrink away, so the same
 // Behaviors that already animate x/y/opacity/scale read as those tiles
 // conjoining into one bar (and splitting back apart on the way out).
 // Columns beyond wallsBarSlots, and rows past a bar's height in taller
 // targets like apps, just pop in/out exactly as they do when switching
-// targets — no separate animation path for them.
+// targets - no separate animation path for them.
 Item {
     id: root
 
@@ -59,7 +59,7 @@ Item {
     readonly property int offsetY: Math.round((root.gridH - root.activeH) / 2)
 
     // bar-mode selection: SettingsSchema.carouselBarSlots columns (0..barCenter*2),
-    // always odd 3–9, symmetric around the center column. Bars use the
+    // always odd 3-9, symmetric around the center column. Bars use the
     // walls spec's own column offset/step, not a separate layout, so a
     // bar sits exactly where that column's tiles already sit.
     readonly property int barSlots: SettingsSchema.carouselBarSlots
@@ -95,7 +95,7 @@ Item {
                 // any in-range column, stretched down over its column
                 readonly property bool isBarBody: root.wallsBars && tile.row === 0 && tile.col < root.barSlots
                 // the rest of that same column (rows 1..spec.maxRows-1):
-                // these are what visibly conjoin — they slide up to the
+                // these are what visibly conjoin - they slide up to the
                 // bar's top edge while shrinking away, rather than
                 // fading out in place like a tile that's simply out of
                 // bounds (rows past spec.maxRows, e.g. the apps tab's
@@ -103,18 +103,18 @@ Item {
                 readonly property bool mergingIntoBar: root.wallsBars && tile.col < root.barSlots
                     && tile.row > 0 && tile.row < root.spec.maxRows
                 // whether this tile exists at all for the active target
-                // (drives the pop in/out on target switch, and — in bar
-                // mode — the rest of a bar's column shrinking away
+                // (drives the pop in/out on target switch, and - in bar
+                // mode - the rest of a bar's column shrinking away
                 // beneath the row-0 tile that grew to cover it)
                 readonly property bool inBounds: root.wallsBars
                     ? tile.isBarBody
                     : (tile.col < root.spec.maxCols && tile.row < root.spec.maxRows)
-                // live hover/click preview, Excel-insert-style — falls
+                // live hover/click preview, Excel-insert-style - falls
                 // back to the committed size when nothing is hovered
                 readonly property bool previewed: root.wallsBars
                     ? tile.barDist <= root.halfFor(root.shownVisible)
                     : (tile.col < root.shownCols && tile.row < root.shownRows)
-                // the actually-saved size — always outlined, even while
+                // the actually-saved size - always outlined, even while
                 // a hover preview is filling in a different size
                 readonly property bool committed: root.wallsBars
                     ? tile.barDist <= root.halfFor(root.curVisible)

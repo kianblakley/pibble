@@ -24,14 +24,14 @@ Item {
         // "lands higher than the stock *2.6 spot" used to be a
         // separate `- 200 * powerProgress` term, but powerProgress
         // is linear-then-hard-capped-at-1 while powerPull is a
-        // smooth exponential — subtracting one from the other left
+        // smooth exponential - subtracting one from the other left
         // a kink right at the threshold (progress's contribution to
         // the rate stops instantly, pull's doesn't), which read as
         // the ring slowing then suddenly speeding back up.
         // powerRingScale folds that same "-200 at the threshold"
         // target into a single multiplier on powerPull instead, so
         // the resting depth is unchanged but the expression is one
-        // smooth curve throughout — the rate can only ever shrink
+        // smooth curve throughout - the rate can only ever shrink
         // (resistance) and never kinks or reverses
         y: -height + LauncherState.powerPull * LauncherState.powerRingScale
         width: 36
@@ -45,7 +45,7 @@ Item {
                 const ctx = getContext("2d");
                 ctx.reset();
                 const cx = width / 2, cy = height / 2, r = 10;
-                // p drives the sweep growth and stops at 1 — past
+                // p drives the sweep growth and stops at 1 - past
                 // the arm threshold the shape (and its gaps) is
                 // done growing. Instead, overshoot dragging spins
                 // the whole completed assembly (tail, head, dash)
@@ -61,7 +61,7 @@ Item {
                 const excess = Math.max(0, LauncherState.powerRaw - LauncherState.powerThreshold);
                 const rot = maxOvershoot * (1 - Math.exp(-excess / 260)) * Math.PI * 2;
                 // a fixed dash marks 12 o'clock the whole time; the
-                // ring never closes onto it — both ends pull away
+                // ring never closes onto it - both ends pull away
                 // from the dash as the drag progresses, landing with
                 // an equal gap to either side of it once complete
                 const finalGap = 1.1;
@@ -76,7 +76,7 @@ Item {
 
                 // the dash itself: perpendicular to the ring (i.e.
                 // radial), leading a constant finalGap/2 ahead of
-                // the head — so it rides along with the head,
+                // the head - so it rides along with the head,
                 // landing exactly at 12 o'clock once the head
                 // completes its sweep. Held back until the drag is
                 // two thirds of the way through, then grows from a
@@ -125,7 +125,7 @@ Item {
         visible: LauncherState.rebootRaw > 1
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        // scaled powerPull-style, not a separate capped term — see
+        // scaled powerPull-style, not a separate capped term - see
         // the comment on powerRing's y above
         anchors.bottomMargin: -height + LauncherState.rebootPull * LauncherState.rebootRingScale
         width: 36
@@ -150,7 +150,7 @@ Item {
                 // rebootPull, so it matches the drag's own
                 // overshoot limits rather than spinning forever
                 const maxArc = 0.82;
-                // mirror of powerRing's maxOvershoot — see the comment there
+                // mirror of powerRing's maxOvershoot - see the comment there
                 const maxOvershoot = 0.5;
                 const excess = Math.max(0, LauncherState.rebootRaw - LauncherState.rebootThreshold);
                 const headFrac = Math.min(1, LauncherState.rebootRaw / LauncherState.rebootThreshold)
@@ -173,7 +173,7 @@ Item {
                     const nx = Math.cos(tangent + Math.PI / 2);
                     const ny = Math.sin(tangent + Math.PI / 2);
                     // grows over the course of the drag, from a
-                    // small nub to the full arrowhead — capped so
+                    // small nub to the full arrowhead - capped so
                     // it doesn't keep bloating during overshoot
                     const arrowScale = 0.3 + 0.7 * Math.min(1, headFrac);
                     const tipX = hx + Math.cos(tangent) * 4.5 * arrowScale;
@@ -205,7 +205,7 @@ Item {
         anchors.bottom: parent.bottom
         // trails above the ring by the same gap powerText trails
         // below powerRing, mirrored around the bottom edge (scaled
-        // powerPull-style — see the comment on powerRing's y above)
+        // powerPull-style - see the comment on powerRing's y above)
         anchors.bottomMargin: LauncherState.rebootPull * LauncherState.rebootRingScale + 12
         text: "reboot?"
         color: Theme.fg
@@ -219,8 +219,8 @@ Item {
     // Swipe-to-go-back pill: rides in from the right edge as
     // LauncherState.backRaw grows, tracking LauncherState.backPull's resistance curve
     // (see the property block on win for the math). A byte-for-byte
-    // copy of cornerButton below — same fixed size, same
-    // color/border/hover-alpha formula, same icon color — just
+    // copy of cornerButton below - same fixed size, same
+    // color/border/hover-alpha formula, same icon color - just
     // substituting the completed-drag state for its hover state.
     // The drag/release-to-go-back behavior itself is bgArea's
     // backTracking.
@@ -230,13 +230,13 @@ Item {
         anchors.right: parent.right
         // spawns at the height the drag actually started from
         // (LauncherState.backGrabY, set once per drag in bgArea's onPressed)
-        // rather than always centering vertically — clamped so it
+        // rather than always centering vertically - clamped so it
         // can't render partly off the top/bottom edge for a drag
         // that started near a screen corner
         y: Math.max(0, Math.min(parent.height - height, LauncherState.backGrabY - height / 2))
         // -width at rest (fully off-screen), sliding to flush with
         // the edge once backPull reaches its own width, then a
-        // little further on overshoot — see LauncherState.backPull
+        // little further on overshoot - see LauncherState.backPull
         anchors.rightMargin: LauncherState.backPull - width
         width: 56
         height: 56
@@ -269,8 +269,8 @@ Item {
         hoverEnabled: true
         readonly property bool revealed: containsMouse || pressed || LauncherState.pane === "settings"
         // the button's hit rect in this Item's own coordinate space
-        // — mirrors cornerButton's anchors below (right/bottom, 32
-        // margin, 56 size) — deliberately independent of cornerButton's
+        // - mirrors cornerButton's anchors below (right/bottom, 32
+        // margin, 56 size) - deliberately independent of cornerButton's
         // reveal opacity/scale animation so a click lands on it
         // even mid pop-in, not just once it's fully grown.
         function inButtonRect(x: real, y: real): bool {

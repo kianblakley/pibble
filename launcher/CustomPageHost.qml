@@ -6,15 +6,15 @@ import "root:/ui"
 // its content and handing it a PageContext.
 //
 // Kept alive (active whenever the page itself is switched on) rather than
-// lazy-loaded to the current pane, so a page's own state — timers, scroll
-// position, whatever it wants to hold onto — survives Tab-cycling away and
+// lazy-loaded to the current pane, so a page's own state - timers, scroll
+// position, whatever it wants to hold onto - survives Tab-cycling away and
 // back, same as the volume OSD.
 Item {
     id: root
 
     // Called on every launcher open. A pane keeps whatever opacity its last
     // entrance animation ended at, so it has to be put back *before* the pane
-    // change that restarts that animation — otherwise the restart is clobbered
+    // change that restarts that animation - otherwise the restart is clobbered
     // right back to 0.004 by a reset running after it. Invisible with a real
     // duration (the animation keeps writing opacity every frame regardless) but
     // it leaves the pane stuck dim when the tile style is "none" and the
@@ -37,7 +37,7 @@ Item {
     opacity: 0.004
     visible: modelData.on && LauncherState.pane === modelData.id
 
-    // fresh context per page, not shared — see PageContext
+    // fresh context per page, not shared - see PageContext
     readonly property var ctx: PageContext {
         pageId: root.modelData.id
     }
@@ -72,14 +72,14 @@ Item {
         id: loader
         anchors.centerIn: parent
         // modelData.on can only be true for a real (non-
-        // broken) entry — see LauncherState.toggleUploadedPage — but
+        // broken) entry - see LauncherState.toggleUploadedPage - but
         // this is also a settings.json value, hand-editable
         // like any other, so the broken check is repeated
         // here rather than trusted from there
         active: root.modelData.on && !root.modelData.broken
         // every page's entry point is <dir>/main.qml (see
         // CustomPages' scan and the CustomPages.dir comment for how
-        // it reaches its own sibling files — nothing else
+        // it reaches its own sibling files - nothing else
         // needed here, this Loader doesn't care how many
         // files the page is split across)
         source: active ? Qt.resolvedUrl(root.modelData.path + "/main.qml") : ""
@@ -90,10 +90,10 @@ Item {
             root.loaded();
         }
         // a page that fails to parse/instantiate just never
-        // shows (the real QML error lands in the terminal/
-        // journal like any other, per CLAUDE.md's "no
-        // compiler" note) — this only tells the user which
-        // one so they know where to look
+        // shows (there's no compile step, so the real QML
+        // error only lands in the terminal/journal like any
+        // other) - this only tells the user which one so
+        // they know where to look
         onStatusChanged: {
             if (status === Loader.Error)
                 Notifier.error("Custom page failed to load", root.modelData.label);

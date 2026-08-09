@@ -3,7 +3,7 @@ import "root:/services"
 
 // one physical-looking key in a keybinding chord (keybindings tab): a
 // flat "cap" over a slightly darker "base" peeking out underneath reads
-// as a root without needing a dedicated icon font — tabler-icons only
+// as a root without needing a dedicated icon font - tabler-icons only
 // ships a matching glyph for a couple of keys (Return's corner-down-left
 // arrow being the clean one), so most labels just render as text.
 Item {

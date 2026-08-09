@@ -10,7 +10,7 @@ Singleton {
 
     property string text: ""
     property bool ok: false
-    // A fetch that came back with nothing — no network yet, DNS not up,
+    // A fetch that came back with nothing - no network yet, DNS not up,
     // wttr.in unreachable. Distinct from weatherOk (which means "there is a
     // reading to show"), because the two want different handling: a failure
     // keeps the last good reading on screen and retries soon, while a
@@ -60,8 +60,8 @@ Singleton {
         onTriggered: root.refetch()
     }
     // The shell starts with the session, typically several seconds before the
-    // network is up, so the first fetch of a fresh boot fails and — with only
-    // the refresh above — nothing tried again for 15 minutes, which read as
+    // network is up, so the first fetch of a fresh boot fails and - with only
+    // the refresh above - nothing tried again for 15 minutes, which read as
     // weather never loading until the daemon was restarted. Backs off 5s, 10s,
     // 20s ... up to the refresh interval, and stops itself the moment a fetch
     // comes back with anything (including a rejected location, which retrying

@@ -29,7 +29,7 @@ Scope {
         onLoaded: {
             // JsonAdapter's load (both the initial parse and any reload() from
             // a hand-edit) writes object/array-typed properties in a way that
-            // doesn't reliably emit their changed signal — plain
+            // doesn't reliably emit their changed signal - plain
             // `Settings.pageOrder = [...]` assignments from QML do
             // (LauncherState.movePage reacts instantly), but the load path
             // leaves bindings that depend on these (LauncherState.pageOrder,

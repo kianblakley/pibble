@@ -59,7 +59,7 @@ Column {
                 readonly property var keyTokens: bindStr.split("+")
                 // while capturing, render whatever's currently held (via
                 // LauncherState.captureLive) in the same KeyCap style as the settled
-                // chip, instead of dropping to plain text — only the
+                // chip, instead of dropping to plain text - only the
                 // "nothing held yet" moment has no keys to render, so that's
                 // the one case still showing a plain hint
                 readonly property var displayTokens: capturing ? (LauncherState.captureLive ? LauncherState.captureLive.split("+") : []) : keyTokens

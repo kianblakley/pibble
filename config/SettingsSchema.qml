@@ -7,7 +7,7 @@ import "root:/services"
 // value, how a ‹›/click step changes it, what resets it, and the bounds the
 // grid-size picker enforces.
 //
-// Separate from Settings itself because Settings is a JsonAdapter — every
+// Separate from Settings itself because Settings is a JsonAdapter - every
 // property declared on it becomes a key in settings.json, so ranges, choice
 // lists and display strings can't live there.
 Singleton {
@@ -50,10 +50,10 @@ Singleton {
             }
         })
 
-    // The "windows" carousel's visible-bar count is always odd, 3–9, so the
+    // The "windows" carousel's visible-bar count is always odd, 3-9, so the
     // picker needs nine columns to offer every choice symmetrically.
     readonly property int carouselBarSlots: 9
-    // Largest cols/rows any target needs — the tile picker's canvas is always
+    // Largest cols/rows any target needs - the tile picker's canvas is always
     // sized to this, so switching targets never resizes it; only which tiles
     // are in bounds (and thus visible) changes.
     readonly property int pickerMaxCols: Math.max(root.carouselBarSlots, ...Object.values(root.gridTargets).map(t => t.maxCols))
@@ -72,7 +72,7 @@ Singleton {
     }
 
     // The value as the settings row shows it. An empty string means "this key
-    // has no ‹› readout" — reset-only rows and chip rows return that.
+    // has no ‹› readout" - reset-only rows and chip rows return that.
     function display(key: string): string {
         switch (key) {
         case "clipsMax":
@@ -93,6 +93,8 @@ Singleton {
             return Settings.singleClickActivate ? "on" : "off";
         case "hiddenMenuAnimations":
             return Settings.hiddenMenuAnimations ? "on" : "off";
+        case "preload":
+            return Settings.preload ? "on" : "off";
         case "fontFamily":
             return Settings.fontFamily || "system default";
         case "iconTheme":
@@ -152,6 +154,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = !Settings.hiddenMenuAnimations;
+            break;
+        case "preload":
+            Settings.preload = !Settings.preload;
             break;
         case "fontFamily":
             // "" (system default) is a real choice, so it heads the list
@@ -218,7 +223,7 @@ Singleton {
     function reset(key: string): void {
         switch (key) {
         case "pages":
-            // uploaded pages aren't touched — only their order resets, which
+            // uploaded pages aren't touched - only their order resets, which
             // drops them to the end and the add row back to the top
             Settings.pages = Defaults.pages;
             Settings.pageOrder = Defaults.pageOrder;
@@ -260,6 +265,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = true;
+            break;
+        case "preload":
+            Settings.preload = true;
             break;
         case "gestures":
             Settings.gestures = true;
