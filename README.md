@@ -11,12 +11,12 @@
 - **Launcher** - clock, app drawer, wallpaper selector, clipboard history, and power/reboot menus
 - **Volume and notification flyouts** - OSDs that pop up over whatever you're doing
 - **Weather and battery** - shown on the clock page
-- **In-app settings** - configurable layout, animations, theming, resource usage and much more
+- **In-app settings** - configurable layout, animations, theming, keybindings, resource usage and much more
 - **Custom pages** - create your own qml page and have it show up in the launcher
 - **Dynamic theming** - matugen-driven color extraction from your current wallpaper, or a custom palette
+- **Notification replay** - re-fire recent notifications, stepping further back in history on each repeated call
 - **Live wallpaper support** - live wallpaper previews, with auto-generated blurred variants
 - **Multi-monitor support** - the launcher and flyouts follow whichever output is focused
-- **Notification replay** - re-fire recent notifications, stepping further back in history on each repeated call
 - **Gesture and keyboard support** - entirely navigateable with either keyboard or gestures alone
   
 ## Installation
