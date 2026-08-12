@@ -657,9 +657,11 @@ PanelWindow {
     // arguments) does so in milliseconds, so a command still alive this
     // long has taken effect and is simply staying resident: commit it and
     // leave onExited above to report a failure that arrives much later.
+    // Kept short (rather than a multi-second margin) so the resident case
+    // notifies about as fast as the exits-immediately case does.
     Timer {
         id: wallGrace
-        interval: 3000
+        interval: 300
         onTriggered: {
             if (root.pendingWall) {
                 root.commitWallpaper(root.pendingWall);
