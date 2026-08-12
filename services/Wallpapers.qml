@@ -26,10 +26,25 @@ Singleton {
 
     readonly property string dir: SystemInfo.expandHome(Settings.wallpaperDir)
 
-    // Each entry: path|thumb|blurred. Both point into cacheRoot, keyed by a
-    // hash of the source path (stable across renames of unrelated files, safe
-    // across multiple wallpaperDirs); <stem>blurred.<ext> next to the source
-    // is still honored as a user-supplied override of the blurred one.
+    // Each entry: path|thumb|blurred|pan. All three generated variants point
+    // into cacheRoot, keyed by a hash of the source path (stable across
+    // renames of unrelated files, safe across multiple wallpaperDirs);
+    // <stem>blurred.<ext> next to the source is still honored as a
+    // user-supplied override of the blurred one.
+    //
+    // The cache is split by the *shape* of what it holds, not by which pane
+    // reads it - one file often serves two - so a variant's directory says
+    // what it is:
+    //
+    //   thumbnails/crops   480x270 center crop, images and gifs
+    //   thumbnails/wide    uncropped, source aspect, <=1920x1080
+    //   thumbnails/clips   the clipboard's own thumbs (Clipboard owns these)
+    //   blurred            output-sized and pre-blurred, see the xray block
+    //
+    // thumb is what a grid tile draws and pan is what the carousel slides a
+    // fixed window across, so an image's thumb is its crop and its pan is its
+    // wide still. A video has no crop at all - Image can't decode the source
+    // file - so its wide still is both, one file under one name.
     //
     // One blurred image serves both uses: the launcher's own backdrop in
     // "xray" mode and the $BLUR the wallpaper command gets (see
@@ -87,19 +102,21 @@ Singleton {
             for f in *.png *.jpg *.jpeg *.webp *.gif *.mp4; do
                 case "$f" in *blurred.*) continue ;; esac
                 stem="\${f%.*}" ext="\${f##*.}"
-                # generated thumb/blur are always true-color (png), even for a
-                # .gif/.mp4 source: writing a single decoded frame back out as
-                # .gif would quantize it to a 256-color palette, banding badly
-                # once blurred, and a video obviously can't round-trip as its
-                # own thumbnail at all; the source itself is still played
-                # back untouched
-                oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
+                isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
+                # a generated crop is true-color (png) even for a .gif source:
+                # writing a single decoded frame back out as .gif would
+                # quantize it to a 256-color palette, banding badly once
+                # blurred. The source itself is still played back untouched.
+                oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                 # versioned like bkey below (r<n>): bump t<n> (here and in
-                # the generation pass) whenever the ffmpeg/magick thumbnail
-                # recipe changes, so stale cached thumbnails fall out of the
-                # sweep instead of sticking around under the old recipe
-                # until their source file happens to change.
+                # the generation pass) whenever the magick crop recipe
+                # changes, so stale entries fall out of the sweep instead of
+                # sticking around under the old recipe until their source file
+                # happens to change.
                 key=$(printf '%s' "$PWD/$f|t3" | md5sum | cut -d' ' -f1)
+                # the wide still, versioned the same way (p<n>) and for the
+                # same reason as the two keys around it
+                pkey=$(printf '%s' "$PWD/$f|p1" | md5sum | cut -d' ' -f1)
                 # the blurred variant is the one cache entry that depends on
                 # more than the source file, so the output geometry, the blur
                 # and the recipe version go in its key too: a resized output,
@@ -108,17 +125,29 @@ Singleton {
                 # below like any other dead entry. Bump r<n> (here and in the
                 # generation pass) whenever the magick command changes.
                 bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
-                # a video source can't stand in as its own thumbnail (unlike
-                # a fresh image/gif, which the Image element can decode
-                # directly) - leave thumb blank until the async pass below
-                # generates a real frame
-                thumb="$PWD/$f" blur=""
-                case "\${ext,,}" in mp4) thumb="" ;; esac
+                # the wide still is a jpeg when magick writes it and a png when
+                # ffmpeg does - see the two calls in the generation pass
+                wide="$cachedir/thumbnails/wide/$pkey.jpg"
+                [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
+                thumb="" blur="" pan=""
                 # only trust caches newer than the source image
-                [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/$key.$oext"
+                [ "$wide" -nt "$f" ] && pan="$wide"
+                if [ "$isvid" = "1" ]; then
+                    # a video has no crop of its own: Image can't decode the
+                    # source file at all, so the wide still is what the grid
+                    # tile draws as well as what the carousel pans across.
+                    # Both stay empty until the generation pass takes it.
+                    thumb="$pan"
+                else
+                    # a fresh image/gif stands in as its own tile (the Image
+                    # element decodes it directly, just slowly) until the crop
+                    # lands
+                    thumb="$PWD/$f"
+                    [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/crops/$key.$oext"
+                fi
                 [ "$cachedir/blurred/$bkey.png" -nt "$f" ] && blur="$cachedir/blurred/$bkey.png"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
-                printf '%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur"
+                printf '%s|%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur" "$pan"
             done | sort`, "_", root.dir, SystemInfo.cacheRoot,
             root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)]
         stdout: StdioCollector {
@@ -136,7 +165,7 @@ Singleton {
                 root.lastMissingDir = "";
                 const walls = text.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
-                    return { path: p[0], thumb: p[1], blur: p[2] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
+                    return { path: p[0], thumb: p[1], blur: p[2] || "", pan: p[3] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
                 // Reassigning this array invalidates every tile's model entry,
                 // which tears each delegate down and rebuilds it - re-creating
@@ -152,7 +181,8 @@ Singleton {
                     root.list = walls;
                 }
                 // Generate missing thumbnails (a full 5K image standing in as
-                // its own thumbnail costs ~100ms to decode+upload) and blurred
+                // its own thumbnail costs ~100ms to decode+upload), pan
+                // sources and blurred
                 // variants in the background; the next scan picks them up and
                 // applying never has to blur synchronously. Also sweeps cache
                 // entries whose source wallpaper is gone - runs every scan
@@ -180,17 +210,24 @@ Singleton {
                 // set of missing entries is what keeps a cache that *can't*
                 // be filled - no ImageMagick - from scanning on a loop: it
                 // only re-arms while the set is still shrinking.
-                const missing = walls.filter(w => w.thumb === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
+                const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
                 if (missing !== "" && missing !== root.generationMissing)
                     generationRetry.restart();
                 root.generationMissing = missing;
                 Quickshell.execDetached(["bash", "-c", `
                     walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6"; shift 6
-                    mkdir -p "$cachedir/thumbnails" "$cachedir/blurred"
-                    # layout from before thumbnails/ and blurred/ moved up
-                    # next to clips/, and from when the backdrop had a cache
-                    # of its own
-                    rm -rf "$cachedir/wallpapers" "$cachedir/xray"
+                    mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred"
+                    # Layouts this cache has had before: wallpapers/ + xray/
+                    # (from when the backdrop had a cache of its own, before
+                    # thumbnails/ and blurred/ moved up next to the
+                    # clipboard's), then a flat thumbnails/ beside a pan/ -
+                    # both since split by shape into the two directories
+                    # above. Regenerating an entry is a second or so, so the
+                    # old trees just go rather than being migrated. The find
+                    # is what clears the flat layout without touching the
+                    # subdirectories that replaced it.
+                    rm -rf "$cachedir/wallpapers" "$cachedir/xray" "$cachedir/pan"
+                    find "$cachedir/thumbnails" -maxdepth 1 -type f -delete 2>/dev/null
                     # one generation pass at a time: scans are cheap and fire
                     # on every open, and two passes racing on the same cache
                     # entry is duplicated magick work at best
@@ -204,18 +241,27 @@ Singleton {
                         stem="\${b%.*}" ext="\${b##*.}"
                         isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
-                        oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
+                        oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
                         # see the matching key note in the scan pass above
                         key=$(printf '%s' "$f|t3" | md5sum | cut -d' ' -f1)
+                        # see the matching pkey note in the scan pass above
+                        pkey=$(printf '%s' "$f|p1" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
                         bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
-                        live="$live $key $bkey"
-                        needthumb=0 needblur=0
-                        [ "$cachedir/thumbnails/$key.$oext" -nt "$f" ] || needthumb=1
+                        wide="$cachedir/thumbnails/wide/$pkey.jpg"
+                        [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
+                        live="$live $key $bkey $pkey"
+                        needcrop=0 needblur=0 needwide=0
+                        # a video has no crop entry - the wide still stands in
+                        # for one everywhere (see the scan pass)
+                        if [ "$isvid" = "0" ]; then
+                            [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] || needcrop=1
+                        fi
+                        [ "$wide" -nt "$f" ] || needwide=1
                         if [ "$gb" = "1" ]; then
                             [ "$cachedir/blurred/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
-                        if [ "$needthumb" = "1" ] || [ "$needblur" = "1" ]; then
+                        if [ "$needcrop" = "1" ] || [ "$needblur" = "1" ] || [ "$needwide" = "1" ]; then
                             if [ "$isvid" = "1" ]; then
                                 if ! command -v ffmpeg >/dev/null 2>&1; then
                                     if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
@@ -223,8 +269,9 @@ Singleton {
                                         notify-send -a pibble -i system-software-install "ffmpeg not found" "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                     fi
                                 else
-                                    # not cropped to 480x270 like the image
-                                    # thumbnails below: this frame is what the
+                                    # a video's only entry, and it goes in
+                                    # wide/ rather than being cropped like the
+                                    # images below: this frame is what the
                                     # picker paints while the live video isn't
                                     # playing, and PreserveAspectCrop derives
                                     # its scale from the source aspect, so a
@@ -237,13 +284,12 @@ Singleton {
                                     #
                                     # Capped at 1920 wide rather than a small
                                     # fixed size: this still doesn't only back
-                                    # the 480x270 grid tile (which downscales
-                                    # at decode time regardless of source
-                                    # size) - the windows-carousel style
-                                    # reuses it as the wide pan source (see
-                                    # wcThumb), decoded at up to ~barHeight
-                                    # tall. A 480px-wide still stretched to
-                                    # fill that box read as noticeably
+                                    # the grid's 240x135 tile (which
+                                    # downscales at decode time regardless of
+                                    # source size) - the carousel decodes the
+                                    # same file at up to ~barHeight tall and
+                                    # pans across it. A 480px-wide still
+                                    # stretched to fill that box read as
                                     # blurrier than the live video it hands
                                     # off to. min() so a source already
                                     # narrower than 1920 isn't upscaled.
@@ -259,7 +305,7 @@ Singleton {
                                     # VideoOutput never shows a truly static
                                     # frame the way this thumbnail does), so
                                     # this only narrows the gap, not closes it.
-                                    [ "$needthumb" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos,unsharp=5:5:0.8:5:5:0.0" "$cachedir/thumbnails/$key.$oext"
+                                    [ "$needwide" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos,unsharp=5:5:0.8:5:5:0.0" "$wide"
                                 fi
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
@@ -269,9 +315,35 @@ Singleton {
                             else
                                 # "$f[0]": first frame only, so an animated
                                 # .gif source still yields a static
-                                # thumbnail/blur (only the selected/centered
+                                # crop/blur (only the selected/centered
                                 # tile/window plays the source file itself)
-                                [ "$needthumb" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/$key.$oext"
+                                [ "$needcrop" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/crops/$key.$oext"
+                                # The wide still: the same frame
+                                # uncropped, bounded to the box a video's
+                                # already gets (see the ffmpeg call above), so
+                                # both types feed that strip the same picture
+                                # at the same quality. The trailing > only
+                                # ever shrinks - a source already smaller
+                                # comes through as it is rather than being
+                                # upscaled into the cache.
+                                #
+                                # This exists purely to keep the decode off the
+                                # original: a 5K PNG costs ~280ms to decode
+                                # even asked for at 440px tall (unlike a JPEG,
+                                # PNG has no scaled decode path - the whole
+                                # thing is unpacked, then resized), and the
+                                # carousel pays that again for every cell that
+                                # wraps around the strip. At 1920 wide it is
+                                # ~30ms. JPEG, not the true-color PNG the
+                                # other variants are written as: nothing
+                                # downstream re-blurs this one, so there is no
+                                # banding to protect against, and a q92 file is
+                                # a quarter the size. Alpha flattened onto
+                                # black explicitly - the format can't carry it
+                                # and magick would otherwise pick white, which
+                                # is not what a transparent wallpaper composites
+                                # over on the desktop.
+                                [ "$needwide" = "1" ] && magick "$f[0]" -resize '1920x1080>' -background black -alpha remove -alpha off -quality 92 "$wide"
                             fi
                         fi
                         # The blurred variant: the wallpaper as the compositor
@@ -290,11 +362,14 @@ Singleton {
                         # deliberately left as is.
                         if [ "$needblur" = "1" ] && command -v magick >/dev/null 2>&1; then
                             bsrc="$f"
-                            [ "$isvid" = "1" ] && bsrc="$cachedir/thumbnails/$key.$oext"
+                            [ "$isvid" = "1" ] && bsrc="$wide"
                             [ -e "$bsrc" ] && magick "$bsrc[0]" -resize "$xgeom^" -gravity center -extent "$xgeom" -blur "0x$xsigma" -color-matrix "1.3937 -0.3576 -0.0361, -0.1063 1.1424 -0.0361, -0.1063 -0.3576 1.4639" "$cachedir/blurred/$bkey.png"
                         fi
                     done
-                    for d in "$cachedir/thumbnails" "$cachedir/blurred"; do
+                    # clips/ is not swept here: the clipboard owns it, keys it
+                    # by entry id rather than source path, and prunes it
+                    # against clipsMax on its own scan
+                    for d in "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred"; do
                         # with nothing asking for blurred variants the keys
                         # this pass knows are not the ones those files were
                         # baked under, so leave them alone rather than

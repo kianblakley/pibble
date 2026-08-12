@@ -317,23 +317,35 @@ Item {
                         // wide enough to cover the whole fade range
                         // (|rank| <= halfVisible + 1; past that the
                         // cell is fully transparent, so further
-                        // overshoot is invisible). The full-res
-                        // source (not the 480x270 tile thumbnail,
-                        // which is already cropped tight to a
-                        // landscape frame and has no spare width to
-                        // pan through) decoded at bar height keeps
-                        // the pan free of seams.
+                        // overshoot is invisible). What it pans
+                        // across is the cached `pan` variant: the
+                        // 480x270 tile thumbnail is cropped tight to
+                        // a landscape frame and has no spare width
+                        // left, while the original costs ~280ms to
+                        // decode at 5K even asked for at bar height
+                        // - and that was paid again for every cell
+                        // wrapping to the far end of the strip, all
+                        // of it queued on Qt Quick's one image
+                        // reader thread. Scrolling faster than the
+                        // reader drained then relabeled a cell
+                        // before its decode landed, which cancels
+                        // the request outright (assigning `source`
+                        // clears any load in flight), so cells went
+                        // and stayed blank until the strip stopped.
+                        // Same picture at 1920 wide decodes in
+                        // ~30ms. Until the background pass has
+                        // written one, the original stands in.
                         //
-                        // Video uses its cached still frame here
-                        // (Image can't decode the source file - see
-                        // the source binding below) in this same
-                        // wide/panned box, so it pans exactly like
-                        // every other type. The still keeps the
-                        // video's own aspect rather than the tile
-                        // grid's 16:9 crop (see the ffmpeg call in
-                        // Wallpapers' scan), which is what lets the shared
-                        // player below hand over to it - and back -
-                        // without the crop shifting.
+                        // A video's pan entry is the cached still
+                        // frame ffmpeg took (Image can't decode the
+                        // source file), so it lands in this same
+                        // wide/panned box like every other type. The
+                        // still keeps the video's own aspect rather
+                        // than the tile grid's 16:9 crop (see the
+                        // ffmpeg call in Wallpapers' scan), which is
+                        // what lets the shared player below hand
+                        // over to it - and back - without the crop
+                        // shifting.
                         width: root.barWidth + ((root.halfVisible + 1) * root.parallaxPx + 20) * 2
                         height: parent.height
                         anchors.verticalCenter: parent.verticalCenter
@@ -349,11 +361,19 @@ Item {
                         // spring below still needs something to fade -
                         // shownWall keeps the last-rendered wallpaper
                         // until a new one replaces it (see onWallChanged).
-                        // A video source can't be decoded by Image at
-                        // all, so it falls back to the (narrower,
-                        // tightly-cropped) static thumb instead of the
-                        // full-res pan source every other type gets.
-                        source: cell.shownWall ? "file://" + (cell.shownWall.video ? cell.shownWall.thumb : cell.shownWall.path) : ""
+                        source: {
+                            const w = cell.shownWall;
+                            if (!w)
+                                return "";
+                            if (w.pan)
+                                return "file://" + w.pan;
+                            // no pan variant cached yet. An image can stand
+                            // in as its own, slowly; a video has nothing to
+                            // fall back to at all (Image can't decode one),
+                            // so it stays empty until the generation pass
+                            // writes the still that is also its pan entry.
+                            return w.video ? "" : "file://" + w.path;
+                        }
                     }
                     // Only the centered window plays its .gif from the
                     // source file; side windows keep the still Image
