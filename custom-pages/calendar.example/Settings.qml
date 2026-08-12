@@ -60,7 +60,7 @@ Item {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: settingRow.modelData.label
-                    color: root.pibble.secondaryTextColor
+                    color: root.pibble.mutedTextColor
                     font.family: root.pibble.font
                     font.pixelSize: root.px(14)
                 }
@@ -74,14 +74,14 @@ Item {
                         width: 28
                         height: 28
                         radius: 8
-                        color: prevArea.containsMouse ? root.pibble.tileBgActive : root.pibble.tileBg
+                        color: prevArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                         border.width: 1
-                        border.color: root.pibble.tileBorder
+                        border.color: root.pibble.borderColor
 
                         Text {
                             anchors.centerIn: parent
                             text: root.chevronLeft
-                            color: root.pibble.accent
+                            color: root.pibble.accentColor
                             font.family: root.pibble.iconFont
                             font.pixelSize: root.px(15)
                         }
@@ -106,14 +106,14 @@ Item {
                         width: 28
                         height: 28
                         radius: 8
-                        color: nextArea.containsMouse ? root.pibble.tileBgActive : root.pibble.tileBg
+                        color: nextArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                         border.width: 1
-                        border.color: root.pibble.tileBorder
+                        border.color: root.pibble.borderColor
 
                         Text {
                             anchors.centerIn: parent
                             text: root.chevronRight
-                            color: root.pibble.accent
+                            color: root.pibble.accentColor
                             font.family: root.pibble.iconFont
                             font.pixelSize: root.px(15)
                         }

@@ -1213,7 +1213,7 @@ PanelWindow {
 
         // typing from the clock jumps into whatever's next in the cycle
         // order - custom pages included, not just the built-in three:
-        // now that a page can read pibble.searchText (see PageContext)
+        // now that a page can read pibble.textInput (see PageContext)
         // there's no reason to skip past one looking for a built-in.
         // The text itself isn't touched here; it's already sitting in
         // this same field, which every page (built-in or custom) reads

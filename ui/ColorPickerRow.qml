@@ -273,7 +273,7 @@ Item {
                 model: [
                     { key: "accent", label: "Accent" },
                     { key: "fg", label: "Text" },
-                    { key: "muted", label: "Muted" }
+                    { key: "muted", label: "Muted text" }
                 ]
 
                 Rectangle {

@@ -89,10 +89,10 @@ JsonAdapter {
     property string wallpaperDir: Defaults.wallpaperDir
     // command run when a wallpaper is chosen; $WALL is the image (or video -
     // pibble stays backend-agnostic, so a command that wants to handle .mp4
-    // differently, e.g. via mpvpaper instead of an image-only tool like the
-    // default awww, has to branch on $WALL's extension and tear down/start the
-    // right backend itself), $BLUR the blurred variant (only generated if
-    // referenced)
+    // differently, e.g. via mpvpaper instead of an image-only tool like
+    // awww, has to branch on $WALL's extension and tear down/start the
+    // right backend itself - the default command below does exactly that),
+    // $BLUR the blurred variant (only generated if referenced)
     property string wallCommand: Defaults.wallCommand
     // path of the last wallpaper applied through the launcher; the Dynamic
     // theme samples this directly instead of asking the compositor what it's

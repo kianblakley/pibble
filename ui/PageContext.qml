@@ -39,9 +39,9 @@ import "root:/services"
 QtObject {
     id: root
 
-    readonly property color accent: Theme.accent
+    readonly property color accentColor: Theme.accent
     readonly property color textColor: Theme.fg
-    readonly property color secondaryTextColor: Theme.muted
+    readonly property color mutedTextColor: Theme.muted
     // the shell's text font
     readonly property string font: Theme.fontFamily
     // Family name of pibble's own icon font. It's already loaded once by
@@ -56,12 +56,12 @@ QtObject {
     readonly property real fontScale: Settings.fontScale
     // Three shades of the accent color, pre-mixed to the same numbers the
     // built-in tile grids (Apps/Walls/Clips) use, so your own tiles match:
-    // tileBg = idle background, tileBgActive = a stronger version for
-    // hover/selected/highlighted, tileBorder = the outline color. Pick
+    // tileColor = idle background, activeTileColor = a stronger version for
+    // hover/selected/highlighted, borderColor = the outline color. Pick
     // whatever corner-radius suits your tile - the built-ins vary theirs too.
-    readonly property color tileBg: Qt.alpha(Theme.accent, 0.11)
-    readonly property color tileBgActive: Qt.alpha(Theme.accent, 0.22)
-    readonly property color tileBorder: Qt.alpha(Theme.accent, 0.33)
+    readonly property color tileColor: Qt.alpha(Theme.accent, 0.11)
+    readonly property color activeTileColor: Qt.alpha(Theme.accent, 0.22)
+    readonly property color borderColor: Qt.alpha(Theme.accent, 0.33)
     // True while this page is the one on screen, false the moment you tab
     // or escape away from it. If you just want to read it, use it straight
     // from pibble. If you want to run code when it changes, mirror it onto
@@ -78,7 +78,7 @@ QtObject {
     // Read-only - watch it to filter your own content, the same way the
     // built-in Apps/Walls/Clips grids filter theirs. It clears itself every
     // time the launcher opens or the pane changes, so you don't have to.
-    readonly property string searchText: LauncherState.query
+    readonly property string textInput: LauncherState.query
     // Gives keyboard focus back to pibble's hidden search box. Only call
     // this if your page grabbed focus itself (e.g. put its own TextInput in
     // front and called forceActiveFocus() on it) - pibble's own keybinds,

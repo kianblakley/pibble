@@ -3,7 +3,7 @@ import "." as Local
 
 // pibble's example custom page: a month calendar, exercising the pibble
 // contract (see ui/PageContext.qml) - tileIn, getSetting/setSetting,
-// searchText, launcherOpen, fontScale, iconFont, and a settingsTab. Copy
+// textInput, launcherOpen, fontScale, iconFont, and a settingsTab. Copy
 // this directory out from under the .example suffix to try it.
 Item {
     id: root
@@ -83,7 +83,7 @@ Item {
         select(now)
 
     // Whatever the user's typed into pibble's search box
-    readonly property string query: pibble ? pibble.searchText : ""
+    readonly property string query: pibble ? pibble.textInput : ""
     onQueryChanged: {
         const target = parseQuery(query);
         if (target)
@@ -158,14 +158,14 @@ Item {
                 height: 28
                 radius: 8
                 opacity: 0
-                color: prevArea.containsMouse ? root.pibble.tileBgActive : root.pibble.tileBg
+                color: prevArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                 border.width: 1
-                border.color: root.pibble.tileBorder
+                border.color: root.pibble.borderColor
 
                 Text {
                     anchors.centerIn: parent
                     text: root.chevronLeft
-                    color: root.pibble.accent
+                    color: root.pibble.accentColor
                     font.family: root.pibble.iconFont
                     font.pixelSize: root.px(15)
                 }
@@ -179,7 +179,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: Qt.locale().standaloneMonthName(root.viewMonth, Locale.LongFormat) + " " + root.viewYear
-                color: titleArea.containsMouse ? root.pibble.accent : root.pibble.textColor
+                color: titleArea.containsMouse ? root.pibble.accentColor : root.pibble.textColor
                 font.family: root.pibble.font
                 font.pixelSize: root.px(22)
                 font.weight: Font.DemiBold
@@ -200,14 +200,14 @@ Item {
                 height: 28
                 radius: 8
                 opacity: 0
-                color: nextArea.containsMouse ? root.pibble.tileBgActive : root.pibble.tileBg
+                color: nextArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                 border.width: 1
-                border.color: root.pibble.tileBorder
+                border.color: root.pibble.borderColor
 
                 Text {
                     anchors.centerIn: parent
                     text: root.chevronRight
-                    color: root.pibble.accent
+                    color: root.pibble.accentColor
                     font.family: root.pibble.iconFont
                     font.pixelSize: root.px(15)
                 }
@@ -237,7 +237,7 @@ Item {
                     width: root.cell
                     horizontalAlignment: Text.AlignHCenter
                     text: Qt.locale().dayName(root.startMonday ? (index + 1) % 7 : index, Locale.ShortFormat)
-                    color: root.pibble.secondaryTextColor
+                    color: root.pibble.mutedTextColor
                     font.family: root.pibble.font
                     font.pixelSize: root.px(13)
                 }
@@ -262,7 +262,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                         text: String(root.isoWeek(root.dateAt(index * 7 + (root.startMonday ? 3 : 4))))
-                        color: root.pibble.secondaryTextColor
+                        color: root.pibble.mutedTextColor
                         font.family: root.pibble.font
                         font.pixelSize: root.px(12)
                     }
@@ -289,14 +289,14 @@ Item {
                         height: root.cell
                         radius: 16
                         opacity: 0
-                        color: isToday ? root.pibble.tileBgActive : (cellArea.containsMouse ? root.pibble.tileBg : "transparent")
+                        color: isToday ? root.pibble.activeTileColor : (cellArea.containsMouse ? root.pibble.tileColor : "transparent")
                         border.width: isSelected ? 1 : 0
-                        border.color: root.pibble.accent
+                        border.color: root.pibble.accentColor
 
                         Text {
                             anchors.centerIn: parent
                             text: String(cell.cellDate.getDate())
-                            color: cell.isToday ? root.pibble.accent : root.pibble.textColor
+                            color: cell.isToday ? root.pibble.accentColor : root.pibble.textColor
                             opacity: cell.cellDate.getMonth() === root.viewMonth ? 1 : 0.35
                             font.family: root.pibble.font
                             font.pixelSize: root.px(18)
@@ -318,7 +318,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             text: root.query ? "“" + root.query + "”" : "type a month or year to jump"
             elide: Text.ElideRight
-            color: root.pibble.secondaryTextColor
+            color: root.pibble.mutedTextColor
             font.family: root.pibble.font
             font.pixelSize: root.px(13)
         }

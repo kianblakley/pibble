@@ -148,7 +148,7 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
-            width: 420
+            width: 444
             height: 34
             radius: 8
             color: Qt.alpha(Theme.accent, pathInput.activeFocus ? 0.16 : 0.08)
@@ -219,7 +219,7 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
-            width: 508
+            width: 444
             height: 34
             radius: 8
             color: Qt.alpha(Theme.accent, cmdInput.activeFocus ? 0.16 : 0.08)

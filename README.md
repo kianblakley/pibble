@@ -36,7 +36,8 @@ Optional (required for full feature set):
 | [ImageMagick](https://github.com/ImageMagick/ImageMagick) | Static wallpaper/clipboard thumbnails |
 | [ffmpeg](https://ffmpeg.org/) | Live wallpaper thumbnails |
 | [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews (install via your distro's package manager) |
-| [awww](https://codeberg.org/LGFae/awww) | Recommended wallpaper backend (can use any) |
+| [awww](https://codeberg.org/LGFae/awww) | Recommended static wallpaper backend (can use any) |
+| [mpvpaper](https://github.com/GhostNaN/mpvpaper) | Recommended live wallpaper backend (can use any) |
 | [cliphist](https://github.com/sentriz/cliphist) | Clipboard history support |
 
 ### 2. Clone
@@ -125,14 +126,14 @@ To access a `pibble` property use `pibble.property` as defined in the table belo
 
 | Property | Type | Use |
 |---|---|---|
-| `accent`, `textColor`, `secondaryTextColor` | `color` | current values of `SETTINGS > General > Color theme` |
-| `tileBg`, `tileBgActive`, `tileBorder` | `color` | ready-mixed colors based on `accent` that are used in tiles/buttons |
+| `accentColor`, `textColor`, `mutedTextColor` | `color` | current values of `SETTINGS > General > Color theme` |
+| `tileColor`, `activeTileColor`, `borderColor` | `color` | ready-mixed colors based on `accentColor` that are used in tiles/buttons |
 | `font` | `string` | curent value of `SETTINGS > General > Font` |
 | `fontScale` | `real` | current value of `SETTINGS > General > Font size`. It's a multiplier, e.g. `1.2` — turn a size into a real pixel value with `Math.round(px * fontScale)` |
 | `iconFont` | `string` | the name of pibble's icon font, you are required to find your own unicode |
 | `pageActive` | `bool` | `true` while your page is the one currently showing |
 | `launcherOpen` | `bool` | `true` while the launcher is open at all |
-| `searchText` | `string` | the current value of pibble's text input |
+| `textInput` | `string` | the current value of pibble's hidden text input |
 | `releaseFocus()` | function | call this to give keyboard focus back to pibble if your page took it |
 | `tileIn(item, slot, cols)` | function | makes `item` play pibble's tile spawn animation set in `SETTINGS > Pages > Grid animation` — pass `slot`/`cols` if it's one tile among several, so they can stagger in one after another |
 | `setSetting(key, value)` / `getSetting(key, fallback)` | function | save/load your page's settings |
