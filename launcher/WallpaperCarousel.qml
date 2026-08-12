@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Wallpaper selector, "carousel" style: an infinite horizontal strip of
 // narrow parallax windows with the selected wallpaper always centered.
@@ -84,8 +85,16 @@ Item {
         const atBreak = slotSpacing * edgeBreak - (barWidth * edgeRate / 2) * edgeBreak * edgeBreak;
         return atBreak + edgeClampedStep * (m - edgeBreak);
     }
+    // extra top/bottom room for the optional query label and page dots.
+    // The carousel is a spatial ring - there's no visual "page of tiles" to
+    // land on - but wallsCols/wallsRows (the grid pages' own size setting)
+    // still carves wallpaperMatches into pages the same way LauncherState
+    // already does for the grid style (wallpaperPageSize/wallpaperPage,
+    // unconditional on style), so the dots below reuse that directly.
+    readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 52 : 0
+    readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
     width: 2 * edgeOffset(halfVisible) + barWidth
-    height: barHeight + captionGap + 22
+    height: barHeight + captionGap + 22 + root.queryH + root.dotsH
     // Its own instance of the shared power/reboot rubber band: one Translate
     // per pane, all bound to the same pull, so no pane has to reach across the
     // tree for a sibling's transform.
@@ -191,7 +200,7 @@ Item {
             // slotSpacing - barWidth (the scale=1 gap) at every
             // rank, not just growing ones.
             x: parent.width / 2 - width / 2 + Math.sign(rank) * root.edgeOffset(Math.abs(rank))
-            y: 0
+            y: root.queryH
             width: root.barWidth
             height: root.barHeight
             z: -Math.abs(rank)
@@ -574,7 +583,7 @@ Item {
         // its own rank - see the notes there for why each is
         // shaped the way it is
         x: parent.width / 2 - width / 2 + Math.sign(root.centerRank) * root.edgeOffset(Math.abs(root.centerRank))
-        y: 0
+        y: root.queryH
         width: root.barWidth
         height: root.barHeight
         scale: Math.max(root.edgeFloor, 1 - Math.abs(root.centerRank) * root.edgeRate)
@@ -639,9 +648,16 @@ Item {
         }
     }
 
+    PageQueryLabel {
+        anchors.top: parent.top
+        anchors.topMargin: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        queryText: LauncherState.query
+    }
+
     Text {
         anchors.top: parent.top
-        anchors.topMargin: root.barHeight + root.captionGap
+        anchors.topMargin: root.queryH + root.barHeight + root.captionGap
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(implicitWidth, root.width)
         text: {
@@ -661,5 +677,14 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         color: Theme.fg
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
+    }
+
+    PageDots {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        pageCount: LauncherState.wallpaperPageSize > 0
+            ? Math.ceil(LauncherState.wallpaperMatches.length / LauncherState.wallpaperPageSize) : 0
+        currentPage: LauncherState.wallpaperPage
     }
 }

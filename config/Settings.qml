@@ -31,6 +31,9 @@ JsonAdapter {
     function alertEnabled(name: string): bool {
         return (settings.pibbleAlerts ?? {})[name] !== false;
     }
+    function pageIndicatorEnabled(name: string): bool {
+        return (settings.pageIndicators ?? {})[name] !== false;
+    }
     function gesturesEnabled(): bool {
         return settings.gestures !== false;
     }
@@ -49,6 +52,9 @@ JsonAdapter {
     property var pages: Defaults.pages
     // cycle order of the pages (drag the chips in settings to change)
     property var pageOrder: Defaults.pageOrder
+    // per-page tile grid decorations: the live search query above the tiles,
+    // and a page-of-tiles dot indicator below them (see PageQueryLabel/PageDots)
+    property var pageIndicators: Defaults.pageIndicators
     // pages added via the Pages settings row's upload picker; each is
     // { id, label, path, on } and starts unchecked. Loaded and cycled
     // alongside the built-in four once ticked on - see LauncherState.pageOrder

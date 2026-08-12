@@ -63,6 +63,33 @@ Column {
         }
     }
 
+    // tile grid decorations: the live search query above the tiles (apps/
+    // walls-grid/clips), and a page-of-tiles dot indicator below them
+    Item {
+        width: 780
+        height: 34
+
+        SettingLabel {
+            anchors.left: parent.left
+            text: "Tile page indicators"
+        }
+        ResetButton {
+            key: "pageIndicators"
+            anchors.right: parent.right
+        }
+        ChipRow {
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            anchors.verticalCenter: parent.verticalCenter
+            items: [
+                { id: "query", label: "search query" },
+                { id: "dots", label: "page dots" }
+            ]
+            isOn: Settings.pageIndicatorEnabled
+            toggle: SettingsSchema.toggleIndicator
+        }
+    }
+
     // grid size: one visible tile grid, switchable between the
     // three pages that have a configurable grid size
     Item {

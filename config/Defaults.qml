@@ -14,6 +14,9 @@ QtObject {
     readonly property var pages: ({ clock: true, apps: true, walls: true, clips: true })
     readonly property var pageOrder: ["clock", "apps", "walls", "clips"]
     readonly property var clockShow: ({ date: true, battery: true, weather: true })
+    // per-page tile grid decorations: the live search query above the tiles,
+    // and a page-of-tiles dot indicator below them
+    readonly property var pageIndicators: ({ query: true, dots: true })
     readonly property var flyouts: ({ volume: true, notifs: true })
     readonly property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
     readonly property var keybinds: ({

@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // The clipboard pane: a masonry grid of variable-height tiles, the expanded
 // card one of them grows into, and the two empty states (nothing in history
@@ -33,8 +34,12 @@ Item {
     Item {
         id: drawer
         anchors.centerIn: parent
+        // extra top/bottom room for the optional query label and page dots,
+        // reserved only when each is on so a disabled one leaves no gap
+        readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 32 : 0
+        readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
         width: Settings.clipsCols * 240 + (Settings.clipsCols - 1) * 16 + 52
-        height: Math.max(masonry.height, 120) + 52
+        height: Math.max(masonry.height, 120) + 52 + drawer.queryH + drawer.dotsH
         // a filtered-out tile collapsing to 0 height shrinks
         // masonry, which (via centerIn: parent below) would
         // otherwise snap the whole drawer's top edge down instantly;
@@ -62,11 +67,18 @@ Item {
             NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.tile(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
         }
 
+        PageQueryLabel {
+            anchors.top: parent.top
+            anchors.topMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            queryText: LauncherState.query
+        }
+
         Row {
             id: masonry
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
-            anchors.topMargin: 26
+            anchors.topMargin: 26 + drawer.queryH
             // pinned directly rather than left implicit: even with
             // each column's own width fixed at 240, relying on
             // Row to sum them back up is one more layer that could
@@ -375,6 +387,15 @@ Item {
                     }
                 }
             }
+        }
+
+        PageDots {
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            pageCount: LauncherState.clipPageSize > 0
+                ? Math.ceil(LauncherState.clipMatches.length / LauncherState.clipPageSize) : 0
+            currentPage: LauncherState.clipPage
         }
 
         ClipExpandCard {

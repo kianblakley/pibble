@@ -199,6 +199,13 @@ Singleton {
         Settings.save();
     }
 
+    function toggleIndicator(name: string): void {
+        const indicators = Object.assign({}, Defaults.pageIndicators, Settings.pageIndicators);
+        indicators[name] = indicators[name] === false;
+        Settings.pageIndicators = indicators;
+        Settings.save();
+    }
+
     function toggleFlyout(name: string): void {
         const flyouts = Object.assign({}, Defaults.flyouts, Settings.flyouts);
         flyouts[name] = flyouts[name] === false;
@@ -230,6 +237,9 @@ Singleton {
             break;
         case "clock":
             Settings.clockShow = Defaults.clockShow;
+            break;
+        case "pageIndicators":
+            Settings.pageIndicators = Defaults.pageIndicators;
             break;
         case "appsGrid":
             Settings.appsCols = Defaults.appsCols;

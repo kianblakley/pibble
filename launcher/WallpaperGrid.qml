@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Wallpaper selector, "grid" style: a paged grid of thumbnails. Only the
 // selected tile animates - its .gif from the source file, its .mp4 through the
@@ -21,8 +22,12 @@ Item {
         root.opacity = 0.004;
     }
     anchors.centerIn: parent
+    // extra top/bottom room for the optional query label and page dots,
+    // reserved only when each is on so a disabled one leaves no gap
+    readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 32 : 0
+    readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
     width: Settings.wallsCols * 240 + (Settings.wallsCols - 1) * 24 + 52
-    height: grid.height + 52
+    height: grid.height + 52 + root.queryH + root.dotsH
     // Its own instance of the shared power/reboot rubber band: one Translate
     // per pane, all bound to the same pull, so no pane has to reach across the
     // tree for a sibling's transform.
@@ -61,11 +66,18 @@ Item {
         NumberAnimation { target: root; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.tile(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
     }
 
+    PageQueryLabel {
+        anchors.top: parent.top
+        anchors.topMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        queryText: LauncherState.query
+    }
+
     Grid {
         id: grid
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: 26
+        anchors.topMargin: 26 + root.queryH
         columns: Settings.wallsCols
         columnSpacing: 24
         rowSpacing: 24
@@ -272,6 +284,15 @@ Item {
                 }
             }
         }
+    }
+
+    PageDots {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        pageCount: LauncherState.wallpaperPageSize > 0
+            ? Math.ceil(LauncherState.wallpaperMatches.length / LauncherState.wallpaperPageSize) : 0
+        currentPage: LauncherState.wallpaperPage
     }
 
     // One video surface for the whole grid, over whichever tile holds the

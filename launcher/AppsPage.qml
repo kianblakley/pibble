@@ -1,6 +1,7 @@
 import QtQuick
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // The apps pane: a paged grid of app tiles ranked by launch frequency and
 // filtered by the shared query, plus the empty state that replaces it.
@@ -23,8 +24,12 @@ Item {
     Item {
         id: drawer
         anchors.centerIn: parent
+        // extra top/bottom room for the optional query label and page dots,
+        // reserved only when each is on so a disabled one leaves no gap
+        readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 32 : 0
+        readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
         width: Settings.appsCols * 174 + (Settings.appsCols - 1) * 24 + 52
-        height: grid.height + 52
+        height: grid.height + 52 + drawer.queryH + drawer.dotsH
         // Its own instance of the shared power/reboot rubber band: one
         // Translate per pane, all bound to the same pull, so no pane has to
         // reach across the tree for a sibling's transform.
@@ -48,11 +53,18 @@ Item {
             NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.tile(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
         }
 
+        PageQueryLabel {
+            anchors.top: parent.top
+            anchors.topMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            queryText: LauncherState.query
+        }
+
         Grid {
             id: grid
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
-            anchors.topMargin: 26
+            anchors.topMargin: 26 + drawer.queryH
             columns: Settings.appsCols
             columnSpacing: 24
             rowSpacing: 24
@@ -242,6 +254,15 @@ Item {
                     }
                 }
             }
+        }
+
+        PageDots {
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            pageCount: LauncherState.appPageSize > 0
+                ? Math.ceil(LauncherState.matches.length / LauncherState.appPageSize) : 0
+            currentPage: LauncherState.appPage
         }
 
     }
