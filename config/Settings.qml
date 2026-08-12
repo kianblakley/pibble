@@ -92,6 +92,17 @@ JsonAdapter {
     // and reusing "carousel" as the flat variant's new id would collide with
     // old saved configs mid-migration
     property string wallpaperStyle: "grid"
+    // Whether the selector animates .gif/.mp4 wallpapers at all. Off leaves
+    // every tile/bar on the still frame the scan cached for it - frame 0 for a
+    // video, so a stopped preview is pixel-identical to a playing one's first
+    // frame and nothing reads as missing - and no video file is opened at all,
+    // which also retires the second half of `preload` below (there is then
+    // nothing to warm, and the ~150MiB per video is never spent; a session that
+    // already opened players keeps them until the daemon restarts, since the
+    // pool never drops one). Only about
+    // the preview: what the applied wallpaper does on the desktop is
+    // wallCommand's business either way.
+    property bool wallpaperLive: true
     property string wallpaperDir: Defaults.wallpaperDir
     // command run when a wallpaper is chosen; $WALL is the image (or video -
     // pibble stays backend-agnostic, so a command that wants to handle .mp4
@@ -121,7 +132,8 @@ JsonAdapter {
     //     VRAM held for the daemon's life. Because it shows up as uniform
     //     latency rather than a visible hitch, it is easy to miss without an A/B.
     //   - every video wallpaper's player is opened while the launcher is down
-    //     (WallpaperVideoPool's `warming`). This one is unmissable: a 666ms
+    //     (WallpaperVideoPool's `warming`), unless wallpaperLive above has
+    //     turned video previews off entirely. This one is unmissable: a 666ms
     //     GUI-thread freeze the first time the selection lands on a video when
     //     off, 0 when on, against ~150MiB of RSS per video wallpaper.
     //

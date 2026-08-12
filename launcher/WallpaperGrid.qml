@@ -180,7 +180,7 @@ Item {
                         // them live, so without the check a hidden
                         // grid would still be decoding frames nobody
                         // can see on every carousel step.
-                        readonly property bool tileLive: Settings.wallpaperStyle === "grid" && LauncherState.shown
+                        readonly property bool tileLive: Settings.wallpaperLive && Settings.wallpaperStyle === "grid" && LauncherState.shown
                         readonly property bool gifAnimating: cell.isSelected && tileLive && !!cell.shownWall?.gif
 
                         Image {
@@ -314,7 +314,7 @@ Item {
     // otherwise leave a video decoding frames for a window nobody is looking
     // at.
     readonly property bool videoShowing: root.settled && !LauncherState.warmingWallpapers
-        && Settings.wallpaperStyle === "grid" && LauncherState.shown && LauncherState.pane === "walls"
+        && Settings.wallpaperLive && Settings.wallpaperStyle === "grid" && LauncherState.shown && LauncherState.pane === "walls"
         && !!root.selWall?.video
 
     // Held false for as long as the tile the surface stands over is still
@@ -363,8 +363,10 @@ Item {
                 // freezes the GUI thread for ~700ms on first sight of a file.
                 // The style check keeps the carousel's own pool from opening
                 // the same files a second time over. Settings.preload off
-                // trades that freeze back for the ~150MiB per video this holds.
-                warming: Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                // trades that freeze back for the ~150MiB per video this holds;
+                // Settings.wallpaperLive off means no video is ever shown here,
+                // so there is nothing to pay for either way.
+                warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
             }
         }
         // the tile's own 1px stroke is underneath this overlay, so redraw it

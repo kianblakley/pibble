@@ -158,6 +158,12 @@ Column {
 
     SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }
 
+    SettingRow {
+        key: "wallpaperLive"
+        label: "Live wallpaper preview"
+        hint: "plays .gif/.mp4 wallpapers in the selector; off keeps them on their still frame"
+    }
+
     // wallpaper path
     Item {
         width: 780

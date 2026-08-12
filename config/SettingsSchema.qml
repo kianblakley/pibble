@@ -121,6 +121,8 @@ Singleton {
             // the internal ids are historical (see Settings.wallpaperStyle);
             // these are what the user is actually shown
             return Settings.wallpaperStyle === "carousel-flat" ? "carousel" : Settings.wallpaperStyle === "carousel" ? "parallax carousel" : Settings.wallpaperStyle;
+        case "wallpaperLive":
+            return Settings.wallpaperLive ? "on" : "off";
         }
         return "";
     }
@@ -194,6 +196,9 @@ Singleton {
             break;
         case "wallpaperStyle":
             Settings.wallpaperStyle = root.cycle(Settings.wallpaperStyle, ["grid", "carousel-flat", "carousel"], dir);
+            break;
+        case "wallpaperLive":
+            Settings.wallpaperLive = !Settings.wallpaperLive;
             break;
         }
         Settings.save();
@@ -341,6 +346,9 @@ Singleton {
             break;
         case "wallpaperStyle":
             Settings.wallpaperStyle = "grid";
+            break;
+        case "wallpaperLive":
+            Settings.wallpaperLive = true;
             break;
         default:
             if (key.startsWith("bind:")) {

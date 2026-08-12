@@ -381,7 +381,7 @@ Item {
                     // dragging back and forth across center:
                     // dropping out reloads the source below.
                     readonly property bool gifAnimating: cell.wallIndex >= 0 && cell.wallIndex === LauncherState.wallpaperSelected && Math.abs(cell.rank) < 1
-                        && Settings.wallpaperStyle !== "grid" && LauncherState.shown && !!cell.shownWall?.gif
+                        && Settings.wallpaperLive && Settings.wallpaperStyle !== "grid" && LauncherState.shown && !!cell.shownWall?.gif
                     AnimatedImage {
                         // Same (wider-than-bar) target width as the still
                         // Image above, not just barWidth: PreserveAspectCrop
@@ -555,7 +555,7 @@ Item {
     // LauncherState.shown, not just the pane: the launcher keeps its last
     // pane while hidden, and decoding frames for a window nobody
     // is looking at costs the same as decoding for one they are.
-    readonly property bool videoShowing: LauncherState.shown && LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
+    readonly property bool videoShowing: LauncherState.shown && LauncherState.pane === "walls" && Settings.wallpaperLive && Settings.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
     // Rank of the slot the player stands in for: the cell
     // videoSource belongs to (see videoAbsStep above) - the one
     // it's riding into on a video-to-video handover, or the one
@@ -613,7 +613,10 @@ Item {
                 // the bindings under an invisible pane keep running): without
                 // it, navigating the *grid* onto a video would have this pool
                 // open the file too, for a strip nobody is looking at.
-                current: Settings.wallpaperStyle === "grid" ? "" : root.videoSource
+                // wallpaperLive gates `current`, not just videoShowing above:
+                // the sticky videoSource would otherwise still have the pool
+                // open (and hold) a file the surface is never going to show.
+                current: !Settings.wallpaperLive || Settings.wallpaperStyle === "grid" ? "" : root.videoSource
                 live: root.videoShowing
                 // Only while the launcher is down, so the file
                 // opens land with nothing on screen to stutter
@@ -623,8 +626,10 @@ Item {
                 // keeps the grid's own pool from opening the same
                 // files a second time over. Settings.preload off
                 // trades that freeze back for the ~150MiB per video
-                // this holds.
-                warming: Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                // this holds; Settings.wallpaperLive off means no
+                // video is ever shown here, so there is nothing to
+                // pay for either way.
+                warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
                 // exactly the box - and therefore exactly the crop
                 // - the centered cell's still Image uses at rank 0,
                 // parallax included: without it the video would sit
