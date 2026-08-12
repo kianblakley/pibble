@@ -661,7 +661,7 @@ PanelWindow {
     // notifies about as fast as the exits-immediately case does.
     Timer {
         id: wallGrace
-        interval: 300
+        interval: 800
         onTriggered: {
             if (root.pendingWall) {
                 root.commitWallpaper(root.pendingWall);
