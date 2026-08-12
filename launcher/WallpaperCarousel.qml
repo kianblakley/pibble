@@ -689,7 +689,11 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 6
         anchors.horizontalCenter: parent.horizontalCenter
-        pageCount: LauncherState.wallpaperPageSize > 0
+        // carouselEmpty, not a filtered-length check: the ring itself never
+        // drops non-matching wallpapers (see wallpaperMatches above), so the
+        // dots track that same full, unfiltered page count while any tile
+        // still matches - only a query with no match anywhere collapses them.
+        pageCount: LauncherState.wallpaperPageSize > 0 && !LauncherState.carouselEmpty
             ? Math.ceil(LauncherState.wallpaperMatches.length / LauncherState.wallpaperPageSize) : 0
         currentPage: LauncherState.wallpaperPage
     }
