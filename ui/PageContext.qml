@@ -4,132 +4,97 @@ import "root:/launcher"
 import "root:/services"
 
 // ---------- custom page contract ----------
-// One of these is created per enabled custom page (see the "Custom
-// pages" render block below) and handed to the loaded file's root item
-// as `pibble`, if it declares that property - every member here is
-// optional to use. Properties are live bindings (theme/anim-style
-// changes propagate the same as they do to any built-in pane).
+// pibble hands one of these to every custom page's root item, as a
+// `pibble` property, if the page declares one. Every member below is
+// optional - use whichever ones you want.
 //
-// What this covers is what the *launcher* owns and a page has no other
-// honest route to: which pane is showing, what's being typed, keyboard
-// focus, the tile-entrance motion, and a storage namespace of its own.
-// It is not a sandbox and never was - nothing stops a page importing
-// "root:/config" and reading every other page's settings. Treat it as
-// the curated, stable surface instead: names here are kept working
-// across refactors, and since there is no compile step, a page that
-// spells out shell internals instead breaks as a silent binding error
-// at runtime rather than at load.
+// Why this exists: a page can't otherwise know things only the launcher
+// keeps track of - which pane is showing, what's being typed, where
+// keyboard focus is - or reproduce the launcher's own tile-pop-in
+// animation and colors by hand. This is that missing piece.
 //
-// Two imports are deliberately fair game, and better than reinventing
-// what they hold:
-//   import "root:/services"  - Theme, Anim, and Icons (Icons.family
-//                              plus the glyph codepoints; there is no
-//                              icon font here, since proxying one
-//                              would just be a second name for it)
-//   import "root:/ui"        - the settings controls the built-in tabs
-//                              are built from. A page's settingsTab
-//                              should use SettingLabel/StepperButton/
-//                              SettingValue rather than hand-rolled
-//                              lookalikes, so its rows keep matching
-//                              the built-in ones for free.
+// It's not a sandbox. A page can `import "root:/config"` or
+// `"root:/services"` and reach shell internals directly if it really
+// wants to - nothing stops it. The difference is that only the members
+// below are promised to keep working after a pibble update; anything
+// reached by importing shell internals directly can break silently
+// (there's no compile step, so a broken reference just shows up as a
+// runtime warning, not a build error).
 //
-// The page sizes itself: CustomPageHost binds its own size to the
-// loaded item's and centers it, falling back to 420x320 if the root
-// reports none. Nothing clips, so a page that overflows just overlaps.
+// No icon glyphs here - pibble's own icon codepoints (which glyph means
+// what) are an internal detail of how pibble draws itself, not
+// something a page should depend on. A page that wants icons uses
+// `iconFont` below (pibble's own vendored font, already loaded) or
+// loads its own font, then finds the codepoints it needs by opening
+// that font in a codepoint viewer like FontForge - see
+// calendar.example's chevron buttons for a worked example.
 //
-// The other direction - a page contributing to pibble, rather than the
-// other way round - goes through one more property on the same root
-// item, read by LauncherState.customSettingsTabs (see there for details) rather
-// than written by PageContext: a `settingsTab` Component gets the page
-// its own tab in Settings, alongside General/Pages/Keybindings/
-// Flyouts, labeled after the page's own folder name (capitalized) -
-// not something the page declares itself.
-// Some things that used to live here (close/openSettings/notify/
-// copyToClipboard, the animation-parameter set, surface) are gone
-// because they were reachable another way already (the keybind closes
-// the launcher; notify-send/Quickshell.clipboardText are plain
-// Quickshell, no wrapper needed) or asked a page to reproduce pibble's
-// own visual rhythm exactly, which is cheap to build off `active`.
-// fill/fillActive/border below are the opposite case: kept (and
-// precomputed, not left as bare alpha numbers) because there's no way
-// for a page to discover or reproduce these specific values other than
-// reading this file.
+// A page sizes itself: pibble just centers a window around whatever
+// width/height the page reports (420x320 if it reports none) - nothing
+// clips, so a page that's too big just overlaps.
+//
+// Pages can also hand something back to pibble, the other direction:
+// a `settingsTab` Component property on the same root item gives the
+// page its own tab in Settings, labeled after the page's folder name.
 QtObject {
     id: root
 
-    // `required` (must be supplied at construction, see the "Custom
-    // pages" render block below) but not `readonly` - QML doesn't
-    // allow both on the same property. Stays mutable after
-    // construction as a result; nothing a page does should ever
-    // reassign it, since getSetting/setSetting's namespacing depends
-    // on it never changing after the host sets it.
-    required property string pageId
     readonly property color accent: Theme.accent
-    readonly property color fg: Theme.fg
-    readonly property color muted: Theme.muted
+    readonly property color textColor: Theme.fg
+    readonly property color secondaryTextColor: Theme.muted
     // the shell's text font
     readonly property string font: Theme.fontFamily
+    // Family name of pibble's own icon font. It's already loaded once by
+    // pibble itself, so using this instead of your own FontLoader saves
+    // loading the same file twice. No codepoints, though - see the header
+    // comment above for why you have to find those yourself.
+    readonly property string iconFont: Icons.family
+    // The multiplier behind Settings > General > "Font size" - not a ready-
+    // made pixel size. Turn it into one yourself: Math.round(px * fontScale).
+    // Use it for anything you want to grow/shrink with that setting, not
+    // just text - padding, tile size, whatever.
     readonly property real fontScale: Settings.fontScale
-    // the shell's own type scale, so a page's sizes track it rather than
-    // re-deriving `Math.round(px * fontScale)` at every Text
-    function fontSize(px: int): int {
-        return Theme.fontSize(px);
-    }
-    // the fill/border colors the built-in Apps/Walls/Clips grids and
-    // Settings buttons round their tiles with - precomputed, not a
-    // bare alpha number, since the number alone is only ever used one
-    // way (Qt.alpha(accent, thatNumber)) and precomputing means a
-    // future change to the actual formula (not just the number) would
-    // still reach every page using these, not just ones re-derived by
-    // hand. The built-ins' own radius ranges 8-19px scaled to tile
-    // size, not one constant, so there's no equivalent radius property -
-    // pick whatever radius suits your own tile.
-    readonly property color fill: Qt.alpha(Theme.accent, 0.11)
-    readonly property color fillActive: Qt.alpha(Theme.accent, 0.22)
-    readonly property color border: Qt.alpha(Theme.accent, 0.33)
-    // true from the moment this page becomes the one on screen until
-    // it's navigated away from (Tab, Escape, picking another page) -
-    // mirrors what every built-in pane gates its own entrance
-    // animations on (see LauncherState.pane). Also written directly onto the
-    // page's own root item (if it declares `active`), since a
-    // binding alone can't run code - see that property's own comment
-    // in the "Custom pages" render block below.
-    readonly property bool active: LauncherState.pane === pageId
-    readonly property bool shown: LauncherState.shown
-    // Live text from pibble's own hidden search field (see win's
-    // TextInput, id: input) - the same source the built-in Apps/Walls/
-    // Clips grids filter their own `matches` off. Read-only: a page
-    // can watch what the user's typing to filter its own content the
-    // same way the built-ins do, without ever taking keyboard focus
-    // itself. Cleared on every pane switch and launcher (re)open (see
-    // LauncherState.setPane/resetState), same as it is for the built-ins.
+    // Three shades of the accent color, pre-mixed to the same numbers the
+    // built-in tile grids (Apps/Walls/Clips) use, so your own tiles match:
+    // tileBg = idle background, tileBgActive = a stronger version for
+    // hover/selected/highlighted, tileBorder = the outline color. Pick
+    // whatever corner-radius suits your tile - the built-ins vary theirs too.
+    readonly property color tileBg: Qt.alpha(Theme.accent, 0.11)
+    readonly property color tileBgActive: Qt.alpha(Theme.accent, 0.22)
+    readonly property color tileBorder: Qt.alpha(Theme.accent, 0.33)
+    // True while this page is the one on screen, false the moment you tab
+    // or escape away from it. If you just want to read it, use it straight
+    // from pibble. If you want to run code when it changes, mirror it onto
+    // your own root item first, the same way launcherOpen is used below:
+    //   readonly property bool pageActive: pibble ? pibble.pageActive : false
+    //   onPageActiveChanged: ...
+    // That works with no extra setup, because QML fires onPageActiveChanged
+    // for your own property regardless of whether its value came from a
+    // binding or a direct assignment.
+    readonly property bool pageActive: LauncherState.pane === pageId
+    // True while the launcher itself is open at all, not just your page.
+    readonly property bool launcherOpen: LauncherState.shown
+    // Whatever the user's currently typed into pibble's hidden search box.
+    // Read-only - watch it to filter your own content, the same way the
+    // built-in Apps/Walls/Clips grids filter theirs. It clears itself every
+    // time the launcher opens or the pane changes, so you don't have to.
     readonly property string searchText: LauncherState.query
-    // Hands keyboard focus back to pibble's hidden search field. Only
-    // needed if this page put its own focusable item (a TextInput,
-    // typically) in front of it - LauncherState.input is otherwise always
-    // focused, which is what lets Tab/Escape/etc keep working from any
-    // page and lets searchText above stay live. A page that grabs
-    // focus (e.g. a TextInput's own MouseArea/TapHandler calling
-    // forceActiveFocus()) and never calls this back can leave the
-    // user stuck: pibble's own keybinds (Escape included) are handled
-    // inside LauncherState.input's Keys.onPressed, which only fires while it's
-    // focused. Call this from whatever signals "done editing" for your
-    // field - typically Keys.onEscapePressed, same as the Settings
-    // pane's own text fields do internally.
+    // Gives keyboard focus back to pibble's hidden search box. Only call
+    // this if your page grabbed focus itself (e.g. put its own TextInput in
+    // front and called forceActiveFocus() on it) - pibble's own keybinds,
+    // Escape included, only work while its search box has focus, so a page
+    // that takes focus and never gives it back can leave the user stuck.
+    // Call this from whatever means "done editing" in your field - usually
+    // Keys.onEscapePressed.
     function releaseFocus(): void {
         LauncherState.focusInput();
     }
-    // One call gives an item the built-in grids' own tile-entrance
-    // rhythm (see Settings.animStyle, "Transitions" in Settings > Grids):
-    // pop in from a smaller/lower/transparent starting state, staggered
-    // by `slot` among `cols` columns if the style calls for a stagger.
-    // Everything (the animation objects, restarting it whenever this
-    // page becomes active again) is owned here - a page never touches
-    // a SequentialAnimation or hears about Anim.fromScale/animDur/
-    // etc directly, so it can't get any of that wrong. `slot`/`cols`
-    // default to 0/1 (no stagger) for a page with just one tile; pass
-    // them for a real grid the same way the built-ins index their own
-    // (row-major, 0-based).
+    // Makes an item pop in with the same little spring animation the built-in
+    // grids use: starts smaller/lower/invisible, then eases into place. Call
+    // it once per item, any time you want it to (re)play - pibble owns the
+    // animation itself, so you never have to touch one directly. `slot`/
+    // `cols` stagger several items one after another (which position, out of
+    // how many columns) - leave them out for a single tile with no stagger.
     function tileIn(item, slot, cols) {
         if (!item)
             return;
@@ -152,22 +117,26 @@ QtObject {
         }
         rec.spring.restart();
     }
-    // tileIn() bookkeeping below - not part of the documented pibble
-    // contract (see the header comment above), just what tileIn()
-    // itself needs to remember which items to re-spring when this
-    // page becomes active again (see onActiveChanged).
+    // Internal only - not something a page is meant to read. It's how
+    // getSetting/setSetting/pageActive know which page they're talking
+    // about, set once by CustomPageHost when it creates this object. It
+    // can't be `readonly` (something outside has to set it), but nothing
+    // should change it after that.
+    required property string pageId
+    // Internal bookkeeping for tileIn() - remembers which items to
+    // re-spring the next time this page becomes active again.
     property var tileRegistry: []
-    // A page whose tiles come and go - a Repeater whose model length changed,
-    // which recreates every delegate, not just the surplus ones - leaves
-    // records pointing at destroyed items. Those read back as truthy and
-    // non-null, so `r.item &&` is no test; Qt.isQtObject is (verified both
-    // ways). Touching one throws, which would take out the restart for every
-    // tile after it in the list, so prune before ever iterating.
+    // If a page's tile Repeater changes size, old delegates get destroyed
+    // and new ones take their place - so this list can end up pointing at
+    // items that no longer exist. Checking `r.item` alone doesn't catch
+    // that (a destroyed item still reads as truthy), so use Qt.isQtObject
+    // instead, and always prune before looping over the list - touching a
+    // destroyed item throws, which would cut the loop short.
     function pruneTiles(): void {
         tileRegistry = tileRegistry.filter(r => Qt.isQtObject(r.item));
     }
-    onActiveChanged: {
-        if (!active)
+    onPageActiveChanged: {
+        if (!pageActive)
             return;
         pruneTiles();
         tileRegistry.forEach(r => r.spring.restart());
@@ -193,19 +162,18 @@ QtObject {
             }
         }
     }
-    // per-page persistence: a page only ever sees its own namespace
-    // (Settings.customPageData[pageId]), keyed by whatever string the page
-    // chooses - arbitrary JSON-serializable values, same as any Settings.*
-    // setting. Survives reinstalling/renaming other pages; only wiped if
-    // the page itself is trashed (see trashPage()).
-    function getSetting(key: string, fallback) {
-        const store = (Settings.customPageData ?? {})[pageId];
-        return store && key in store ? store[key] : fallback;
-    }
+    // A page's own little save file - key/value, whatever JSON-serializable
+    // value you want. Every page gets its own separate namespace, so two
+    // pages can both use the key "count" without clashing. Cleared only if
+    // this page itself gets trashed.
     function setSetting(key: string, value): void {
         const all = Object.assign({}, Settings.customPageData ?? {});
         all[pageId] = Object.assign({}, all[pageId] ?? {}, { [key]: value });
         Settings.customPageData = all;
         Settings.save();
+    }
+    function getSetting(key: string, fallback) {
+        const store = (Settings.customPageData ?? {})[pageId];
+        return store && key in store ? store[key] : fallback;
     }
 }
