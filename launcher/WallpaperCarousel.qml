@@ -660,12 +660,13 @@ Item {
         queryText: LauncherState.query
     }
 
-    Text {
+    ScrambleText {
         anchors.top: parent.top
         anchors.topMargin: root.queryH + root.barHeight + root.captionGap
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(implicitWidth, root.width)
-        text: {
+        // restWidth, not implicitWidth - see the grid caption's copy of this
+        width: Math.min(restWidth, root.width)
+        content: {
             if (LauncherState.carouselEmpty)
                 return "";
             const count = LauncherState.wallpaperMatches.length;

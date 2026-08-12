@@ -245,13 +245,15 @@ Item {
                         border.width: 1
                         border.color: cell.isSelected ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
                     }
-                    Text {
+                    ScrambleText {
                         anchors.top: thumb.bottom
                         anchors.topMargin: 8
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(implicitWidth, 220)
+                        // restWidth, not implicitWidth - see the app tile's
+                        // caption for why
+                        width: Math.min(restWidth, 220)
                         height: 16
-                        text: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
+                        content: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
                         color: Theme.fg

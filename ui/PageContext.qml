@@ -117,6 +117,30 @@ QtObject {
         }
         rec.spring.restart();
     }
+    // tileIn()'s text half: hands back `source` as it looks partway through
+    // the scramble pibble's own labels play as a page opens, so your text
+    // resolves alongside them. Use it *in a binding*, never as a one-time
+    // assignment - it reads the shared clock behind the effect, so the binding
+    // re-runs itself for the length of the run and settles on the real string:
+    //   Text { text: pibble.scramble(modelData.name, index, 3) }
+    // `slot`/`cols` stagger several labels one after another, exactly as
+    // tileIn's do - leave them out for a single label. Pass tileIn's own
+    // slot/cols for a label on a tile and the two land together: pibble's own
+    // labels start when their tile actually appears, but a plain function
+    // can't see your item to do that, so the stagger is what lines the two up
+    // here. Hands back `source` untouched whenever nothing is running (or the
+    // user has the effect switched off in Settings > Pages), so it's always
+    // safe to bind through.
+    function scramble(source, slot, cols) {
+        const text = source ?? "";
+        if (!Anim.scrambleActive || !root.pageActive)
+            return text;
+        const s = slot ?? 0;
+        // staggerOffset, not stagger: this is re-read every frame of the run,
+        // and stagger()'s window closing partway through would drop the offset
+        // to 0 under everything still waiting on it (see Anim).
+        return Anim.scrambled(text, Anim.scrambleElapsed - Anim.staggerOffset(s, cols ?? 1, 60), (Anim.scrambleRun << 8) ^ (s * 31 + text.length));
+    }
     // Internal only - not something a page is meant to read. It's how
     // getSetting/setSetting/pageActive know which page they're talking
     // about, set once by CustomPageHost when it creates this object. It

@@ -66,6 +66,10 @@ JsonAdapter {
     property var customPageData: ({})
 
     property string animStyle: "bloom"
+    // whether a pane's text resolves out of random glyphs as that pane opens
+    // (see Anim's scramble clock); rides animStyle - "none" leaves nothing to
+    // ride - but switchable on its own, being much the louder of the two
+    property bool textScramble: true
     // independent of animStyle: gates the settings pane's entrance spring and
     // the power-off/reboot pull-back animation, neither of which is a "grid"
     // (see Anim.menu())

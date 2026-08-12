@@ -173,10 +173,10 @@ Item {
                                     source: Icons.url(cell.shownEntry ? cell.shownEntry.icon : "")
                                     visible: status === Image.Ready
                                 }
-                                Text {
+                                ScrambleText {
                                     anchors.centerIn: parent
                                     visible: !icon.visible
-                                    text: (cell.shownEntry ? cell.shownEntry.name : "").slice(0, 2).toUpperCase()
+                                    content: (cell.shownEntry ? cell.shownEntry.name : "").slice(0, 2).toUpperCase()
                                     color: Theme.accent
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(16); weight: Font.Bold }
                                 }
@@ -217,11 +217,15 @@ Item {
                             }
                         }
 
-                        Text {
+                        ScrambleText {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            width: Math.min(implicitWidth, 76)
+                            // restWidth, not implicitWidth: the caption keeps
+                            // the width of the app's real name while it's
+                            // still noise, so it doesn't breathe wider and
+                            // narrower under a centered tile mid-scramble
+                            width: Math.min(restWidth, 76)
                             height: 16
-                            text: cell.shownEntry ? cell.shownEntry.name : ""
+                            content: cell.shownEntry ? cell.shownEntry.name : ""
                             elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.fg
@@ -274,12 +278,17 @@ Item {
     // ready to fade in again next time. Centered on the pane like
     // the wallpaper/clip empty states below, not inside `drawer`
     // (whose box stays the full grid size regardless of match count).
-    Text {
+    ScrambleText {
         id: emptyLabel
         visible: LauncherState.pane === "apps" && opacity > 0
         anchors.centerIn: parent
         opacity: 0
-        text: Apps.all.length === 0 ? "no apps found" : "no matches"
+        content: Apps.all.length === 0 ? "no apps found" : "no matches"
+        // pinned to the resting string's box, so a centered label (as every
+        // one out here is) doesn't shuffle sideways on every reroll, or up and
+        // down with the line height of whichever font carries a symbol
+        width: restWidth
+        height: restHeight
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
 

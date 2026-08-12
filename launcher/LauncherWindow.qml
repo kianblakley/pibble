@@ -183,6 +183,28 @@ PanelWindow {
         value: root.screen ? root.screen.height : 0
     }
 
+    // The "grow" reveal's circle, published for the text scramble's per-label
+    // gate (see ui/ScrambleText.qml): a label the reveal hasn't reached is not
+    // on screen, however opaque it is, and must not spend its scramble behind
+    // the mask. Anim is a service and can't reach up here for it, so it's
+    // pushed down - and left negative ("nothing is masking") for the launch
+    // styles that fade instead of growing, and for a reveal that has landed.
+    Binding {
+        target: Anim
+        property: "maskRadius"
+        value: LauncherState.growMode && LauncherState.reveal < 1 ? LauncherState.revealDiameter / 2 : -1
+    }
+    Binding {
+        target: Anim
+        property: "maskX"
+        value: LauncherState.originX
+    }
+    Binding {
+        target: Anim
+        property: "maskY"
+        value: LauncherState.originY
+    }
+
     function open(targetPane: string): void {
         fadeOut.stop(); // reopening mid-dismiss is allowed
         root.flushRemap();

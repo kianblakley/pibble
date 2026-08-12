@@ -2,7 +2,7 @@ import QtQuick
 import "." as Local
 
 // pibble's example custom page: a month calendar, exercising the pibble
-// contract (see ui/PageContext.qml) - tileIn, getSetting/setSetting,
+// contract (see ui/PageContext.qml) - tileIn, scramble, getSetting/setSetting,
 // textInput, launcherOpen, fontScale, iconFont, and a settingsTab. Copy
 // this directory out from under the .example suffix to try it.
 Item {
@@ -178,7 +178,12 @@ Item {
             }
             Text {
                 anchors.centerIn: parent
-                text: Qt.locale().standaloneMonthName(root.viewMonth, Locale.LongFormat) + " " + root.viewYear
+                // pibble.scramble() resolves this out of random glyphs as the
+                // page opens, in step with the built-in pages' own labels. It
+                // has to sit in the binding like this, not be assigned once:
+                // what it returns changes for the length of the run and then
+                // settles on the string passed in.
+                text: root.pibble.scramble(Qt.locale().standaloneMonthName(root.viewMonth, Locale.LongFormat) + " " + root.viewYear)
                 color: titleArea.containsMouse ? root.pibble.accentColor : root.pibble.textColor
                 font.family: root.pibble.font
                 font.pixelSize: root.px(22)
@@ -236,7 +241,9 @@ Item {
 
                     width: root.cell
                     horizontalAlignment: Text.AlignHCenter
-                    text: Qt.locale().dayName(root.startMonday ? (index + 1) % 7 : index, Locale.ShortFormat)
+                    // scramble's slot/cols stagger it exactly as tileIn's do,
+                    // so the header resolves across the week left to right
+                    text: root.pibble.scramble(Qt.locale().dayName(root.startMonday ? (index + 1) % 7 : index, Locale.ShortFormat), index, 7)
                     color: root.pibble.mutedTextColor
                     font.family: root.pibble.font
                     font.pixelSize: root.px(13)
@@ -261,7 +268,7 @@ Item {
                         height: root.cell
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        text: String(root.isoWeek(root.dateAt(index * 7 + (root.startMonday ? 3 : 4))))
+                        text: root.pibble.scramble(String(root.isoWeek(root.dateAt(index * 7 + (root.startMonday ? 3 : 4)))), index * 7, 7)
                         color: root.pibble.mutedTextColor
                         font.family: root.pibble.font
                         font.pixelSize: root.px(12)
@@ -295,7 +302,10 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: String(cell.cellDate.getDate())
+                            // same slot/cols this cell's own tileIn() uses (see
+                            // springDays), so a day's number resolves as its
+                            // tile lands rather than ahead of it
+                            text: root.pibble.scramble(String(cell.cellDate.getDate()), cell.index, 7)
                             color: cell.isToday ? root.pibble.accentColor : root.pibble.textColor
                             opacity: cell.cellDate.getMonth() === root.viewMonth ? 1 : 0.35
                             font.family: root.pibble.font
@@ -316,7 +326,7 @@ Item {
         Text {
             width: root.gridW
             horizontalAlignment: Text.AlignHCenter
-            text: root.query ? "“" + root.query + "”" : "type a month or year to jump"
+            text: root.pibble.scramble(root.query ? "“" + root.query + "”" : "type a month or year to jump")
             elide: Text.ElideRight
             color: root.pibble.mutedTextColor
             font.family: root.pibble.font

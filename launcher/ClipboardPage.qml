@@ -227,12 +227,15 @@ Item {
                             }
 
                             // caption line, like app/wallpaper labels
-                            Text {
+                            ScrambleText {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: tile.y + cell.tileH + 6
                                 opacity: tile.opacity
                                 scale: tile.scale
-                                text: {
+                                // pinned to the resting string's width - see
+                                // the app tile's caption
+                                width: restWidth
+                                content: {
                                     const c = cell.shownClip;
                                     if (!c)
                                         return "";
@@ -283,11 +286,11 @@ Item {
                                 // plain (non-searching) preview: elide is only reliable on the
                                 // lightweight Text item, so this stays a plain Text and only
                                 // shows when there's no highlight to render
-                                Text {
+                                ScrambleText {
                                     visible: cell.shownClip !== null && cell.shownClip.image !== true && !cell.shownClip.hiSpans
                                     anchors.fill: parent
                                     anchors.margins: 13
-                                    text: cell.shownClip ? Format.escapeHtml(cell.shownClip.preview) : ""
+                                    content: cell.shownClip ? Format.escapeHtml(cell.shownClip.preview) : ""
                                     textFormat: Text.StyledText
                                     wrapMode: Text.Wrap
                                     elide: Text.ElideRight
@@ -408,13 +411,17 @@ Item {
     // Clipboard empty states: siblings of the drawer (not nested inside it) so
     // anchors.centerIn: parent centers on the pane instead of the drawer's box,
     // which stays sized to the full grid regardless of clip/match count.
-    Text {
+    ScrambleText {
         visible: LauncherState.pane === "clips" && Clipboard.entries.length === 0
         anchors.centerIn: parent
         transform: Translate {
             y: LauncherState.powerPull - LauncherState.rebootPull
         }
-        text: "clipboard history is empty"
+        // pinned to the resting string's box, so this centered label doesn't
+        // shuffle about on every reroll - see the apps pane's copy of this
+        width: restWidth
+        height: restHeight
+        content: "clipboard history is empty"
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
     }
@@ -426,7 +433,7 @@ Item {
     // worth of time, via a Timer that restarts/cancels on every
     // change instead of an imperative restart()/stop() pair racing
     // against whichever keystroke's onClipMatchesChanged fires last.
-    Text {
+    ScrambleText {
         id: emptyLabel
         readonly property bool wantShow: Clipboard.entries.length > 0 && LauncherState.clipMatches.length === 0
         property bool debouncedShow: false
@@ -447,7 +454,9 @@ Item {
         Behavior on opacity {
             NumberAnimation { duration: Anim.tile(220); easing.type: Easing.OutCubic }
         }
-        text: "no matches"
+        width: restWidth
+        height: restHeight
+        content: "no matches"
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
 

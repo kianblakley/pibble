@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import "root:/services"
+import "root:/ui"
 
 // Idle state: the big clock, plus whichever of date / battery / weather are
 // switched on. The outer gate holds it back until the reveal circle is large
@@ -159,7 +160,7 @@ Item {
                             color: segment.modelData === "battery" ? Theme.accent : Theme.muted
                             font { family: Icons.family; pixelSize: Theme.fontSize(16) }
                         }
-                        Text {
+                        ScrambleText {
                             // same freeze trick as segmentIcon above: hold the
                             // last real value while the segment fades out so
                             // the text doesn't blank before it's gone
@@ -169,7 +170,23 @@ Item {
                             property string frozenValue: valueText
                             onValueTextChanged: if (valueText.length > 0) frozenValue = valueText
                             anchors.verticalCenter: parent.verticalCenter
-                            text: frozenValue
+                            content: frozenValue
+                            // The one place a scramble delay is worth setting:
+                            // a line's segments all arrive together (one
+                            // opacity, one line), so nothing else would stagger
+                            // them across it. A tile grid needs no such thing -
+                            // there each caption starts when its own tile lands.
+                            scrambleDelay: segment.index * 45
+                            // pinned to the resting string's box: this sits in
+                            // a Row inside a centered Column, both of which
+                            // animate their reflow, so a segment that grew and
+                            // shrank with its noise would have the whole clock
+                            // sliding about for the length of the run - across
+                            // in step with the glyph widths, and up and down
+                            // with the line height of whichever font ends up
+                            // carrying a symbol
+                            width: restWidth
+                            height: restHeight
                             color: segment.modelData === "date" ? Theme.muted
                                 : segment.modelData === "battery" ? (Battery.charging ? Theme.accent : Theme.muted)
                                 : segment.modelData === "weather" ? Theme.muted : Theme.fg

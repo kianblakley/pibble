@@ -154,6 +154,12 @@ Column {
 
     SettingRow { key: "animStyle"; label: "Grid animation" }
 
+    SettingRow {
+        key: "textScramble"
+        label: "Text scramble"
+        hint: "a page's text resolves out of random glyphs as it opens; follows the grid animation being on"
+    }
+
     SettingRow { key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
 
     SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }

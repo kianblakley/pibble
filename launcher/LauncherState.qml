@@ -348,14 +348,23 @@ Singleton {
             Clipboard.checkAlert();
     }
 
-    // Entering a pane replays its tile stagger; the clock has no tiles. Also
-    // tells Clipboard whether its alerts have anywhere to land - a scan runs on
-    // every launcher open, but a cliphist problem is only worth reporting while
-    // the user is actually looking at the clips pane.
+    // Entering a pane replays its tile stagger; the clock has no tiles. Its
+    // text scramble runs for every pane, clock included - that one is all
+    // text and nothing else. One call for the whole shell rather than one per
+    // pane: the run is global, and each label decides for itself whether it's
+    // on screen to take part (see ui/ScrambleText.qml). Also tells Clipboard
+    // whether its alerts have anywhere to land - a scan runs on every launcher
+    // open, but a cliphist problem is only worth reporting while the user is
+    // actually looking at the clips pane.
     onPaneChanged: {
         Clipboard.paneVisible = root.pane === "clips";
         if (root.pane !== "clock")
             Anim.beginStagger();
+        // Starting the clock is all this does - when each label actually
+        // begins is the label's own business, since it can only start once
+        // whatever brings it in (a tile's spring, the launch reveal) has
+        // brought it in (see ui/ScrambleText.qml).
+        Anim.beginScramble();
     }
     // settings remembers where it was opened from
     property string paneBeforeSettings: "clock"

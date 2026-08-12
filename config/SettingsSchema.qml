@@ -79,6 +79,8 @@ Singleton {
             return "" + Settings.clipsMax;
         case "animStyle":
             return Settings.animStyle;
+        case "textScramble":
+            return Settings.textScramble ? "on" : "off";
         case "fontScale":
             return Math.round(Settings.fontScale * 100) + "%";
         case "dimOpacity":
@@ -135,6 +137,9 @@ Singleton {
             break;
         case "animStyle":
             Settings.animStyle = root.cycle(Settings.animStyle, root.tileAnimationChoices, dir);
+            break;
+        case "textScramble":
+            Settings.textScramble = !Settings.textScramble;
             break;
         case "fontScale":
             Settings.fontScale = Math.max(0.7, Math.min(1.6, Math.round((Settings.fontScale + dir * 0.1) * 100) / 100));
@@ -265,6 +270,9 @@ Singleton {
             break;
         case "animStyle":
             Settings.animStyle = "bloom";
+            break;
+        case "textScramble":
+            Settings.textScramble = true;
             break;
         case "fontScale":
             Settings.fontScale = 1.0;
