@@ -534,40 +534,42 @@ Item {
     // to the still frame underneath) file while it fades out
     // riding its own cell away, rather than blanking mid-slide.
     property string videoSource: ""
-    // absStep of the cell videoSource was last handed over from,
-    // updated in lockstep with videoSource itself (see below) so
-    // centerRank always measures from the slot the open file
-    // actually belongs to. Without this it tracked
-    // LauncherState.carouselStep directly, which jumps to the
-    // *destination* slot the instant navigation starts - fine
-    // while hopping video-to-video (videoSource jumps with it),
-    // but wrong leaving a video for a plain image: videoSource
-    // stays put (see onCenterWallChanged), so the fading-out
-    // player would ride the incoming cell's position instead of
-    // the outgoing one, flashing the old thumbnail over the tile
-    // being navigated to.
-    property int videoAbsStep: LauncherState.carouselStep
+    // Ring index videoSource sits at, captured with it. Only the
+    // *congruence* is kept, never a slot: absStep below is re-derived
+    // from it against the current carouselStep every time, so nothing
+    // here can be left pointing at a slot the file no longer belongs
+    // to. It used to hold the slot itself, assigned alongside
+    // videoSource - which was only ever right while centerWall kept
+    // changing. Every path that re-anchors carouselStep without
+    // changing the centered wallpaper (resetState's reset to 0 on each
+    // open, wallpaperMatches' own reset, onTotalSlotsChanged) left the
+    // old slot on the books, so reopening onto a centered video played
+    // it over whichever cell that stale slot had wrapped onto.
+    property int videoIndex: 0
     onCenterWallChanged: if (centerWall && centerWall.video) {
         videoSource = centerWall.path;
-        videoAbsStep = LauncherState.carouselStep;
+        videoIndex = LauncherState.wallpaperSelected;
     }
-    // Same ± totalSlots wrap the cells' own rebalance() applies to
-    // absStep (see cell.rebalance above), kept in sync here too: without
-    // it, videoAbsStep is the one position on this whole strip that
-    // never gets recycled, so a slot it drifted off from during a fast
-    // scroll stays on the books forever and can wrap back into view
-    // later - by then some other cell owns that geometric spot, and the
-    // stale player would paint the old video's frame over its content
-    // instead of staying retired off-screen like every real cell does.
-    function rebalanceVideo() {
-        while (root.videoAbsStep - LauncherState.carouselAnim > root.restSpan + 1)
-            root.videoAbsStep -= root.totalSlots;
-        while (root.videoAbsStep - LauncherState.carouselAnim < -(root.restSpan + 1))
-            root.videoAbsStep += root.totalSlots;
-    }
-    Connections {
-        target: LauncherState
-        function onCarouselAnimChanged() { root.rebalanceVideo(); }
+    // absStep of the cell videoSource belongs to: the slot congruent to
+    // videoIndex nearest the selection's own slot, the same short-way-
+    // around rule jumpCarousel picks a direction with. It is not simply
+    // LauncherState.carouselStep, which jumps to the *destination* slot
+    // the instant navigation starts - fine while hopping video-to-video
+    // (videoIndex jumps with it), but wrong leaving a video for a plain
+    // image: videoIndex stays put (see onCenterWallChanged), and the
+    // fading-out player has to ride the outgoing cell rather than flash
+    // the old thumbnail over the tile being navigated to. Landing off
+    // the visible span is fine and needs no recycling - the opacity
+    // below culls it exactly as it culls a cell at that rank.
+    readonly property int videoAbsStep: {
+        const count = LauncherState.wallpaperMatches.length;
+        const step = LauncherState.carouselStep;
+        if (count <= 0)
+            return step;
+        let delta = ((root.videoIndex - step) % count + count) % count;
+        if (delta > count / 2)
+            delta -= count;
+        return step + delta;
     }
     // videoSource === centerWall.path holds off the handover for
     // the frame or two after a switch between two videos, while
