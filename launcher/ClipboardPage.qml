@@ -121,6 +121,39 @@ Item {
                             readonly property var clip: LauncherState.clipMatches[clipIndex] ?? null
                             readonly property bool isSelected: clip !== null && LauncherState.clipSelected === clipIndex
 
+                            // This cell's place in the *text* wave, i.e. its
+                            // slot with every image tile ahead of it taken out.
+                            // An image tile carries nothing to resolve but its
+                            // dimensions, so counting them spends the wave's
+                            // first beats on tiles with no text on them: a page
+                            // of screenshots reads as a pause before anything
+                            // scrambles at all. They keep their place in the
+                            // grid - this is only what the scramble is staggered
+                            // by, never the tile springs, which are a wave of
+                            // the tiles themselves and want every one of them.
+                            //
+                            // An image tile takes no beat of its own: its
+                            // dimensions resolve in step with the last text
+                            // tile before it, which is the beat the wave is
+                            // actually on as it passes. Counting straight would
+                            // instead put it on the *next* one, a beat early,
+                            // and a run of them would then arrive together
+                            // ahead of the text they're standing among. Images
+                            // leading the page have no text tile behind them
+                            // and fall on the wave's first beat, alongside the
+                            // first that does.
+                            readonly property int waveSlot: {
+                                const base = LauncherState.clipPage * LauncherState.clipPageSize;
+                                let n = 0;
+                                for (let i = 0; i < cell.slot; i++) {
+                                    const c = LauncherState.clipMatches[base + i];
+                                    if (c && !c.image)
+                                        n++;
+                                }
+                                const self = LauncherState.clipMatches[base + cell.slot];
+                                return self && self.image ? Math.max(0, n - 1) : n;
+                            }
+
                             property var shownClip: null
                             property bool filled: false
                             onClipChanged: {
@@ -241,6 +274,12 @@ Item {
                                         return "";
                                     return c.image ? c.dims : c.bytes + " chars";
                                 }
+                                // a slot taking a different clip leaves the
+                                // tile where it is (see the isNew branch
+                                // above), so the text resolving again is the
+                                // whole transition
+                                replayOnChange: true
+                                replayStagger: Anim.stagger(cell.waveSlot, Settings.clipsCols, 60)
                                 color: Theme.fg
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }
@@ -285,12 +324,31 @@ Item {
                                 }
                                 // plain (non-searching) preview: elide is only reliable on the
                                 // lightweight Text item, so this stays a plain Text and only
-                                // shows when there's no highlight to render
+                                // shows when there's no highlight to render - but it keeps
+                                // running the scramble either way, and the highlight below
+                                // renders off its `text` (see screenItem)
                                 ScrambleText {
+                                    id: preview
                                     visible: cell.shownClip !== null && cell.shownClip.image !== true && !cell.shownClip.hiSpans
                                     anchors.fill: parent
                                     anchors.margins: 13
-                                    content: cell.shownClip ? Format.escapeHtml(cell.shownClip.preview) : ""
+                                    // Left unescaped under a highlight: there the markup is
+                                    // built by slicing this string at the match's own offsets,
+                                    // and escaping shifts them (highlightMarkup escapes each
+                                    // slice itself). This label isn't the one painting then.
+                                    content: {
+                                        const c = cell.shownClip;
+                                        if (!c)
+                                            return "";
+                                        return c.hiSpans ? c.hiText : Format.escapeHtml(c.preview);
+                                    }
+                                    // Under a highlight this label is hidden and the TextEdit
+                                    // below is what's on screen, so that is what decides when
+                                    // the effect may start - a hidden label never arms.
+                                    screenItem: cell.shownClip && cell.shownClip.hiSpans ? highlight : null
+                                    // see the caption above
+                                    replayOnChange: true
+                                    replayStagger: Anim.stagger(cell.waveSlot, Settings.clipsCols, 60)
                                     textFormat: Text.StyledText
                                     wrapMode: Text.Wrap
                                     elide: Text.ElideRight
@@ -307,6 +365,7 @@ Item {
                                 // but clip:true plus the fixed tileH still guarantees the tile
                                 // itself never grows - overflow is just clipped, not "…"-truncated
                                 TextEdit {
+                                    id: highlight
                                     visible: cell.shownClip !== null && cell.shownClip.image !== true && !!cell.shownClip.hiSpans
                                     anchors.fill: parent
                                     anchors.margins: 13
@@ -317,7 +376,13 @@ Item {
                                     persistentSelection: false
                                     text: {
                                         const c = cell.shownClip;
-                                        return c && c.hiSpans ? Clipboard.highlightMarkup(c.hiText, c.hiSpans) : "";
+                                        // preview.text, not c.hiText: the same snippet part-way
+                                        // through the scramble, so the highlight resolves with
+                                        // the rest of the tile instead of sitting there
+                                        // finished. Safe to slice at the match's own offsets -
+                                        // the noise stands in character for character, so
+                                        // every span still covers the run it marked.
+                                        return c && c.hiSpans ? Clipboard.highlightMarkup(preview.text, c.hiSpans) : "";
                                     }
                                     textFormat: TextEdit.RichText
                                     wrapMode: TextEdit.Wrap

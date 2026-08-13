@@ -254,6 +254,11 @@ Item {
                         width: Math.min(restWidth, 220)
                         height: 16
                         content: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
+                        // a slot taking a different wallpaper leaves the tile
+                        // where it is (see the isNew branch above), so the
+                        // caption resolving again is the whole transition
+                        replayOnChange: true
+                        replayStagger: Anim.stagger(cell.index, Settings.wallsCols, 60)
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
                         color: Theme.fg

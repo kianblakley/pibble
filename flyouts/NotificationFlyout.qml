@@ -5,6 +5,7 @@ import Quickshell.Widgets
 import Quickshell.Services.Notifications
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Notification flyout, one notification at a time.
 //
@@ -623,12 +624,16 @@ Scope {
                 readonly property bool bodyAsSubtitle: window.view.body !== "" && window.view.body.length <= 60
                     && window.view.body.indexOf("\n") < 0
 
-                // natural content width clamped to a compact range; rich is fixed
+                // natural content width clamped to a compact range; rich is fixed.
+                // Every term is a resting measurement (restWidth, or the hidden
+                // bodyMeasure): the card is sized before its text has resolved,
+                // and sizing off the noise would have it breathing wider and
+                // narrower on every reroll.
                 readonly property real natW: 12 + (thumb ? 50 : 0) + 34 + Math.max(
                     appRow.implicitWidth,
-                    headText.implicitWidth,
-                    subtitle.visible ? subtitleElided.implicitWidth : 0,
-                    bodyBlock.visible ? bodyText.implicitWidth : 0)
+                    headText.restWidth,
+                    subtitle.visible ? subtitleElided.restWidth : 0,
+                    bodyBlock.visible ? bodyMeasure.implicitWidth : 0)
                 width: rich ? Theme.fontSize(336)
                     : Math.min(Theme.fontSize(344), Math.max(Theme.fontSize(210), Math.ceil(natW)))
                 height: stripH + contentBox.height + 22
@@ -773,18 +778,41 @@ Scope {
                                 antialiasing: true
                                 color: window.tintColor
                             }
-                            Text {
-                                text: window.view.app || "notification"
+                            ScrambleText {
+                                content: window.view.app || "notification"
+                                // Every label on the card is pinned to its
+                                // resting box, and the card's own width is
+                                // measured off resting metrics too (see natW):
+                                // a noise glyph is not as wide as the character
+                                // it stands in for, and a card that sized
+                                // itself off the noise would breathe for the
+                                // length of the run.
+                                width: restWidth
+                                height: restHeight
+                                scramble: !window.noAnim
+                                // this card arrives on its own schedule and
+                                // owns no part of the launcher's - see
+                                // followsPane in ui/ScrambleText.qml
+                                followsPane: false
                                 textFormat: Text.PlainText
                                 color: Theme.notification.muted
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(10); letterSpacing: 2; capitalization: Font.AllUppercase }
                             }
                         }
-                        Text {
+                        ScrambleText {
                             id: headText
-                            visible: text.length > 0
+                            // content, not text: `text` is what the effect
+                            // renders, and a visibility that read it would feed
+                            // back into whether this label may start at all
+                            visible: content.length > 0
                             width: parent.width
-                            text: window.view.summary
+                            // held at the resting string's height, so a summary
+                            // whose noise happens to wrap onto a second line
+                            // can't push the whole card taller mid-run
+                            height: restHeight
+                            content: window.view.summary
+                            scramble: !window.noAnim
+                            followsPane: false // see the app label above
                             textFormat: Text.PlainText
                             wrapMode: Text.Wrap
                             maximumLineCount: 2
@@ -802,7 +830,7 @@ Scope {
                             visible: card.bodyAsSubtitle
                             width: parent.width
                             readonly property bool truncated: card.bodyAsSubtitle && subtitleElided.truncated
-                            height: visible ? (card.expanded && truncated ? subtitleWrapped.paintedHeight : subtitleElided.implicitHeight) : 0
+                            height: visible ? (card.expanded && truncated ? subtitleWrapped.paintedHeight : subtitleElided.restHeight) : 0
                             clip: true
                             opacity: card.lineO(card.lineBase + 2)
                             transform: Translate { y: card.lineY(card.lineBase + 2) }
@@ -811,10 +839,12 @@ Scope {
                                 NumberAnimation { duration: 340; easing.type: Easing.InOutCubic }
                             }
 
-                            Text {
+                            ScrambleText {
                                 id: subtitleElided
                                 width: parent.width
-                                text: card.bodyAsSubtitle ? window.view.body : ""
+                                content: card.bodyAsSubtitle ? window.view.body : ""
+                                scramble: !window.noAnim
+                                followsPane: false // see the app label above
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
                                 color: Theme.notification.muted
@@ -827,7 +857,11 @@ Scope {
                             Text {
                                 id: subtitleWrapped
                                 width: parent.width
-                                text: subtitleElided.text
+                                // .content, not .text: this copy only ever
+                                // appears on a tap, long after the run is over,
+                                // so it holds the real string rather than
+                                // re-resolving one the user has already read
+                                text: subtitleElided.content
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
                                 color: Theme.notification.muted
@@ -857,24 +891,100 @@ Scope {
                                 id: bodyClip
                                 width: parent.width
                                 clip: true
-                                readonly property real lineH: bodyText.lineCount > 0 ? bodyText.paintedHeight / bodyText.lineCount : Theme.fontSize(15)
-                                readonly property real collapsedH: Math.min(bodyText.paintedHeight, Math.ceil(lineH * 3))
-                                readonly property bool truncated: bodyText.paintedHeight > collapsedH + 1
-                                height: card.expanded ? bodyText.paintedHeight : collapsedH
+                                // Measured off bodyMeasure below, never off the
+                                // label on screen: a paragraph of noise doesn't
+                                // wrap where the real text does, so a line
+                                // count taken mid-run would have the card's
+                                // three-line clamp - and its whole height -
+                                // moving for the length of the effect.
+                                readonly property real lineH: bodyMeasure.lineCount > 0 ? bodyMeasure.paintedHeight / bodyMeasure.lineCount : Theme.fontSize(15)
+                                readonly property real collapsedH: Math.min(bodyMeasure.paintedHeight, Math.ceil(lineH * 3))
+                                readonly property bool truncated: bodyMeasure.paintedHeight > collapsedH + 1
+                                height: card.expanded ? bodyMeasure.paintedHeight : collapsedH
                                 Behavior on height {
                                     enabled: window.phase === "show"
                                     NumberAnimation { duration: 340; easing.type: Easing.InOutCubic }
                                 }
 
-                                Text {
+                                ScrambleText {
                                     id: bodyText
                                     width: parent.width
-                                    text: bodyBlock.visible ? window.view.body : ""
+                                    content: bodyBlock.visible ? window.view.body : ""
+                                    scramble: !window.noAnim
+                                    followsPane: false // see the app label above
+                                    // Only the three lines the clip shows are
+                                    // ever on screen, and a resolve spread
+                                    // across the whole body hands those back
+                                    // finished within their own fraction of
+                                    // the span - on a pasted outline, the
+                                    // first tenth of it, which reads as a body
+                                    // that never scrambled. Pace across the
+                                    // characters those three lines actually
+                                    // hold, counted off the layout by the
+                                    // probe below.
+                                    paceLength: Math.min(bodyProbe.text.length,
+                                        bodyProbe.positionAt(bodyClip.width, Math.max(0, bodyClip.collapsedH - bodyClip.lineH / 2)))
+                                    // and paced over its own ceiling rather
+                                    // than the wave's: three lines is a lot of
+                                    // text to wipe through in the 460ms a word
+                                    // gets, and this label has nothing on the
+                                    // card to finish alongside - the app name
+                                    // and summary above are done long before
+                                    // it either way. Kept well inside the
+                                    // card's own dwell (notifTimeout, 5s by
+                                    // default) so the body is settled and
+                                    // readable for the whole of it.
+                                    spanCap: 900
                                     wrapMode: Text.Wrap
                                     maximumLineCount: 24
                                     textFormat: Text.PlainText
                                     color: Theme.notification.muted
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(11) }
+                                }
+                                // The resting body, laid out but never drawn:
+                                // everything sized off the body reads this
+                                // instead of the label above, which spends the
+                                // first half-second as noise. restWidth is no
+                                // use here - it measures the whole string on
+                                // one line, where a body's natural width is its
+                                // widest wrapped line. Same hidden-measurer
+                                // trick the clipboard tiles size themselves by.
+                                Text {
+                                    id: bodyMeasure
+                                    visible: false
+                                    width: bodyClip.width
+                                    text: bodyText.content
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 24
+                                    textFormat: Text.PlainText
+                                    font: bodyText.font
+                                }
+                                // Where the clip's third line ends, for the
+                                // pacing above. A share of the body's height
+                                // can't answer that: it assumes every line is
+                                // about as long as the next, and the bodies
+                                // that need the pacing most are the ones where
+                                // that is wildest - a pasted outline's first
+                                // three lines hold fifty characters where the
+                                // ratio says five hundred (and bodyMeasure,
+                                // clamped to 24 lines, isn't even measuring
+                                // all of it). Only TextEdit can be asked where
+                                // a point in a layout falls, so the question
+                                // goes to one of those; it stays out of the
+                                // way of input by being invisible.
+                                //
+                                // Sliced, because laying out four thousand
+                                // characters to find the end of the third line
+                                // is work nobody reads: no three lines this
+                                // wide hold anything near this many.
+                                TextEdit {
+                                    id: bodyProbe
+                                    visible: false
+                                    width: bodyClip.width
+                                    text: bodyText.content.slice(0, 600)
+                                    wrapMode: TextEdit.Wrap
+                                    textFormat: TextEdit.PlainText
+                                    font: bodyText.font
                                 }
                                 // ellipses over the clipped last line; gone once
                                 // expanded (card-coloured backing masks the text)

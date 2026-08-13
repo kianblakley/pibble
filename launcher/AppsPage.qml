@@ -177,6 +177,12 @@ Item {
                                     anchors.centerIn: parent
                                     visible: !icon.visible
                                     content: (cell.shownEntry ? cell.shownEntry.name : "").slice(0, 2).toUpperCase()
+                                    // a slot taking a different app - a page
+                                    // turn, or the filter narrowing - never
+                                    // moves the tile, so the text resolving
+                                    // again is the whole of the transition
+                                    replayOnChange: true
+                                    replayStagger: Anim.stagger(cell.index, Settings.appsCols, 60)
                                     color: Theme.accent
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(16); weight: Font.Bold }
                                 }
@@ -226,6 +232,9 @@ Item {
                             width: Math.min(restWidth, 76)
                             height: 16
                             content: cell.shownEntry ? cell.shownEntry.name : ""
+                            // see the initials label above
+                            replayOnChange: true
+                            replayStagger: Anim.stagger(cell.index, Settings.appsCols, 60)
                             elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.fg

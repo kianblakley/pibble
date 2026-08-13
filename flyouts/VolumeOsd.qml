@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import Quickshell.Services.Pipewire
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Volume OSD: a pill (or an equalizer) sliding up from the bottom edge.
 //
@@ -180,15 +181,28 @@ Scope {
             // optional numeric readout on the right edge; the bar/eq
             // content shifts left to make room. Fixed width so the layout
             // doesn't jitter as the digit count changes.
-            Text {
+            ScrambleText {
                 id: percentText
-                visible: window.pct
+                // The showing state is part of this, not just window.pct: an
+                // unmapped window's items still read as visible, so without it
+                // the readout would count as on screen for the whole session,
+                // arm once at startup and never resolve again (see
+                // ui/ScrambleText.qml - a label starts when it *arrives*).
+                visible: window.pct && (root.show || root.leaving)
                 anchors.right: parent.right
                 anchors.rightMargin: 24
                 anchors.verticalCenter: parent.verticalCenter
                 width: Theme.fontSize(42)
                 horizontalAlignment: Text.AlignRight
-                text: Math.round(root.volume * 100) + "%"
+                content: Math.round(root.volume * 100) + "%"
+                // Every step of a held volume key changes this string, and a
+                // readout that re-resolved on each one would never be legible
+                // while it mattered - so no replayOnChange: the effect plays as
+                // the OSD arrives and the number is plain from then on.
+                scramble: window.mode !== "none"
+                // this OSD comes and goes on its own schedule, with no part in
+                // the launcher's - see followsPane in ui/ScrambleText.qml
+                followsPane: false
                 color: root.muted ? Theme.active.muted : Theme.active.fg
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(15); weight: Font.DemiBold }
                 Behavior on color {

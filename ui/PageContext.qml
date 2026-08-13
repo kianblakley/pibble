@@ -139,7 +139,13 @@ QtObject {
         // staggerOffset, not stagger: this is re-read every frame of the run,
         // and stagger()'s window closing partway through would drop the offset
         // to 0 under everything still waiting on it (see Anim).
-        return Anim.scrambled(text, Anim.scrambleElapsed - Anim.staggerOffset(s, cols ?? 1, 60), (Anim.scrambleRun << 8) ^ (s * 31 + text.length));
+        //
+        // Measured from this run's start rather than the clock's: the clock
+        // carries on across a run that begins while it is still going (a page
+        // opened right behind another), where a raw elapsed would hand a page
+        // arriving on the second run text that had already resolved on the
+        // first.
+        return Anim.scrambled(text, Anim.scrambleElapsed - Anim.scrambleRunStarted - Anim.staggerOffset(s, cols ?? 1, 60), (Anim.scrambleRun << 8) ^ (s * 31 + text.length), 0, 0);
     }
     // Internal only - not something a page is meant to read. It's how
     // getSetting/setSetting/pageActive know which page they're talking

@@ -103,10 +103,11 @@ Singleton {
     // louder effect than the spring it rides.
     readonly property bool scrambleOn: Settings.textScramble && root.style !== "none"
 
-    // Bumped once per run, and mixed into each label's own seed, so a label
-    // draws different noise on every open instead of replaying one pattern
-    // for the whole session. Every label also re-arms off this - see
-    // ScrambleText - so it is bumped last in beginScramble().
+    // Bumped once per *pane* run, and mixed into each label's own seed, so a
+    // label draws different noise on every open instead of replaying one
+    // pattern for the whole session. Every label also re-arms off this - see
+    // ScrambleText - so it is bumped last in beginScramble(), and so
+    // wakeScramble() below deliberately leaves it alone.
     property int scrambleRun: 0
     property bool scrambleActive: false
     // ms since the current run started, as ScrambleText reads it
@@ -121,6 +122,10 @@ Singleton {
     // means a 42-tile custom page's cascade keeps the clock alive to its end
     // while a two-label pane still lets it stop early.
     property int scrambleUntil: 0
+    // Where the current run began on that timeline. The clock outlives a
+    // single run (see beginScramble), so the backstop below is measured from
+    // here rather than from zero.
+    property int scrambleRunStarted: 0
     // How long a fresh run waits for its first label with nothing holding it
     // yet: the launch reveal has to finish exposing them, and under the "grow"
     // styles that is the whole reveal.
@@ -172,15 +177,49 @@ Singleton {
     function beginScramble(): void {
         if (!root.scrambleOn)
             return;
-        root.scrambleStarted = Date.now();
-        root.scrambleElapsed = 0;
-        root.scrambleUntil = root.scrambleLead;
-        root.scrambleHolds.length = 0;
-        root.scrambleActive = true;
-        // Last, and after the clock is already running at 0: labels reset and
+        // The timeline only goes back to zero when the clock was stopped. A
+        // run beginning over one that is still going - a pane change behind a
+        // notification card that is still resolving - has to leave it where it
+        // is: every label already running holds a start on that timeline, and
+        // rewinding underneath them reads as a start hundreds of ms in the
+        // future, i.e. full noise on a label that never moved.
+        if (!root.scrambleActive) {
+            root.scrambleStarted = Date.now();
+            root.scrambleElapsed = 0;
+            root.scrambleHolds.length = 0;
+            root.scrambleActive = true;
+            scrambleClock.restart();
+        }
+        root.scrambleRunStarted = root.scrambleElapsed;
+        root.scrambleUntil = root.scrambleElapsed + root.scrambleLead;
+        // Last, and after the clock is already running: labels reset and
         // re-arm off this, and one that is on screen already arms itself
         // there and then.
         root.scrambleRun++;
+    }
+
+    // Put the clock back in motion for a single label that arrived on its own
+    // rather than with a pane: a tile springing back in as a filter widens, or
+    // a grid slot taking a different entry on a page turn (see
+    // ScrambleText.replay()). A no-op while a run is already going - the label
+    // simply takes the clock where it is.
+    //
+    // Unlike beginScramble() this does not bump scrambleRun: that is every
+    // label's cue to start over, which is exactly wrong here, since the labels
+    // that didn't move should stay resolved.
+    function wakeScramble(): void {
+        if (!root.scrambleOn || root.scrambleActive)
+            return;
+        root.scrambleStarted = Date.now();
+        root.scrambleElapsed = 0;
+        root.scrambleRunStarted = 0;
+        // No lead: whatever woke the clock is on screen already (that is what
+        // arming means), and holds the run open from its first frame. Anything
+        // arriving later - the rest of a staggered wave - wakes the clock again
+        // if this run has ended by the time it gets there.
+        root.scrambleUntil = 0;
+        root.scrambleHolds.length = 0;
+        root.scrambleActive = true;
         scrambleClock.restart();
     }
 
@@ -226,7 +265,7 @@ Singleton {
             // drained before the stop check, so a hold asked for on the last
             // tick can't be missed by the one that ends the run
             for (const until of root.scrambleHolds)
-                root.scrambleUntil = Math.min(Math.max(root.scrambleUntil, until), root.scrambleMaxRun);
+                root.scrambleUntil = Math.min(Math.max(root.scrambleUntil, until), root.scrambleRunStarted + root.scrambleMaxRun);
             root.scrambleHolds.length = 0;
             if (root.scrambleElapsed >= root.scrambleUntil) {
                 root.scrambleActive = false;
@@ -243,17 +282,36 @@ Singleton {
     // has finished before that tile is fully on screen. A calendar's two-digit
     // day numbers were the case that showed this up: they landed looking
     // untouched while every longer label around them was visibly resolving.
-    function scrambleSpan(len: int): int {
-        return Math.min(300 + len * 14, 460);
+    //
+    // The 460ms ceiling is what holds a wave together, and `cap` lifts it for
+    // a label resolving on its own instead: a notification body is the only
+    // long string on its card, with nobody to finish alongside, and under the
+    // shared ceiling three lines of it get wiped through in the time a
+    // six-letter caption takes - the same "it never scrambled" the pacing
+    // below is there to fix, one step further out. 0 takes the shared ceiling,
+    // which is what everything in a grid wants.
+    function scrambleSpan(len: int, cap: int): int {
+        return Math.min(300 + len * 14, cap > 0 ? cap : 460);
     }
 
     // `source` as it looks `elapsed` ms into the run (negative while a label
     // is still waiting out its stagger delay): characters resolve left to
     // right, and every one that hasn't yet stands in as a random glyph that
     // rerolls every scrambleHold ms.
-    function scrambled(source: string, elapsed: int, seed: int): string {
-        const span = root.scrambleSpan(source.length);
-        if (source.length === 0 || elapsed >= span)
+    //
+    // `paceLen` is how many characters the span is spread across, for a label
+    // where only the head of the string is ever on screen - a notification
+    // body clipped to three lines. Paced across the whole string, the part
+    // that can actually be seen is finished within its own fraction of the
+    // span (three lines out of twelve: 115ms of a 460ms run), which reads as a
+    // body that never scrambled at all. Everything past `paceLen` comes back
+    // resolved from the first frame instead; by the caller's own account
+    // nothing can see it. 0 paces across the whole string, as everything but
+    // that one label wants.
+    function scrambled(source: string, elapsed: int, seed: int, paceLen: int, spanCap: int): string {
+        const len = paceLen > 0 && paceLen < source.length ? paceLen : source.length;
+        const span = root.scrambleSpan(len, spanCap);
+        if (len === 0 || elapsed >= span)
             return source;
         // Anything still asking for noise is what keeps the clock running -
         // there is no fixed window, since a label that hasn't come on screen
@@ -267,7 +325,7 @@ Singleton {
             const ch = source.charAt(i);
             // whitespace is left alone: it's what holds word shapes and line
             // breaks still while everything around it churns
-            if (ch === " " || ch === "\n" || ch === "\t" || elapsed >= (i + 1) / source.length * span) {
+            if (i >= len || ch === " " || ch === "\n" || ch === "\t" || elapsed >= (i + 1) / len * span) {
                 out += ch;
                 continue;
             }

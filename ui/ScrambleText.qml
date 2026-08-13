@@ -1,9 +1,12 @@
 import QtQuick
 import "root:/services"
 
-// A Text whose string resolves out of a run of random glyphs every time a
-// pane opens, off Anim's shared scramble clock (see the block at the foot of
-// Anim.qml for the clock itself).
+// A Text whose string resolves out of a run of random glyphs every time it
+// arrives - a pane opening, a tile springing back in behind a widening
+// filter - off Anim's shared scramble clock (see the block at the foot of
+// Anim.qml for the clock itself). A label whose *string* is what changed while
+// it sat there, rather than the label itself arriving, opts in with
+// `replayOnChange` below.
 //
 // Callers bind the real string to `content`, not to `text`: `text` is what
 // the effect renders, so binding it at the call site and having the effect
@@ -23,11 +26,62 @@ Text {
     id: root
 
     property string content: ""
+    // Per-label off switch, for a label sitting under a motion setting of its
+    // own. The flyouts are the case: each has its own "none" animation style,
+    // and a notification the user has asked to arrive instantly shouldn't
+    // spend half a second resolving. Anim.scrambleOn is the global switch and
+    // still wins over this one.
+    property bool scramble: true
     // Extra hold once this label is on screen, for a cascade *within* one
     // group that all comes into view at once (the clock's segments). Leave it
     // at 0 for anything that arrives on its own schedule - the arrival is the
     // stagger there, and a delay on top of it double-counts.
     property int scrambleDelay: 0
+
+    // Whether this label belongs to the launcher's stage: it arrives when a
+    // pane does, so a fresh pane run is its cue to start over, and the launch
+    // reveal is what decides when it can be seen. The flyouts are the
+    // exception and turn this off - their windows come and go on a schedule of
+    // their own, a pane change behind them is none of their business, and the
+    // reveal circle is measured in the launcher window's coordinates, which
+    // mean nothing inside theirs. Left on, a notification card still sitting
+    // there dissolves back into noise every time the user changes page or
+    // opens the launcher.
+    property bool followsPane: true
+
+    // How many characters of `content` the resolve is paced across, for a
+    // label whose visible extent is only the head of its string - see
+    // Anim.scrambled(). 0 (the default) paces across all of it.
+    property int paceLength: 0
+    // The longest this label's resolve may take, in ms, for one that isn't
+    // resolving alongside anything: the shared 460ms ceiling exists to keep a
+    // grid's labels finishing together, and a paragraph held to it reads as a
+    // wipe rather than a resolve (see Anim.scrambleSpan). 0 takes the shared
+    // one - the right answer for anything in a wave.
+    property int spanCap: 0
+
+    // Whether a change of `content` replays the effect, for a string swapped
+    // under a label that never went anywhere: a grid slot taking a different
+    // app on a page turn, or as a filter narrows. Off by default, because a
+    // label whose string is *live* rather than swapped - the clock's time, the
+    // query echo, the carousel caption tracking a drag - changes content as a
+    // matter of course, and would spend all of that time resolving.
+    property bool replayOnChange: false
+    onContentChanged: {
+        if (root.replayOnChange)
+            root.replay();
+    }
+    // Stagger for a replay only. A page turn swaps every caption in the grid
+    // in one frame, so without this they all resolve in lockstep - where a
+    // pane entrance gets its cascade for free from the tiles arriving one by
+    // one. Not scrambleDelay, which would apply to that entrance too and
+    // double-count it. Bind it to Anim.stagger(), which is 0 outside a page
+    // turn: that is what keeps a filter narrowing on every keystroke from
+    // re-staggering (see the note on Anim.staggering). stagger() and not
+    // staggerOffset(), unlike everything else that reads a stagger out of a
+    // binding, because replay() folds this into startedAt once and keeps it -
+    // the window closing mid-run can't take it back out again.
+    property int replayStagger: 0
 
     // The width to hold, for callers that size themselves off the label
     // (`width: Math.min(restWidth, 76)` and friends): the resting string's,
@@ -67,6 +121,17 @@ Text {
     // lockstep.
     readonly property int scrambleSeed: Math.floor(Math.random() * 0x10000)
 
+    // The item standing in for this label on screen, for a label that paints
+    // nothing itself and only runs the effect for something else. The
+    // clipboard's highlighted preview is the one case: only TextEdit paints a
+    // span's background color, so the label there hands its `text` to a
+    // TextEdit beside it and hides. Everything below that asks "can this be
+    // seen yet" has to ask about that item instead, or a label that is
+    // deliberately invisible never arms - the effect would be off exactly
+    // where it was asked for. Null for an ordinary label, which is its own.
+    property Item screenItem: null
+    readonly property Item shownItem: root.screenItem ?? root
+
     // Opacity with every ancestor's folded in. An entrance spring fades the
     // *tile* in, never the label inside it, so this label's own opacity says
     // nothing about whether it can be seen. Reading each ancestor's opacity
@@ -74,7 +139,7 @@ Text {
     // animates.
     readonly property real stackedOpacity: {
         let o = 1;
-        for (let item = root; item; item = item.parent)
+        for (let item = root.shownItem; item; item = item.parent)
             o *= item.opacity;
         return o;
     }
@@ -91,40 +156,87 @@ Text {
     // fed by `text`, closing the same circle.) The vertical is left at the
     // item's top edge; a label is shallow enough that its top and middle are
     // reached within a frame or two of each other.
+    //
+    // A screenItem is measured off its own width instead: it is a separate
+    // item, sized by whatever lays it out rather than by this label's text, so
+    // the circle the resting metrics avoid isn't there to begin with.
     readonly property bool unmasked: {
-        const center = root.mapToItem(null, sizer.advanceWidth / 2, 0);
+        if (!root.followsPane)
+            return true;
+        const item = root.shownItem;
+        const center = item.mapToItem(null, (item === root ? sizer.advanceWidth : item.width) / 2, 0);
         return Anim.unmasked(center.x, center.y);
     }
-    readonly property bool onScreen: root.visible && root.stackedOpacity > 0.05 && root.unmasked
+    readonly property bool onScreen: root.shownItem.visible && root.stackedOpacity > 0.05 && root.unmasked
 
     // Where on the shared clock this label's own run began, or -1 for one that
     // hasn't come on screen yet (and so hasn't started).
     property int startedAt: -1
-    onOnScreenChanged: root.armScramble()
+    onOnScreenChanged: {
+        if (root.onScreen)
+            root.armScramble();
+        else
+            // Leaving the screen forgets the run this label took part in, so
+            // that whatever brings it back - a tile springing in again once
+            // the filter widens, a ghosted slot refilling - is an arrival of
+            // its own and scrambles like one.
+            root.startedAt = -1;
+    }
     function armScramble(): void {
-        if (root.startedAt >= 0 || !Anim.scrambleActive || !root.onScreen)
+        if (root.startedAt >= 0 || !root.scramble || !Anim.scrambleOn || !root.onScreen)
             return;
+        // A label can arrive with no run behind it: a tile re-entering a pane
+        // that is just sitting there is nobody's pane entrance. Waking the
+        // clock is a no-op if something else already has it going.
+        Anim.wakeScramble();
         root.startedAt = Anim.scrambleElapsed;
+    }
+    // Start this label over from full noise, for content that changed under a
+    // label already on screen (see replayOnChange). One that *isn't* on screen
+    // only disarms: it starts when it arrives, exactly as it does on a pane
+    // entrance - which is also what keeps a background clipboard update from
+    // running the clock behind a closed launcher.
+    function replay(): void {
+        root.startedAt = -1;
+        root.noiseWidth = 0;
+        if (!root.scramble || !Anim.scrambleOn || !root.onScreen)
+            return;
+        Anim.wakeScramble();
+        // Under a stagger this starts in the *future*, which scrambled() reads
+        // as a negative elapsed and holds at full noise until it comes round.
+        root.startedAt = Anim.scrambleElapsed + root.replayStagger;
     }
     Connections {
         target: Anim
         // A fresh run: forget the last one's start, and take this one's
         // straight away if this label is already on screen (a pane switch,
-        // where nothing has to be revealed first).
+        // where nothing has to be revealed first). A label off the launcher's
+        // stage sits the run out entirely - the clock's timeline carries on
+        // across it (see Anim.beginScramble), so a start taken before it is
+        // still the start it has now.
         function onScrambleRunChanged(): void {
+            if (!root.followsPane)
+                return;
             root.startedAt = -1;
             root.noiseWidth = 0;
             root.armScramble();
         }
-        // back to the resting string, so back to the resting width
+        // Back to the resting string, so back to the resting width - and
+        // nothing left armed. A run that has ended takes the clock's timeline
+        // with it: the next one starts from zero again (see Anim's
+        // wakeScramble), where a leftover start from this run would read as a
+        // label that began hundreds of ms in the future, i.e. full noise on a
+        // label that never moved.
         function onScrambleActiveChanged(): void {
-            if (!Anim.scrambleActive)
+            if (!Anim.scrambleActive) {
                 root.noiseWidth = 0;
+                root.startedAt = -1;
+            }
         }
     }
 
-    text: Anim.scrambleActive && root.startedAt >= 0
-        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun)
+    text: root.scramble && Anim.scrambleActive && root.startedAt >= 0
+        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun, root.paceLength, root.spanCap)
         : root.content
 
     TextMetrics {
