@@ -3,9 +3,9 @@
 </h1>
 
 <p align=center>
-    <img src="https://img.shields.io/github/license/kianblakley/pibble?color=gold&style=flat-square" alt="License">
-    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble?color=gold&style=flat-square" alt="Last commit">
-    <img src="https://img.shields.io/github/languages/top/kianblakley/pibble?color=gold&style=flat-square" alt="Top language">
+    <img src="https://img.shields.io/github/license/kianblakley/pibble?color=gold&style=for-the-badge&logo=gnu&logoColor=white" alt="License">
+    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble?color=gold&style=for-the-badge&logo=git&logoColor=white" alt="Last commit">
+    <img src="https://img.shields.io/badge/Built%20with-Quickshell-gold?style=for-the-badge&logo=qt&logoColor=white" alt="Built with Quickshell">
 </p>
 
 ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png)
