@@ -437,6 +437,17 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: Theme.radius(12)
+                    // Forced on rather than left to Rectangle's
+                    // default, which is "on iff radius > 0": with
+                    // Settings > General > "Rounded corners" off
+                    // every radius here is 0, and an aliased 1px
+                    // stroke on a cell that rests on half-pixel x
+                    // and is scaled below 1 by its rank (both
+                    // above) rasterizes to no coverage at all -
+                    // the whole left or right edge of a moving
+                    // cell simply drops out for a frame at a time.
+                    // Antialiased it thins instead of vanishing.
+                    antialiasing: true
                     color: "transparent"
                     border.width: 1
                     // same muted-to-full-accent brighten tiles
@@ -669,6 +680,9 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: Theme.radius(12)
+            // shares the cell stroke's placement, so it shares its
+            // reason for forcing this on - see the note there
+            antialiasing: true
             color: "transparent"
             border.width: 1
             border.color: Theme.accent

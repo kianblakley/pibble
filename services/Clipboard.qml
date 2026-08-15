@@ -85,9 +85,22 @@ Singleton {
                         # otherwise corrupt this tab/newline-delimited
                         # record format
                         content=$(cliphist decode "$id" 2>/dev/null | head -c 20000)
-                        full=\${content//\\/\\\\}
-                        full=\${full//$'\t'/\\t}
-                        full=\${full//$'\n'/\\n}
+                        # The backslash comes out of a variable and every
+                        # replacement is quoted, rather than being written
+                        # inline: an unquoted \\t as replacement text is
+                        # quote-removed back down to a plain t before the
+                        # substitution runs, so this used to write every
+                        # newline out as a bare "n" (and never doubled a
+                        # backslash at all) - which is what put a literal n
+                        # where each line break should be in every snippet
+                        # the clips pane painted. Doubling the backslashes
+                        # here to get past that is a count nobody can read:
+                        # this is a QML template literal, so each one has to
+                        # survive JS escaping first.
+                        bs='\\'
+                        full=\${content//"$bs"/"$bs$bs"}
+                        full=\${full//$'\t'/"$bs"t}
+                        full=\${full//$'\n'/"$bs"n}
                         ;;
                 esac
                 printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$n" "$cached" "$full" "$preview"

@@ -213,6 +213,43 @@ Item {
                                 width: 214
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
+                                // the string that is actually painted, which
+                                // under a query is the snippet built around the
+                                // match (hiText, see LauncherState's clipMatches)
+                                // and not cliphist's one-line preview. Measuring the
+                                // preview instead sized every highlighted tile
+                                // to the wrong string, leaving it short of its
+                                // snippet - the match itself often fell on the
+                                // first line past the bottom edge, so all that
+                                // showed of the highlight was the top of its box.
+                                // Raw, not escaped: escapeHtml turns "\n" into
+                                // <br>, which breaks a line exactly as the "\n"
+                                // does here, and leaves everything else a
+                                // character for a character.
+                                text: {
+                                    const c = cell.shownClip;
+                                    if (!c || c.image)
+                                        return "";
+                                    return c.hiSpans ? c.hiText : c.preview;
+                                }
+                                font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
+                            }
+                            // The same measurement of this clip's *resting*
+                            // string, i.e. the height this tile has with no
+                            // query on. It caps the one above: a query is a
+                            // different view of a clip, not a bigger one, so
+                            // filtering moves the text inside the tile rather
+                            // than growing the tile under it. The snippet is
+                            // already cut to about this length, so what this
+                            // turns away is the line or two that wrapping can
+                            // still add - taken off the tail, where the
+                            // match (which the snippet is centred on) isn't.
+                            Text {
+                                id: measureRest
+                                visible: false
+                                width: 214
+                                wrapMode: Text.Wrap
+                                textFormat: Text.PlainText
                                 text: {
                                     const c = cell.shownClip;
                                     return c && !c.image ? c.preview : "";
@@ -230,9 +267,32 @@ Item {
                                     const d = (c.dims || "").split("x");
                                     const iw = parseInt(d[0]) || 16;
                                     const ih = parseInt(d[1]) || 9;
-                                    return Math.max(70, Math.min(320, Math.round(240 * ih / iw)));
+                                    // the picture is drawn into the clipping box
+                                    // below, which is inset by 4 on every side -
+                                    // so the aspect has to be taken on 240-8, not
+                                    // on the tile's full width. Taken on 240 the
+                                    // box came out fractionally too flat for the
+                                    // image, and PreserveAspectFit answered by
+                                    // pillarboxing it: a landscape screenshot sat
+                                    // a few pixels short of both sides. The clamps
+                                    // are the only thing that can still hand the
+                                    // image a box of the wrong shape - a panorama
+                                    // wants less height than 70, a phone
+                                    // screenshot far more than 320 - and the
+                                    // picture is cropped to fill rather than
+                                    // letterboxed there (see fillMode below).
+                                    return Math.max(70, Math.min(320, Math.round(232 * ih / iw) + 8));
                                 }
-                                return Math.max(44, Math.min(240, Math.ceil(measureText.paintedHeight) + 26));
+                                // capped on whole lines rather than on raw pixels:
+                                // a snippet too long for the tile is cut by the
+                                // highlight's clip either way (TextEdit can't
+                                // elide), but stopping on a line boundary means
+                                // the last line it does show is a whole one
+                                // instead of a strip of glyph tops.
+                                const lines = Math.max(1, measureText.lineCount);
+                                const rest = Math.max(1, measureRest.lineCount);
+                                const fits = Math.max(1, Math.floor((240 - 26) / lineHpx));
+                                return Math.max(44, Math.ceil(Math.min(lines, rest, fits) * lineHpx) + 26);
                             }
                             width: 240
                             height: tileH > 0 ? tileH + 24 : 0
@@ -314,7 +374,16 @@ Item {
                                     Image {
                                         anchors.fill: parent
                                         asynchronous: true
-                                        fillMode: Image.PreserveAspectFit
+                                        // Crop, not fit: tileH above already
+                                        // gives this box the image's own aspect,
+                                        // so the two agree everywhere except at
+                                        // the 70/320 clamps - and there fitting
+                                        // is what left a panorama floating in a
+                                        // band of empty tile. Cropping fills the
+                                        // tile the clamp insisted on instead,
+                                        // which is what the wallpaper tiles do
+                                        // with their own fixed 16:9 boxes.
+                                        fillMode: Image.PreserveAspectCrop
                                         sourceSize: Qt.size(480, 640)
                                         source: {
                                             const c = cell.shownClip;

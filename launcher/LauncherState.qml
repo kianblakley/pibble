@@ -726,7 +726,17 @@ Singleton {
             const m = Clipboard.searchMatch(text, terms);
             if (m === null)
                 continue;
-            const snip = Clipboard.snippet(text, m, 90);
+            // Radius taken from this clip's own preview rather than fixed:
+            // the tile is sized to that preview (see ClipboardPage's
+            // measureRest), so a snippet cut to about its length lands in
+            // the room the tile already has. A fixed radius wide enough to
+            // be useful is around twice a cliphist preview, which grew every
+            // matching tile to twice its resting height the moment a query
+            // narrowed onto it - the grid reflowed on each keystroke. The
+            // floor is for a clip whose preview is short enough that
+            // matching it would leave no context around the match at all.
+            const pad = Math.max(24, Math.round((c.preview.length - (m.anchor.end - m.anchor.start)) / 2));
+            const snip = Clipboard.snippet(text, m, pad);
             scored.push({ c: Object.assign({}, c, { hiText: snip.text, hiSpans: snip.hi }), s: m.score });
         }
         scored.sort((x, y) => y.s - x.s);
