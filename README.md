@@ -135,8 +135,8 @@ To access a `pibble` property use `pibble.property` as defined in the table belo
 | `launcherOpen` | `bool` | `true` while the launcher is open at all |
 | `textInput` | `string` | the current value of pibble's hidden text input |
 | `releaseFocus()` | function | call this to give keyboard focus back to pibble if your page took it |
-| `tileIn(item, slot, cols)` | function | makes `item` play pibble's tile spawn animation set in `SETTINGS > Pages > Grid animation` — pass `slot`/`cols` if it's one tile among several, so they can stagger in one after another |
-| `scramble(text, slot, cols)` | function | returns `text` mid-way through the glyph scramble pibble's own labels play as a page opens (`SETTINGS > Pages > Text scramble`) — use it inside a `text:` binding, and pass `slot`/`cols` to stagger several labels like `tileIn` does |
+| `tileIn(item, slot, cols)` | function | makes `item` play pibble's tile spawn animation set in `SETTINGS > Animations > Grid animation` — pass `slot`/`cols` if it's one tile among several, so they can stagger in one after another |
+| `scramble(text, slot, cols)` | function | returns `text` mid-way through the glyph scramble pibble's own labels play as a page opens (`SETTINGS > Animations > Text scramble`) — use it inside a `text:` binding, and pass `slot`/`cols` to stagger several labels like `tileIn` does |
 | `setSetting(key, value)` / `getSetting(key, fallback)` | function | save/load your page's settings |
 
 Note: Splitting your page across multiple files requires you to declare `import "." as Local`, then use `Local.Foo {}` instead of plain `Foo {}` to access them.

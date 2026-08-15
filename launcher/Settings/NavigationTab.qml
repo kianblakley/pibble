@@ -134,7 +134,7 @@ Column {
     SettingRow {
         key: "gestures"
         label: "Navigation gestures"
-        hint: "left/right: cycle pages · up/down: scroll tiles · top edge: power off · bottom edge: reboot · right edge: exit/back"
+        hint: "left/right: cycle pages · up/down: scroll tiles · top edge: power off · bottom edge: reboot · right edge: back"
         valueWidth: Metrics.shortValueWidth
     }
 }

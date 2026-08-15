@@ -69,33 +69,6 @@ Column {
         }
     }
 
-    // tile grid decorations: the live search query above the tiles (apps/
-    // walls-grid/clips), and a page-of-tiles dot indicator below them
-    Item {
-        width: 780
-        height: 34
-
-        SettingLabel {
-            anchors.left: parent.left
-            content: "Tile page indicators"
-        }
-        ResetButton {
-            key: "pageIndicators"
-            anchors.right: parent.right
-        }
-        ChipRow {
-            anchors.right: parent.right
-            anchors.rightMargin: 34
-            anchors.verticalCenter: parent.verticalCenter
-            items: [
-                { id: "query", label: "search query" },
-                { id: "dots", label: "page dots" }
-            ]
-            isOn: Settings.pageIndicatorEnabled
-            toggle: SettingsSchema.toggleIndicator
-        }
-    }
-
     // grid size: one visible tile grid, switchable between the
     // three pages that have a configurable grid size
     Item {
@@ -161,23 +134,38 @@ Column {
         target: LauncherState.gridTarget
     }
 
-    SettingRow { key: "animStyle"; label: "Grid animation" }
+    // tile grid decorations: the live search query above the tiles (apps/
+    // walls-grid/clips), and a page-of-tiles dot indicator below them
+    Item {
+        width: 780
+        height: 34
 
-    SettingRow {
-        key: "textScramble"
-        label: "Text scramble"
-        hint: "a page's text resolves out of random glyphs as it opens; follows the grid animation being on"
+        SettingLabel {
+            anchors.left: parent.left
+            content: "Wayfinding elements"
+        }
+        ResetButton {
+            key: "pageIndicators"
+            anchors.right: parent.right
+        }
+        ChipRow {
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            anchors.verticalCenter: parent.verticalCenter
+            items: [
+                { id: "query", label: "search query" },
+                { id: "dots", label: "page indicator" }
+            ]
+            isOn: Settings.pageIndicatorEnabled
+            toggle: SettingsSchema.toggleIndicator
+        }
     }
 
     SettingRow { key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
 
     SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }
 
-    SettingRow {
-        key: "wallpaperLive"
-        label: "Live wallpaper preview"
-        hint: "plays .gif/.mp4 wallpapers in the selector; off keeps them on their still frame"
-    }
+    SettingRow { key: "wallpaperLive"; label: "Wallpapers live preview" }
 
     // wallpaper path
     Item {
@@ -325,8 +313,5 @@ Column {
     }
 
     SettingRow { key: "clipsMax"; label: "Clipboard entries" }
-
-    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
-
 }
 

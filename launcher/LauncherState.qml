@@ -383,7 +383,7 @@ Singleton {
     function cyclePane(dir: int) {
         // inside settings the cycle keybinds walk the settings tabs
         if (pane === "settings") {
-            const tabs = ["general", "pages", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
+            const tabs = ["general", "pages", "animations", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
             settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
             return;
         }

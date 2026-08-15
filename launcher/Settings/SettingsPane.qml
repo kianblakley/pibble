@@ -32,7 +32,7 @@ Item {
     // built-ins first, then one slot per custom page that opts
     // into a settings tab (see LauncherState.customSettingsTabs) - in
     // whatever order those pages themselves loaded in
-    readonly property var tabOrder: ["general", "pages", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
+    readonly property var tabOrder: ["general", "pages", "animations", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
     // LauncherWindow's customPages Repeater's model is Settings.uploadedPages itself,
     // reassigned wholesale (a fresh array) on every toggle/
     // upload/trash/rescan - since it's a plain JS-array model,
@@ -93,6 +93,7 @@ Item {
         property var stagedTabs: [
             { id: "general", label: "General", custom: false, phase: "in" },
             { id: "pages", label: "Pages", custom: false, phase: "in" },
+            { id: "animations", label: "Animations", custom: false, phase: "in" },
             { id: "keybindings", label: "Navigation", custom: false, phase: "in" },
             { id: "flyouts", label: "Flyouts", custom: false, phase: "in" }
         ]
@@ -405,7 +406,7 @@ Item {
         anchors.topMargin: 18
         // constant height (tallest page): switching tabs never
         // moves the pane, shorter pages stay top-aligned
-        height: Math.max(generalTab.height, pagesTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
+        height: Math.max(generalTab.height, pagesTab.height, animationsTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
         // tallest of any custom tab's content column, recomputed
         // whenever one loads/resizes - 0 (a no-op in the Math.max
         // above) when there are none
@@ -430,14 +431,19 @@ Item {
             slideIndex: 1
             activeIndex: root.tabIndex
         }
+        AnimationsTab {
+            id: animationsTab
+            slideIndex: 2
+            activeIndex: root.tabIndex
+        }
         NavigationTab {
             id: navigationTab
-            slideIndex: 2
+            slideIndex: 3
             activeIndex: root.tabIndex
         }
         FlyoutsTab {
             id: flyoutsTab
-            slideIndex: 3
+            slideIndex: 4
             activeIndex: root.tabIndex
         }
 

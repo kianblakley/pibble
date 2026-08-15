@@ -57,7 +57,6 @@ Column {
 
     SettingRow { key: "volStyle"; label: "Volume style"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volWidth"; label: "Volume size"; valueWidth: Metrics.shortValueWidth }
-    SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volPercent"; label: "Volume percent"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volTimeout"; label: "Volume timeout"; valueWidth: Metrics.shortValueWidth }
 
@@ -92,7 +91,6 @@ Column {
         }
     }
     SettingRow { key: "notifStyle"; label: "Notification style"; valueWidth: Metrics.shortValueWidth }
-    SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "notifTimeout"; label: "Notification timeout"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "replayCount"; label: "Replay count"; hint: "how many recent notifications `pibble replay` can step back through"; valueWidth: Metrics.shortValueWidth }
 }
