@@ -361,7 +361,7 @@ Item {
             anchors.fill: parent
             radius: Theme.radius(14)
             color: "transparent"
-            WallpaperVideoPool {
+            WallpaperVideoSurface {
                 anchors.fill: parent
                 current: root.videoShowing && root.selWall ? root.selWall.path : ""
                 live: root.videoShowing

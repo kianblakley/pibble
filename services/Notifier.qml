@@ -49,22 +49,46 @@ Singleton {
         Quickshell.execDetached(args);
     }
 
+    // The QtMultimedia QML module itself isn't installed, so no video wallpaper
+    // can be previewed at all. Fires from WallpaperVideoSurface's Loader, which
+    // is the only place this is knowable: with no module there is no
+    // MediaPlayer to raise the error below.
+    property bool warnedMediaModule: false
+    function mediaModuleMissing(): void {
+        if (root.warnedMediaModule)
+            return;
+        root.warnedMediaModule = true;
+        root.missingDependency("QtMultimedia not found", "QtMultimedia is used for live wallpaper previews - install it (e.g. qt6-qtmultimedia) to enable them. Everything else works without it.");
+    }
+
     // Fires from a video wallpaper's MediaPlayer.onErrorOccurred (grid tile and
     // carousel preview both wire into this) rather than a startup probe: the
-    // QtMultimedia QML module can still import fine with no working backend
-    // installed (its plugins are a separate runtime dependency) - playback only
-    // actually fails once a MediaPlayer tries to open a file. Distinct from the
-    // "ffmpeg not found" alert in Wallpapers, which is about the ffmpeg CLI used
-    // to generate thumbnails/blur - this one is QtMultimedia's own playback
-    // backend, missing/broken independent of whether that CLI is installed.
+    // module can import fine with no working *backend* installed (its plugins
+    // are a separate runtime dependency) - playback only actually fails once a
+    // MediaPlayer tries to open a file. Distinct from the "ffmpeg not found"
+    // alert in Wallpapers, which is about the ffmpeg CLI used to generate
+    // thumbnails/blur - this one is QtMultimedia's own playback backend,
+    // missing/broken independent of whether that CLI is installed.
+    //
+    // `backendFault` is classified by the caller rather than here, off
+    // MediaPlayer's own error enum: reading that enum needs an `import
+    // QtMultimedia`, and a singleton every other singleton pulls in is the one
+    // place that import must never appear (see WallpaperVideoSurface). It
+    // separates "nothing can play" from "this file can't play" - reporting a
+    // codec QtMultimedia won't take, or a file it can't read, as a missing
+    // dependency sends people installing a package they already have.
+    //
     // Once-per-session, not once-per-tile, since every video tile would
     // otherwise re-report the same cause.
     property bool warnedMediaBackend: false
-    function mediaBackendFailure(): void {
+    function mediaPlaybackFailure(backendFault: bool, detail: string): void {
         if (root.warnedMediaBackend)
             return;
         root.warnedMediaBackend = true;
-        root.missingDependency("Video wallpaper playback failed", "Install Qt6 multimedia to enable live wallpaper previews.");
+        if (backendFault)
+            root.missingDependency("Video wallpaper playback failed", "QtMultimedia has no working playback backend (" + detail + ") - install your distro's Qt6 multimedia backend package, e.g. qt6-multimedia-ffmpeg.");
+        else
+            root.error("Video wallpaper preview failed", detail);
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text

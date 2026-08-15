@@ -1,6 +1,5 @@
 pragma Singleton
 import QtQuick
-import QtMultimedia
 import Quickshell
 import Quickshell.Io
 import "root:/config"
