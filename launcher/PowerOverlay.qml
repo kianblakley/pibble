@@ -1,5 +1,6 @@
 import QtQuick
 import "root:/services"
+import "root:/ui"
 
 // Everything that floats above the panes: the swipe-to-power and
 // swipe-to-reboot pull indicators and their confirmation prompts, the
@@ -103,18 +104,25 @@ Item {
             }
         }
     }
-    Text {
+    ScrambleText {
         anchors.horizontalCenter: parent.horizontalCenter
         y: powerRing.y + powerRing.height + 12
-        text: "power off?"
+        content: "power off?"
         color: Theme.fg
+        // the prompts answer to the power switch, not the settings pane's -
+        // see Anim.power() and Settings.scrambleSections
+        scrambleSection: "power"
         // start the fade as the ring nears closed: the pull easing
         // crawls through its last few percent, so waiting for exactly
         // 1.0 reads as a long pause after the circle looks complete
         opacity: LauncherState.powerProgress >= 0.85 ? 1 : 0
         Behavior on opacity {
-            NumberAnimation { duration: Anim.menu(160); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Anim.power(160); easing.type: Easing.OutCubic }
         }
+        // pinned to the resting string's box, so this centered label doesn't
+        // shuffle about on every reroll - see the apps pane's copy of this
+        width: restWidth
+        height: restHeight
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: 2 }
     }
 
@@ -200,19 +208,24 @@ Item {
             }
         }
     }
-    Text {
+    ScrambleText {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         // trails above the ring by the same gap powerText trails
         // below powerRing, mirrored around the bottom edge (scaled
         // powerPull-style - see the comment on powerRing's y above)
         anchors.bottomMargin: LauncherState.rebootPull * LauncherState.rebootRingScale + 12
-        text: "reboot?"
+        content: "reboot?"
         color: Theme.fg
+        scrambleSection: "power" // see powerText's copy of this
         opacity: LauncherState.rebootProgress >= 0.85 ? 1 : 0
         Behavior on opacity {
-            NumberAnimation { duration: Anim.menu(160); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Anim.power(160); easing.type: Easing.OutCubic }
         }
+        // pinned as powerText is above - doubly so here, where the box is
+        // bottom-anchored and a taller fallback glyph would push the string up
+        width: restWidth
+        height: restHeight
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: 2 }
     }
 
@@ -244,7 +257,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            radius: 28
+            radius: Theme.radius(28)
             color: Qt.alpha(Theme.accent, LauncherState.backProgress >= 1 ? 0.2 : 0.11)
             border.width: 1
             border.color: Qt.alpha(Theme.accent, 0.33)
@@ -287,7 +300,7 @@ Item {
             anchors.margins: 32
             width: 56
             height: 56
-            radius: 28
+            radius: Theme.radius(28)
             antialiasing: true
             color: Qt.alpha(Theme.accent, cornerZone.overButton ? 0.2 : 0.11)
             border.width: 1

@@ -9,7 +9,7 @@ Item {
 
     property string hint: ""
     width: 780
-    height: 80 + (hint ? hintLabel.implicitHeight + 2 : 0)
+    height: 80 + (hint ? hintLabel.height + 2 : 0)
     readonly property string current: Settings.theme
     function setVal(v: string) {
         Settings.theme = v;
@@ -20,7 +20,7 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: undefined
         y: 6
-        text: "Color theme"
+        content: "Color theme"
     }
     Row {
         anchors.right: parent.right
@@ -36,7 +36,7 @@ Item {
         visible: root.hint !== ""
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        text: root.hint
+        content: root.hint
     }
     Row {
         anchors.right: parent.right
@@ -54,7 +54,7 @@ Item {
                 readonly property bool active: root.current === modelData.id
                 width: 80
                 height: 80
-                radius: 12
+                radius: Theme.radius(12)
                 color: Qt.alpha(Theme.accent, active ? 0.16 : 0.06)
                 border.width: active ? 2 : 1
                 border.color: active ? Theme.accent : Qt.alpha(Theme.accent, 0.25)
@@ -71,16 +71,22 @@ Item {
                                 required property var modelData
                                 width: 18
                                 height: 18
-                                radius: 5
+                                radius: Theme.radius(5)
                                 color: modelData
                                 border.width: 1
                                 border.color: Qt.rgba(1, 1, 1, 0.15)
                             }
                         }
                     }
-                    Text {
+                    ScrambleText {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: card.modelData.name
+                        // the card is a fixed 80x80 and this Column is centred
+                        // in it, so the label's own box has to hold still or
+                        // the swatches above it drift as the noise rerolls
+                        width: restWidth
+                        height: restHeight
+                        horizontalAlignment: Text.AlignHCenter
+                        content: card.modelData.name
                         color: card.active ? Theme.fg : Theme.muted
                         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                     }

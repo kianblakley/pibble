@@ -9,7 +9,7 @@ Rectangle {
     property string key
     width: 24
     height: 24
-    radius: 12
+    radius: Theme.radius(12)
     color: "transparent"
     anchors.verticalCenter: parent.verticalCenter
     Text {

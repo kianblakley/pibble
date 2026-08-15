@@ -60,11 +60,11 @@ Singleton {
     // Once-per-session, not once-per-tile, since every video tile would
     // otherwise re-report the same cause.
     property bool warnedMediaBackend: false
-    function mediaBackendFailure(errorString: string): void {
+    function mediaBackendFailure(): void {
         if (root.warnedMediaBackend)
             return;
         root.warnedMediaBackend = true;
-        root.missingDependency("Video wallpaper playback failed", "QtMultimedia has no working playback backend (" + errorString + ") - install your distro's Qt6 multimedia backend package (e.g. qt6-multimedia-ffmpeg) to enable video wallpapers.");
+        root.missingDependency("Video wallpaper playback failed", "Install Qt6 multimedia to enable live wallpaper previews.");
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text
@@ -118,6 +118,34 @@ Singleton {
         if (lower.includes("wallpaper"))
             return Icons.wallpaperSlideshow;
         return Icons.bell;
+    }
+
+    // Whether this is one of pibble's own error/missing-dependency alerts, the
+    // two categories that must never collapse into one card: a missing tool and
+    // the failure it causes are separate things to go and fix, and the flyout
+    // only ever holds one notification per sender - so without this every
+    // pibble alert would expire the one before it and the user would see
+    // whichever landed last. Matches the raw icon name pibble passed to
+    // notify-send, recovering it from the image slot the same way viewOf does
+    // (libnotify routes -i through the image-path hint, not app_icon).
+    function ownAlert(n): bool {
+        if (String(n.appName ?? "") !== "pibble")
+            return false;
+        const raw = String(n.appIcon ?? "") || String(n.image ?? "").replace("image://icon/", "");
+        return raw === "dialog-error" || raw === "system-software-install";
+    }
+
+    // Identity for the flyout's replace-within-app rule (see
+    // NotificationFlyout.accept): the sender's name when given, else the
+    // desktop-entry hint (Discord and friends send no appName). The alerts
+    // above get a per-notification key instead, so they can never match each
+    // other and queue like separate apps do. Lives here rather than in the
+    // flyout because viewOf's `key` has to derive identically - the flyout
+    // compares the two.
+    function keyOf(n): string {
+        if (root.ownAlert(n))
+            return "pibble-alert:" + n.id;
+        return String(n.appName ?? "") || String(n.desktopEntry ?? "");
     }
 
     // Notification object → display fields, shared by the live flyout card and
@@ -195,7 +223,7 @@ Singleton {
             own: n.appName === "pibble" || entryId === "pibble",
             glyph: root.glyphFor(iconName, n.urgency, String(n.summary ?? "")),
             app: appName,
-            key: (String(n.appName ?? "")) || entryId,
+            key: root.keyOf(n),
             summary: n.summary ?? "",
             body: n.body ?? "",
             image: image,

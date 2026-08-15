@@ -6,9 +6,9 @@
 #   pibble toggle [page]
 #                    show/hide the launcher window (for the keybind),
 #                    starting the daemon first if it isn't running; with a
-#                    page id, opens straight to that page (or switches to
-#                    it if another page is open, or closes if it's already
-#                    the one showing)
+#                    page id (or "settings"), opens straight to that page (or
+#                    switches to it if another page is open, or closes if it's
+#                    already the one showing)
 #   pibble replay    re-fire one recent notification; repeated presses step
 #                    back through history (see "Replay count" in flyout settings)
 #   pibble help      show this message (also what a bare `pibble` does)
@@ -142,7 +142,10 @@ list_pages() {
         custom=$(sed -n '/"uploadedPages"/,/^    \]/ s/.*"id": *"\([^"]*\)".*/\1/p' "$settings" | sed 's/^[^:]*://' | paste -sd, -)
         [ -n "$custom" ] && ids="$ids, ${custom//,/, }"
     fi
-    printf '%s' "$ids"
+    # the settings pane isn't a page (it sits outside the cycle - see
+    # LauncherState.activePanes), but it toggles exactly like one, so it's
+    # listed here, last, rather than left undiscoverable
+    printf '%s' "$ids, settings"
 }
 
 usage() {
@@ -159,7 +162,7 @@ Commands:
             show/hide the launcher window, starting the daemon first if
             needed; with a page id, opens/switches straight to that page
             (or closes if it's already the one showing)
-            available pages: $(list_pages)
+            available: $(list_pages)
   replay    re-fire one recent notification; repeated presses step back
   help      show this message (also what a bare \`pibble\` does)
 USAGE

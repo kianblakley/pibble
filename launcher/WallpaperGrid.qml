@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Wallpaper selector, "grid" style: a paged grid of thumbnails. Only the
 // selected tile animates - its .gif from the source file, its .mp4 through the
@@ -21,8 +22,12 @@ Item {
         root.opacity = 0.004;
     }
     anchors.centerIn: parent
+    // extra top/bottom room for the optional query label and page dots,
+    // reserved only when each is on so a disabled one leaves no gap
+    readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 32 : 0
+    readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
     width: Settings.wallsCols * 240 + (Settings.wallsCols - 1) * 24 + 52
-    height: grid.height + 52
+    height: grid.height + 52 + root.queryH + root.dotsH
     // Its own instance of the shared power/reboot rubber band: one Translate
     // per pane, all bound to the same pull, so no pane has to reach across the
     // tree for a sibling's transform.
@@ -61,11 +66,18 @@ Item {
         NumberAnimation { target: root; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.tile(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
     }
 
+    PageQueryLabel {
+        anchors.top: parent.top
+        anchors.topMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        queryText: LauncherState.query
+    }
+
     Grid {
         id: grid
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: 26
+        anchors.topMargin: 26 + root.queryH
         columns: Settings.wallsCols
         columnSpacing: 24
         rowSpacing: 24
@@ -141,7 +153,7 @@ Item {
                         visible: cell.isSelected
                         anchors.fill: thumb
                         anchors.margins: -5
-                        radius: 19
+                        radius: Theme.radius(19)
                         color: "transparent"
                         border.width: 3
                         border.color: Qt.alpha(Theme.accent, 0.33)
@@ -150,7 +162,7 @@ Item {
                         id: thumb
                         width: 240
                         height: 135
-                        radius: 14
+                        radius: Theme.radius(14)
                         color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
 
                         // Only the selected tile plays its .gif (from
@@ -168,7 +180,7 @@ Item {
                         // them live, so without the check a hidden
                         // grid would still be decoding frames nobody
                         // can see on every carousel step.
-                        readonly property bool tileLive: Settings.wallpaperStyle === "grid" && LauncherState.shown
+                        readonly property bool tileLive: Settings.wallpaperLive && Settings.wallpaperStyle === "grid" && LauncherState.shown
                         readonly property bool gifAnimating: cell.isSelected && tileLive && !!cell.shownWall?.gif
 
                         Image {
@@ -228,18 +240,26 @@ Item {
                     // the carousel cell's thumbnail stroke below.
                     Rectangle {
                         anchors.fill: thumb
-                        radius: 14
+                        radius: Theme.radius(14)
                         color: "transparent"
                         border.width: 1
                         border.color: cell.isSelected ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
                     }
-                    Text {
+                    ScrambleText {
                         anchors.top: thumb.bottom
                         anchors.topMargin: 8
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(implicitWidth, 220)
+                        // restWidth, not implicitWidth, and paceWidth as the
+                        // same cap - see the app tile's caption for both
+                        paceWidth: 220
+                        width: Math.min(restWidth, paceWidth)
                         height: 16
-                        text: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
+                        content: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
+                        // a slot taking a different wallpaper leaves the tile
+                        // where it is (see the isNew branch above), so the
+                        // caption resolving again is the whole transition
+                        replayOnChange: true
+                        replayStagger: Anim.stagger(cell.index, Settings.wallsCols, 60)
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
                         color: Theme.fg
@@ -274,6 +294,15 @@ Item {
         }
     }
 
+    PageDots {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        pageCount: LauncherState.wallpaperPageSize > 0
+            ? Math.ceil(LauncherState.wallpaperMatches.length / LauncherState.wallpaperPageSize) : 0
+        currentPage: LauncherState.wallpaperPage
+    }
+
     // One video surface for the whole grid, over whichever tile holds the
     // selection, rather than one inside each tile. Every video wallpaper's
     // player is already open and paused behind this (see WallpaperVideoPool),
@@ -293,7 +322,7 @@ Item {
     // otherwise leave a video decoding frames for a window nobody is looking
     // at.
     readonly property bool videoShowing: root.settled && !LauncherState.warmingWallpapers
-        && Settings.wallpaperStyle === "grid" && LauncherState.shown && LauncherState.pane === "walls"
+        && Settings.wallpaperLive && Settings.wallpaperStyle === "grid" && LauncherState.shown && LauncherState.pane === "walls"
         && !!root.selWall?.video
 
     // Held false for as long as the tile the surface stands over is still
@@ -330,7 +359,7 @@ Item {
 
         ClippingRectangle {
             anchors.fill: parent
-            radius: 14
+            radius: Theme.radius(14)
             color: "transparent"
             WallpaperVideoPool {
                 anchors.fill: parent
@@ -342,8 +371,10 @@ Item {
                 // freezes the GUI thread for ~700ms on first sight of a file.
                 // The style check keeps the carousel's own pool from opening
                 // the same files a second time over. Settings.preload off
-                // trades that freeze back for the ~150MiB per video this holds.
-                warming: Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                // trades that freeze back for the ~150MiB per video this holds;
+                // Settings.wallpaperLive off means no video is ever shown here,
+                // so there is nothing to pay for either way.
+                warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
             }
         }
         // the tile's own 1px stroke is underneath this overlay, so redraw it
@@ -352,7 +383,7 @@ Item {
         // above).
         Rectangle {
             anchors.fill: parent
-            radius: 14
+            radius: Theme.radius(14)
             color: "transparent"
             border.width: 1
             border.color: Theme.accent

@@ -1,19 +1,21 @@
 import QtQuick
-// the same controls the built-in tabs are built from, so these rows keep
-// matching them (size, spacing, type scale) without restating any of it
-import "root:/services"
-import "root:/ui"
 
 // This page's own tab in pibble's Settings, reached from main.qml's
-// `settingsTab` Component. It only reports what was clicked - main.qml owns
-// both the property and its persisted copy, so there's one writer for each.
+// `settingsTab` Component. main.qml owns the settings' persisted copy;
+// this only reports what was clicked via `picked`.
 Item {
     id: root
 
     required property var pibble
+    required property string chevronLeft
+    required property string chevronRight
     property bool startMonday: true
     property bool showWeeks: true
     signal picked(string key, bool value)
+
+    function px(size: int): int {
+        return Math.round(size * pibble.fontScale);
+    }
 
     width: 780
     height: rows.implicitHeight
@@ -45,7 +47,6 @@ Item {
 
                 readonly property var option: modelData.options.find(o => o.value === modelData.current)
 
-                // wraps, so a two-value setting steps the same either way
                 function step(delta: int): void {
                     const options = modelData.options;
                     const at = options.indexOf(option);
@@ -55,26 +56,73 @@ Item {
                 width: rows.width
                 height: 34
 
-                SettingLabel {
+                Text {
                     anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: settingRow.modelData.label
+                    color: root.pibble.mutedTextColor
+                    font.family: root.pibble.font
+                    font.pixelSize: root.px(14)
                 }
                 Row {
                     anchors.right: parent.right
                     height: parent.height
                     spacing: 8
 
-                    StepperButton {
-                        icon: Icons.chevronLeft
-                        onPressed: settingRow.step(-1)
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 28
+                        height: 28
+                        radius: root.pibble.radius(8)
+                        color: prevArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
+                        border.width: 1
+                        border.color: root.pibble.borderColor
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.chevronLeft
+                            color: root.pibble.accentColor
+                            font.family: root.pibble.iconFont
+                            font.pixelSize: root.px(15)
+                        }
+                        MouseArea {
+                            id: prevArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: settingRow.step(-1)
+                        }
                     }
-                    SettingValue {
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 90
+                        horizontalAlignment: Text.AlignHCenter
                         text: settingRow.option.label
-                        width: Metrics.shortValueWidth
+                        color: root.pibble.textColor
+                        font.family: root.pibble.font
+                        font.pixelSize: root.px(14)
                     }
-                    StepperButton {
-                        icon: Icons.chevronRight
-                        onPressed: settingRow.step(1)
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 28
+                        height: 28
+                        radius: root.pibble.radius(8)
+                        color: nextArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
+                        border.width: 1
+                        border.color: root.pibble.borderColor
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.chevronRight
+                            color: root.pibble.accentColor
+                            font.family: root.pibble.iconFont
+                            font.pixelSize: root.px(15)
+                        }
+                        MouseArea {
+                            id: nextArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: settingRow.step(1)
+                        }
                     }
                 }
             }

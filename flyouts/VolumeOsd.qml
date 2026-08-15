@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import Quickshell.Services.Pipewire
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Volume OSD: a pill (or an equalizer) sliding up from the bottom edge.
 //
@@ -144,7 +145,7 @@ Scope {
             width: Settings.volWidth
             // equalizer variants need a taller card than the pill
             height: window.eq ? 108 : 56
-            radius: window.eq ? 18 : 28
+            radius: Theme.radius(window.eq ? 18 : 28)
             // rests 90px above the screen bottom; the slide exit drops it
             // past the window (= screen) bottom edge. Bounce is built in:
             // the exit overshoot lands off-screen, so only the entry
@@ -180,15 +181,29 @@ Scope {
             // optional numeric readout on the right edge; the bar/eq
             // content shifts left to make room. Fixed width so the layout
             // doesn't jitter as the digit count changes.
-            Text {
+            ScrambleText {
                 id: percentText
-                visible: window.pct
+                // The showing state is part of this, not just window.pct: an
+                // unmapped window's items still read as visible, so without it
+                // the readout would count as on screen for the whole session,
+                // arm once at startup and never resolve again (see
+                // ui/ScrambleText.qml - a label starts when it *arrives*).
+                visible: window.pct && (root.show || root.leaving)
                 anchors.right: parent.right
                 anchors.rightMargin: 24
                 anchors.verticalCenter: parent.verticalCenter
                 width: Theme.fontSize(42)
                 horizontalAlignment: Text.AlignRight
-                text: Math.round(root.volume * 100) + "%"
+                content: Math.round(root.volume * 100) + "%"
+                // Every step of a held volume key changes this string, and a
+                // readout that re-resolved on each one would never be legible
+                // while it mattered - so no replayOnChange: the effect plays as
+                // the OSD arrives and the number is plain from then on.
+                scramble: window.mode !== "none"
+                scrambleSection: "volume"
+                // this OSD comes and goes on its own schedule, with no part in
+                // the launcher's - see followsPane in ui/ScrambleText.qml
+                followsPane: false
                 color: root.muted ? Theme.active.muted : Theme.active.fg
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(15); weight: Font.DemiBold }
                 Behavior on color {
@@ -212,13 +227,13 @@ Scope {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: 4
+                    radius: Theme.radius(4)
                     color: Qt.alpha(Theme.active.accent, 0.15)
                 }
                 Rectangle {
                     width: parent.width * Math.min(1, root.volume)
                     height: parent.height
-                    radius: 4
+                    radius: Theme.radius(4)
                     color: root.muted ? Qt.alpha(Theme.active.muted, 0.8) : Theme.active.accent
                     Behavior on width {
                         NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
@@ -268,7 +283,7 @@ Scope {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.bottom: parent.verticalCenter
                             width: eqRow.barW
-                            radius: 3
+                            radius: Theme.radius(3)
                             height: eqBar.half
                             color: eqBar.barColor
                             Behavior on color {
@@ -279,7 +294,7 @@ Scope {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: parent.verticalCenter
                             width: eqRow.barW
-                            radius: 3
+                            radius: Theme.radius(3)
                             height: eqBar.half
                             color: eqBar.barColor
                             opacity: 0.55

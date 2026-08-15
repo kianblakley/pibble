@@ -56,7 +56,7 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: undefined
         y: 6
-        text: "Custom colors"
+        content: "Custom colors"
     }
     Row {
         id: resetRow
@@ -131,7 +131,7 @@ Item {
                 Rectangle {
                     width: 16
                     height: 16
-                    radius: 8
+                    radius: Theme.radius(8)
                     color: "transparent"
                     border.width: 1
                     border.color: Qt.rgba(0, 0, 0, 0.45)
@@ -140,7 +140,7 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: 1
-                        radius: width / 2
+                        radius: Theme.radius(width / 2)
                         color: "transparent"
                         border.width: 2
                         border.color: "#ffffff"
@@ -155,7 +155,7 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: 4
+                    radius: Theme.radius(4)
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
                         // deliberately desaturated so the bar reads
@@ -192,7 +192,7 @@ Item {
                 Rectangle {
                     width: 16
                     height: 16
-                    radius: 8
+                    radius: Theme.radius(8)
                     anchors.verticalCenter: parent.verticalCenter
                     x: root.hue * hueSlider.width - width / 2
                     color: Qt.hsva(root.hue, 0.5, 0.85, 1)
@@ -204,7 +204,7 @@ Item {
             Rectangle {
                 width: shadeSquare.width
                 height: 42
-                radius: 8
+                radius: Theme.radius(8)
                 color: Qt.alpha(Theme.accent, 0.06)
                 border.width: 1
                 border.color: Qt.alpha(Theme.accent, 0.2)
@@ -218,7 +218,7 @@ Item {
                     Rectangle {
                         width: 18
                         height: 18
-                        radius: 4
+                        radius: Theme.radius(4)
                         anchors.verticalCenter: parent.verticalCenter
                         color: root.slotHex
                         border.width: 1
@@ -273,7 +273,7 @@ Item {
                 model: [
                     { key: "accent", label: "Accent" },
                     { key: "fg", label: "Text" },
-                    { key: "muted", label: "Muted" }
+                    { key: "muted", label: "Muted text" }
                 ]
 
                 Rectangle {
@@ -283,7 +283,7 @@ Item {
                     readonly property string hex: modelData.key === "fg" ? Settings.customFg : modelData.key === "muted" ? Settings.customMuted : Settings.customAccent
                     width: 170
                     height: 46
-                    radius: 10
+                    radius: Theme.radius(10)
                     color: Qt.alpha(Theme.accent, active ? 0.16 : 0.06)
                     border.width: active ? 2 : 1
                     border.color: active ? Theme.accent : Qt.alpha(Theme.accent, 0.25)
@@ -297,7 +297,7 @@ Item {
                         Rectangle {
                             width: 18
                             height: 18
-                            radius: 4
+                            radius: Theme.radius(4)
                             anchors.verticalCenter: parent.verticalCenter
                             color: slotChip.hex
                             border.width: 1
@@ -306,13 +306,21 @@ Item {
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
-                            Text {
-                                text: slotChip.modelData.label
+                            ScrambleText {
+                                // both lines are pinned to their resting box:
+                                // they sit in a Column inside a fixed-height
+                                // chip, so a line that grew with its noise
+                                // would shove the hex under it down and back
+                                height: restHeight
+                                content: slotChip.modelData.label
                                 color: slotChip.active ? Theme.fg : Theme.muted
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }
-                            Text {
-                                text: slotChip.hex.toUpperCase()
+                            ScrambleText {
+                                height: restHeight
+                                // no replay on change: this tracks the picker
+                                // as it is dragged, so it would never settle
+                                content: slotChip.hex.toUpperCase()
                                 color: Qt.alpha(Theme.muted, 0.8)
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }

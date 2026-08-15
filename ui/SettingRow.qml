@@ -11,17 +11,23 @@ Item {
     property string label
     property string hint: ""
     property int valueWidth: 190
+    // The controls' total span - ‹ + value + › + reset, gaps included - for
+    // anything else in the column that has to line its own right-aligned block
+    // up with this row's controls rather than with the column's edge (see
+    // ChipRow's targetWidth).
+    readonly property real controlsWidth: controls.width
     width: 780
-    height: 34 + (hint ? hintLabel.implicitHeight + 2 : 0)
+    height: 34 + (hint ? hintLabel.height + 2 : 0)
     Item {
         id: mainLine
         width: parent.width
         height: 34
         SettingLabel {
             anchors.left: parent.left
-            text: root.label
+            content: root.label
         }
         Row {
+            id: controls
             anchors.right: parent.right
             spacing: 8
             height: parent.height
@@ -30,7 +36,7 @@ Item {
                 onPressed: SettingsSchema.adjust(root.key, -1)
             }
             SettingValue {
-                text: SettingsSchema.display(root.key)
+                content: SettingsSchema.display(root.key)
                 width: root.valueWidth
             }
             StepperButton {
@@ -47,6 +53,6 @@ Item {
         visible: root.hint !== ""
         anchors.top: mainLine.bottom
         anchors.topMargin: 2
-        text: root.hint
+        content: root.hint
     }
 }

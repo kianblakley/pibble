@@ -26,7 +26,16 @@ Item {
     readonly property bool isImg: LauncherState.expandedClip !== null && LauncherState.expandedClip.image === true
     // images render at native size, capped to fit the screen
     // (58% of width, 53% of height to leave room for the
-    // text/metadata below the image and the card's margins)
+    // text/metadata below the image and the card's margins).
+    //
+    // Exactly the image's own shape, with no floor under either
+    // side: a floor doesn't make a small image bigger (nothing
+    // here upscales), it only pads the box it sits in - and on
+    // a shape far from square that padding is most of the card.
+    // A 5120x183 strip got a 180px-tall box for a 106px-tall
+    // picture and read as a mostly empty panel. The card keeps a
+    // minimum width of its own below, which is what the floors
+    // were really protecting.
     readonly property size imgFit: {
         if (!isImg)
             return Qt.size(0, 0);
@@ -36,10 +45,12 @@ Item {
         const maxW = LauncherState.screenWidth * 0.58;
         const maxH = LauncherState.screenHeight * 0.53;
         const s = Math.min(1, maxW / iw, maxH / ih);
-        return Qt.size(Math.max(320, Math.round(iw * s)), Math.max(180, Math.round(ih * s)));
+        return Qt.size(Math.max(1, Math.round(iw * s)), Math.max(1, Math.round(ih * s)));
     }
     anchors.centerIn: parent
-    width: isImg ? imgFit.width + 48 : 560
+    // 360 is the narrowest the metadata rows below read at, so a
+    // tall or tiny image doesn't squeeze them
+    width: isImg ? Math.max(360, imgFit.width + 48) : 560
     height: column.height + 44
     // large images cover much more of the screen than text
     // cards, so the same growth duration reads as an abrupt
@@ -117,17 +128,26 @@ Item {
         spacing: 14
 
         ClippingRectangle {
+            // sized to the picture rather than to the column, so the
+            // rounded corners are the image's own and a shape narrower
+            // than the card isn't sitting in a box wider than itself
             visible: root.isImg
-            width: parent.width
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width, root.imgFit.width)
             height: root.imgFit.height
-            radius: 12
+            radius: Theme.radius(12)
             color: "transparent"
 
             Image {
                 anchors.fill: parent
                 asynchronous: true
                 fillMode: Image.PreserveAspectFit
-                sourceSize: Qt.size(LauncherState.screenWidth, LauncherState.screenHeight)
+                // the size it is actually drawn at, not the screen's:
+                // the box above already has the image's own aspect, so
+                // this asks the reader for exactly the pixels that get
+                // painted instead of decoding a 5120-wide screenshot in
+                // full and handing the scene graph a texture to match
+                sourceSize: Qt.size(root.imgFit.width, root.imgFit.height)
                 // prefer the on-demand full-res decode; the
                 // small thumb is an instant placeholder while
                 // it lands, and the fallback if decode fails
@@ -239,13 +259,13 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 6
             height: parent.height
-            radius: 3
+            radius: Theme.radius(3)
             color: Qt.alpha(Theme.muted, 0.15)
 
             Rectangle {
                 id: scrollThumb
                 width: parent.width
-                radius: 3
+                radius: Theme.radius(3)
                 color: Qt.alpha(Theme.accent, scrollDrag.pressed ? 0.85 : 0.6)
                 height: Math.min(scrollTrack.height, Math.max(12, textFlick.visibleArea.heightRatio * scrollTrack.height))
                 y: {

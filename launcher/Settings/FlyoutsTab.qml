@@ -14,6 +14,12 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
+    // Every tab is laid out at once and the inactive ones are slid out behind
+    // the filmstrip's clip, at full opacity - so nothing else tells a label in
+    // here that it can't be seen. Every ScrambleText below this item reads it
+    // (see ui/ScrambleText.qml) and sits the run out until this tab is the one
+    // showing, which is what makes a tab switch its labels' arrival.
+    readonly property bool scrambleSuppressed: root.slideIndex !== root.activeIndex
 
     x: 20 + (root.slideIndex - root.activeIndex) * 840
     Behavior on x {
@@ -30,7 +36,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Flyouts"
+            content: "Flyouts"
         }
         ResetButton {
             key: "flyouts"
@@ -51,7 +57,6 @@ Column {
 
     SettingRow { key: "volStyle"; label: "Volume style"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volWidth"; label: "Volume size"; valueWidth: Metrics.shortValueWidth }
-    SettingRow { key: "volAnim"; label: "Volume animation"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volPercent"; label: "Volume percent"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "volTimeout"; label: "Volume timeout"; valueWidth: Metrics.shortValueWidth }
 
@@ -65,7 +70,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Pibble alerts"
+            content: "Pibble alerts"
         }
         ResetButton {
             key: "pibbleAlerts"
@@ -85,8 +90,8 @@ Column {
             toggle: SettingsSchema.toggleAlert
         }
     }
+    SettingRow { key: "batteryAlertLevel"; label: "Low battery alert threshold"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "notifStyle"; label: "Notification style"; valueWidth: Metrics.shortValueWidth }
-    SettingRow { key: "notifAnim"; label: "Notification animation"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "notifTimeout"; label: "Notification timeout"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "replayCount"; label: "Replay count"; hint: "how many recent notifications `pibble replay` can step back through"; valueWidth: Metrics.shortValueWidth }
 }

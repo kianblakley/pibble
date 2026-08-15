@@ -64,6 +64,39 @@ Singleton {
     readonly property var launchAnimationChoices: ["grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "grow-center", "fade", "none"]
     readonly property var tileAnimationChoices: ["bloom", "pop", "cascade", "fade", "slide", "none"]
 
+    // The chips under the Animations tab's text-scramble row: one per surface
+    // the effect shows up on. Ids are Settings.scrambleSections' keys (see
+    // Anim.scrambleAllowed). The launcher's own pages come first, in the order
+    // the shell cycles them, then the two menus and the two flyouts - which is
+    // also the order the tab wraps them in, four to a line, so the pages sit on
+    // one and everything that isn't a page on the next. The launch reveal has
+    // no chip: it has no text of its own, every label it uncovers belonging to
+    // whichever page it uncovers.
+    //
+    // Within the second line the two flyouts bracket the two menus rather than
+    // sitting together, which is not the order the ids fall in - chosen by
+    // hand for the pairing.
+    readonly property var scrambleSectionChips: [
+        { id: "clock", label: "clock" },
+        { id: "apps", label: "apps" },
+        { id: "walls", label: "wallpapers" },
+        { id: "clips", label: "clipboard" },
+        { id: "volume", label: "volume" },
+        { id: "power", label: "power" },
+        { id: "notifs", label: "notifications" },
+        { id: "settings", label: "settings" }
+    ]
+    readonly property int scrambleChipColumns: 4
+
+    // The user-facing spelling of a motion style. Only "none" differs, and only
+    // here: the stored id stays "none" everywhere (Settings.heal, and every
+    // `=== "none"` check across the shell, read it), so this renames what is
+    // shown without renaming the value - which would put every saved config's
+    // "none" back to the default.
+    function styleName(value: string): string {
+        return value === "none" ? "off" : value;
+    }
+
     function cycle(current: string, choices: var, dir: int): string {
         let i = choices.indexOf(current);
         if (i < 0)
@@ -78,13 +111,15 @@ Singleton {
         case "clipsMax":
             return "" + Settings.clipsMax;
         case "animStyle":
-            return Settings.animStyle;
+            return root.styleName(Settings.animStyle);
+        case "roundedCorners":
+            return Settings.roundedCorners ? "on" : "off";
         case "fontScale":
             return Math.round(Settings.fontScale * 100) + "%";
         case "dimOpacity":
             return Math.round(Settings.dimOpacity * 100) + "%";
         case "launchAnimation":
-            return Settings.launchAnimation;
+            return root.styleName(Settings.launchAnimation);
         case "bgBlur":
             return Settings.bgBlur === "compositor" ? "ext-background-effect" : Settings.bgBlur;
         case "gestures":
@@ -93,6 +128,8 @@ Singleton {
             return Settings.singleClickActivate ? "on" : "off";
         case "hiddenMenuAnimations":
             return Settings.hiddenMenuAnimations ? "on" : "off";
+        case "powerAnimations":
+            return Settings.powerAnimations ? "on" : "off";
         case "preload":
             return Settings.preload ? "on" : "off";
         case "fontFamily":
@@ -102,7 +139,7 @@ Singleton {
         case "volWidth":
             return Settings.volWidth + " px";
         case "volAnim":
-            return Settings.volAnim;
+            return root.styleName(Settings.volAnim);
         case "volStyle":
             return Settings.volStyle === "sine" ? "sine wave" : Settings.volStyle;
         case "volPercent":
@@ -113,14 +150,18 @@ Singleton {
             return (Settings.notifTimeout / 1000).toFixed(0) + " s";
         case "replayCount":
             return "" + Settings.replayCount;
+        case "batteryAlertLevel":
+            return Settings.batteryAlertLevel + "%";
         case "notifStyle":
             return Settings.notifStyle;
         case "notifAnim":
-            return Settings.notifAnim;
+            return root.styleName(Settings.notifAnim);
         case "wallpaperStyle":
             // the internal ids are historical (see Settings.wallpaperStyle);
             // these are what the user is actually shown
             return Settings.wallpaperStyle === "carousel-flat" ? "carousel" : Settings.wallpaperStyle === "carousel" ? "parallax carousel" : Settings.wallpaperStyle;
+        case "wallpaperLive":
+            return Settings.wallpaperLive ? "on" : "off";
         }
         return "";
     }
@@ -133,6 +174,9 @@ Singleton {
             break;
         case "animStyle":
             Settings.animStyle = root.cycle(Settings.animStyle, root.tileAnimationChoices, dir);
+            break;
+        case "roundedCorners":
+            Settings.roundedCorners = !Settings.roundedCorners;
             break;
         case "fontScale":
             Settings.fontScale = Math.max(0.7, Math.min(1.6, Math.round((Settings.fontScale + dir * 0.1) * 100) / 100));
@@ -154,6 +198,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = !Settings.hiddenMenuAnimations;
+            break;
+        case "powerAnimations":
+            Settings.powerAnimations = !Settings.powerAnimations;
             break;
         case "preload":
             Settings.preload = !Settings.preload;
@@ -186,6 +233,9 @@ Singleton {
         case "replayCount":
             Settings.replayCount = Math.max(1, Math.min(5, Settings.replayCount + dir));
             break;
+        case "batteryAlertLevel":
+            Settings.batteryAlertLevel = Math.max(5, Math.min(50, Settings.batteryAlertLevel + dir * 5));
+            break;
         case "notifStyle":
             Settings.notifStyle = root.cycle(Settings.notifStyle, ["bubble", "pill"], dir);
             break;
@@ -195,7 +245,17 @@ Singleton {
         case "wallpaperStyle":
             Settings.wallpaperStyle = root.cycle(Settings.wallpaperStyle, ["grid", "carousel-flat", "carousel"], dir);
             break;
+        case "wallpaperLive":
+            Settings.wallpaperLive = !Settings.wallpaperLive;
+            break;
         }
+        Settings.save();
+    }
+
+    function toggleIndicator(name: string): void {
+        const indicators = Object.assign({}, Defaults.pageIndicators, Settings.pageIndicators);
+        indicators[name] = indicators[name] === false;
+        Settings.pageIndicators = indicators;
         Settings.save();
     }
 
@@ -203,6 +263,13 @@ Singleton {
         const flyouts = Object.assign({}, Defaults.flyouts, Settings.flyouts);
         flyouts[name] = flyouts[name] === false;
         Settings.flyouts = flyouts;
+        Settings.save();
+    }
+
+    function toggleScrambleSection(name: string): void {
+        const sections = Object.assign({}, Defaults.scrambleSections, Settings.scrambleSections);
+        sections[name] = sections[name] === false;
+        Settings.scrambleSections = sections;
         Settings.save();
     }
 
@@ -231,6 +298,9 @@ Singleton {
         case "clock":
             Settings.clockShow = Defaults.clockShow;
             break;
+        case "pageIndicators":
+            Settings.pageIndicators = Defaults.pageIndicators;
+            break;
         case "appsGrid":
             Settings.appsCols = Defaults.appsCols;
             Settings.appsRows = Defaults.appsRows;
@@ -251,6 +321,14 @@ Singleton {
         case "animStyle":
             Settings.animStyle = "bloom";
             break;
+        case "textScramble":
+            // the row is its chips, so its reset is theirs (the key it is
+            // still named for is retired - see Settings.heal)
+            Settings.scrambleSections = Defaults.scrambleSections;
+            break;
+        case "roundedCorners":
+            Settings.roundedCorners = true;
+            break;
         case "fontScale":
             Settings.fontScale = 1.0;
             break;
@@ -265,6 +343,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = true;
+            break;
+        case "powerAnimations":
+            Settings.powerAnimations = true;
             break;
         case "preload":
             Settings.preload = true;
@@ -323,6 +404,9 @@ Singleton {
         case "replayCount":
             Settings.replayCount = 1;
             break;
+        case "batteryAlertLevel":
+            Settings.batteryAlertLevel = Defaults.batteryAlertLevel;
+            break;
         case "notifStyle":
             Settings.notifStyle = "bubble";
             break;
@@ -331,6 +415,9 @@ Singleton {
             break;
         case "wallpaperStyle":
             Settings.wallpaperStyle = "grid";
+            break;
+        case "wallpaperLive":
+            Settings.wallpaperLive = true;
             break;
         default:
             if (key.startsWith("bind:")) {

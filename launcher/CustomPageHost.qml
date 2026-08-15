@@ -47,17 +47,11 @@ Item {
     // Repeater's delegates itself
     readonly property var pageItem: loader.item
 
-    function syncActive() {
-        if (loader.item && "active" in loader.item)
-            loader.item.active = LauncherState.pane === modelData.id;
-    }
-
     Connections {
         target: LauncherState
         function onPaneChanged() {
             if (LauncherState.pane === root.modelData.id)
                 enterAnim.restart();
-            root.syncActive();
         }
     }
 
@@ -86,7 +80,6 @@ Item {
         onLoaded: {
             if ("pibble" in item)
                 item.pibble = root.ctx;
-            root.syncActive();
             root.loaded();
         }
         // a page that fails to parse/instantiate just never

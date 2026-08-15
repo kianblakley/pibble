@@ -17,7 +17,13 @@ Singleton {
     // cliphist installed but nothing is feeding it (no `wl-paste --watch`
     // running to pipe clipboard changes into `cliphist store`)
     property bool watcherRunning: true
-    readonly property string thumbDir: SystemInfo.cacheRoot + "/clips"
+    // Under thumbnails/ with the wallpaper variants, since that is what these
+    // are - but keyed by cliphist entry id, not by a hash of a source path,
+    // and pruned by this service alone (see prune below). Nothing sweeps the
+    // whole tree.
+    readonly property string thumbDir: SystemInfo.cacheRoot + "/thumbnails/clips"
+    // layout from before that move; migrated in the scan below
+    readonly property string legacyThumbDir: SystemInfo.cacheRoot + "/clips"
     // Re-runs on every launcher open, since the clipboard changes between
     // them. Restarting rather than starting: a scan still in flight from a
     // previous open would otherwise land after this one and show stale entries.
@@ -48,6 +54,15 @@ Singleton {
         id: scan
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+            # Carry the old flat cache over rather than dropping it: these are
+            # id-keyed either way, so the files are still valid under the new
+            # path, and regenerating one means decoding a screenshot back out
+            # of cliphist. Runs before the scan below reports what is cached.
+            if [ -d "$3" ]; then
+                mkdir -p "$2"
+                mv "$3"/*.png "$2"/ 2>/dev/null
+                rmdir "$3" 2>/dev/null
+            fi
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
             pgrep -x wl-paste >/dev/null 2>&1 && echo WATCH:1 || echo WATCH:0
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
@@ -70,13 +85,26 @@ Singleton {
                         # otherwise corrupt this tab/newline-delimited
                         # record format
                         content=$(cliphist decode "$id" 2>/dev/null | head -c 20000)
-                        full=\${content//\\/\\\\}
-                        full=\${full//$'\t'/\\t}
-                        full=\${full//$'\n'/\\n}
+                        # The backslash comes out of a variable and every
+                        # replacement is quoted, rather than being written
+                        # inline: an unquoted \\t as replacement text is
+                        # quote-removed back down to a plain t before the
+                        # substitution runs, so this used to write every
+                        # newline out as a bare "n" (and never doubled a
+                        # backslash at all) - which is what put a literal n
+                        # where each line break should be in every snippet
+                        # the clips pane painted. Doubling the backslashes
+                        # here to get past that is a count nobody can read:
+                        # this is a QML template literal, so each one has to
+                        # survive JS escaping first.
+                        bs='\\'
+                        full=\${content//"$bs"/"$bs$bs"}
+                        full=\${full//$'\t'/"$bs"t}
+                        full=\${full//$'\n'/"$bs"n}
                         ;;
                 esac
                 printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$n" "$cached" "$full" "$preview"
-            done`, "_", String(Settings.clipsMax), root.thumbDir]
+            done`, "_", String(Settings.clipsMax), root.thumbDir, root.legacyThumbDir]
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
@@ -140,18 +168,33 @@ Singleton {
                         # small: the QML reader thread decodes the whole PNG
                         # before sourceSize applies, so a full-res screenshot
                         # would starve the app-icon decodes queued behind it.
+                        #
+                        # Capped on pixel *count* (307200 = the 480x640 box this
+                        # used to fit into), not on a bounding box. A box caps
+                        # the long side, so a shape far from square spends its
+                        # whole budget there and comes back with almost nothing
+                        # on the short one: a 5120x183 strip fitted to 480x640
+                        # is 480x17, which is 8k pixels where a landscape
+                        # screenshot gets 130k, and it's what made a narrow clip
+                        # look like it hadn't loaded until the on-demand full-res
+                        # decode landed behind it. An area cap spends the same
+                        # budget on every shape (that strip becomes ~2930x105),
+                        # so the placeholder is worth showing whatever the
+                        # aspect. LauncherWindow's "is the thumb already the
+                        # original" test is the same figure - keep the two
+                        # together.
                         for id in "$@"; do
                             [ -s "$dir/$id.png" ] && continue
                             tmp=$(mktemp)
                             cliphist decode "$id" > "$tmp"
                             if command -v magick >/dev/null; then
-                                magick "$tmp" -resize '480x640>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                                magick "$tmp" -resize '307200@>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
                             elif command -v convert >/dev/null; then
-                                convert "$tmp" -resize '480x640>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                                convert "$tmp" -resize '307200@>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
@@ -250,13 +293,19 @@ Singleton {
     }
 
     // builds the tile's preview text around the matched span: the anchor
-    // window plus padding on each side. Deliberately doesn't snap to word
-    // boundaries - the offset bookkeeping that'd require isn't worth it for
-    // a compact preview, and cutting mid-word at the edges of a snippet is
-    // a well-worn convention (search-result snippets do the same).
-    function snippet(text: string, match: var, radius: int): var {
-        const start = Math.max(0, match.anchor.start - radius);
-        const end = Math.min(text.length, match.anchor.end + radius);
+    // window plus `before` characters ahead of it and `after` behind.
+    // Deliberately doesn't snap to word boundaries - the offset bookkeeping
+    // that'd require isn't worth it for a compact preview, and cutting mid-word
+    // at the edges of a snippet is a well-worn convention (search-result
+    // snippets do the same).
+    //
+    // The two sides are separate because a tile is read from the top: the match
+    // has to land in the lines that are actually on screen, so what fills the
+    // rest of the tile goes after it rather than being split evenly around it
+    // (see clipTileChars in LauncherState, which is what the caller splits).
+    function snippet(text: string, match: var, before: int, after: int): var {
+        const start = Math.max(0, match.anchor.start - before);
+        const end = Math.min(text.length, match.anchor.end + after);
         const prefix = start > 0 ? "… " : "";
         const suffix = end < text.length ? " …" : "";
         const shift = prefix.length - start;
@@ -301,7 +350,7 @@ Singleton {
             const match = root.searchMatch(text, terms);
             if (match === null)
                 continue;
-            const snip = root.snippet(text, match, 90);
+            const snip = root.snippet(text, match, 90, 90);
             scored.push({
                 clip: Object.assign({}, clip, {
                     highlightText: snip.text,

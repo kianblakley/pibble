@@ -40,20 +40,9 @@ Singleton {
     property real screenWidth: 0
     property real screenHeight: 0
     property real reveal: 0
-    readonly property var originFraction: {
-        switch (Settings.launchAnimation) {
-        case "grow-top-left":
-            return [0, 0];
-        case "grow-top-right":
-            return [1, 0];
-        case "grow-bottom-left":
-            return [0, 1];
-        case "grow-bottom-right":
-            return [1, 1];
-        default:
-            return [0.5, 0.5]; // grow-center, and fade (origin unused)
-        }
-    }
+    // shared with the Animations tab's launch preview, which grows the same
+    // circle out of the same corner over a stand-in for the screen
+    readonly property var originFraction: Anim.launchOrigin()
     readonly property real originX: root.originFraction[0] * root.screenWidth
     readonly property real originY: root.originFraction[1] * root.screenHeight
     // Radius needed to cover the farthest screen corner from the origin. At
@@ -209,9 +198,6 @@ Singleton {
     }
     function togglePage(id: string): void {
         const pages = Object.assign({}, Defaults.pages, Settings.pages);
-        // keep at least one page enabled overall (built-in or custom)
-        if (pages[id] !== false && root.activePanes.length <= 1)
-            return;
         pages[id] = pages[id] === false;
         Settings.pages = pages;
         Settings.save();
@@ -226,10 +212,6 @@ Singleton {
         // trashed, not toggled on
         if (!u || u.broken)
             return;
-        // keep at least one page enabled overall (built-in or custom),
-        // same invariant togglePage enforces for the built-in four
-        if (u.on && activePanes.length <= 1)
-            return;
         Settings.uploadedPages = uploaded.map(x => x.id === id ? Object.assign({}, x, { on: !x.on }) : x);
         Settings.save();
     }
@@ -237,19 +219,28 @@ Singleton {
     // enabled custom page, in orderedPages' relative order - a custom
     // page's position among the Pages settings rows is exactly where it
     // sits in Tab's cycle too.
+    //
+    // Legitimately empty: every page can be unticked, which leaves the
+    // launcher with nothing to cycle and the settings pane - which was
+    // never part of the cycle to begin with - as the only thing it can
+    // show. Everything reading this has to hold for a zero-length list;
+    // see homePane() below, cyclePane() and goBack().
     readonly property var activePanes: {
         const pages = Settings.pages ?? {};
         const uploaded = Settings.uploadedPages ?? [];
-        const list = orderedPages.filter(id => {
+        return orderedPages.filter(id => {
             if (id === "__add_folder__")
                 return false;
             const u = uploaded.find(x => x.id === id);
             return u ? u.on : pages[id] !== false;
         });
-        return list.length ? list : ["clock"];
     }
+    // Where an open (or a fallback out of an invalid setPane) lands. With
+    // every page off there is no home to go to, so the launcher opens
+    // straight onto settings - the one pane that is always reachable, and
+    // the only place the pages can be turned back on.
     function homePane(): string {
-        return activePanes[0];
+        return activePanes.length ? activePanes[0] : "settings";
     }
     // The names `pibble toggle` takes for the two built-in panes whose
     // internal ids read as abbreviations. The ids themselves stay short:
@@ -348,23 +339,49 @@ Singleton {
             Clipboard.checkAlert();
     }
 
-    // Entering a pane replays its tile stagger; the clock has no tiles. Also
-    // tells Clipboard whether its alerts have anywhere to land - a scan runs on
-    // every launcher open, but a cliphist problem is only worth reporting while
-    // the user is actually looking at the clips pane.
+    // Entering a pane replays its tile stagger; the clock has no tiles. Its
+    // text scramble runs for every pane, clock included - that one is all
+    // text and nothing else. One call for the whole shell rather than one per
+    // pane: the run is global, and each label decides for itself whether it's
+    // on screen to take part (see ui/ScrambleText.qml). Also tells Clipboard
+    // whether its alerts have anywhere to land - a scan runs on every launcher
+    // open, but a cliphist problem is only worth reporting while the user is
+    // actually looking at the clips pane.
     onPaneChanged: {
         Clipboard.paneVisible = root.pane === "clips";
+        // a stage label's scramble belongs to whichever page it is standing on,
+        // and a service can't reach in here to ask - see Anim.stagePane
+        Anim.stagePane = root.pane;
         if (root.pane !== "clock")
             Anim.beginStagger();
+        // Starting the clock is all this does - when each label actually
+        // begins is the label's own business, since it can only start once
+        // whatever brings it in (a tile's spring, the launch reveal) has
+        // brought it in (see ui/ScrambleText.qml).
+        Anim.beginScramble();
     }
     // settings remembers where it was opened from
     property string paneBeforeSettings: "clock"
+    // ...and this is what backing out of it actually lands on. Never settings
+    // itself: with every page off, settings *is* what an open records here
+    // (homePane() is settings then), and once a page has been ticked back on,
+    // backing out would put the pane it is already on back on - an Escape that
+    // does nothing, forever. Falls through to the home pane, the same rule
+    // setPane() uses for a pane that has since been disabled. Both callers
+    // check activePanes first, so this can't hand settings back.
+    function paneBehindSettings(): string {
+        return root.activePanes.includes(root.paneBeforeSettings) ? root.paneBeforeSettings : root.homePane();
+    }
     property string settingsTab: "general"
     // which page's grid the tile picker on the Grids tab is editing
     property string gridTarget: "apps"
     function toggleSettings() {
         if (pane === "settings") {
-            setPane(paneBeforeSettings);
+            // with every page off, settings is the whole launcher - there is
+            // nothing behind it to toggle back to (see homePane)
+            if (!activePanes.length)
+                return;
+            setPane(paneBehindSettings());
         } else {
             paneBeforeSettings = pane;
             setPane("settings");
@@ -374,10 +391,14 @@ Singleton {
     function cyclePane(dir: int) {
         // inside settings the cycle keybinds walk the settings tabs
         if (pane === "settings") {
-            const tabs = ["general", "pages", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
+            const tabs = ["general", "pages", "animations", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
             settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
             return;
         }
+        // nothing to cycle with every page off - the settings pane above is
+        // the only one left, and it isn't in the cycle
+        if (!activePanes.length)
+            return;
         let i = activePanes.indexOf(pane);
         if (i < 0)
             i = 0;
@@ -435,7 +456,7 @@ Singleton {
     readonly property real powerRingScale: powerRestDepth / powerPullAtThreshold
     Behavior on powerRaw {
         enabled: !root.powerDragging
-        NumberAnimation { duration: Anim.menu(320); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Anim.power(320); easing.type: Easing.OutCubic }
     }
     Timer {
         // a forgotten armed prompt must not lie in wait to turn the next
@@ -455,9 +476,12 @@ Singleton {
         powerArmed = true;
         powerRaw = powerThreshold;
     }
+    // The launcher deliberately stays up: its close animation and the shutdown
+    // race, and the compositor tears the surface down mid-fade - a half-played
+    // exit frozen on screen as the session goes. Leaving it where it is means
+    // the last thing drawn is the armed prompt the user confirmed.
     function powerOff() {
         Quickshell.execDetached(["systemctl", "poweroff"]);
-        exit();
     }
 
     property bool rebootDragging: false
@@ -474,7 +498,7 @@ Singleton {
     readonly property real rebootRingScale: rebootRestDepth / rebootPullAtThreshold
     Behavior on rebootRaw {
         enabled: !root.rebootDragging
-        NumberAnimation { duration: Anim.menu(320); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Anim.power(320); easing.type: Easing.OutCubic }
     }
     Timer {
         // same forgotten-prompt safety net as power, mirrored
@@ -490,9 +514,9 @@ Singleton {
         rebootArmed = true;
         rebootRaw = rebootThreshold;
     }
+    // stays up for the same reason powerOff() does - see there
     function rebootNow() {
         Quickshell.execDetached(["systemctl", "reboot"]);
-        exit();
     }
 
     // ---------- swipe-to-go-back ----------
@@ -539,9 +563,11 @@ Singleton {
             root.disarmReboot();
         else if (root.expandedClip)
             root.collapseClip();
-        else if (root.pane === "settings")
-            root.setPane(root.paneBeforeSettings);
+        else if (root.pane === "settings" && root.activePanes.length)
+            root.setPane(root.paneBehindSettings());
         else
+            // with every page off there is nothing behind settings to back out
+            // to, so it closes the launcher like any other pane would
             root.exit();
     }
 
@@ -710,6 +736,17 @@ Singleton {
     // attached (rather than wrapped) so every other lookup elsewhere
     // (expandClip, clipCopy, ...) keeps working against plain clip
     // fields unchanged.
+    // How much of a clip a tile is ever given, filtered or not. A tile tops out
+    // at a square (see ClipboardPage's tileH), which at this width and size
+    // holds a few hundred characters, so this is comfortably past what can be
+    // seen - what it saves is laying out the scan's whole 20000-character field
+    // per tile, three times over (the two measurements and the label itself).
+    readonly property int clipTileChars: 600
+    // How much of that a filtered tile spends on the text *ahead* of the match,
+    // i.e. how far down the tile the highlight lands. Two lines or so: enough
+    // that the match reads as being in the middle of something, little enough
+    // that it can't be pushed off the bottom.
+    readonly property int clipSnippetLead: 70
     property var clipMatches: {
         const raw = root.query.trim();
         if (!raw)
@@ -728,7 +765,21 @@ Singleton {
             const m = Clipboard.searchMatch(text, terms);
             if (m === null)
                 continue;
-            const snip = Clipboard.snippet(text, m, 90);
+            // Cut to the same length the tile fills with when no query is on
+            // (clipTileChars), so a filtered tile is the same size as the one
+            // it replaces rather than a smaller one - the snippet is a
+            // different view of the clip, not less of it. It used to be cut to
+            // about the length of cliphist's own one-line preview, which was
+            // right while that preview was what a tile held, and left every
+            // matching tile a few lines tall once tiles started filling with
+            // the decoded text instead.
+            //
+            // Split unevenly around the match, not centred on it: the tile
+            // truncates from the bottom, so an even split would put the match
+            // halfway down a snippet whose second half is off screen. This
+            // keeps it a couple of lines in, with the rest of the room spent on
+            // what follows.
+            const snip = Clipboard.snippet(text, m, root.clipSnippetLead, root.clipTileChars - root.clipSnippetLead);
             scored.push({ c: Object.assign({}, c, { hiText: snip.text, hiSpans: snip.hi }), s: m.score });
         }
         scored.sort((x, y) => y.s - x.s);
@@ -865,10 +916,14 @@ Singleton {
         const nextPage = ((curPage + dir) % pages + pages) % pages;
         return Math.min(count - 1, nextPage * pageSize + w);
     }
-    // swipe-up/down: page through the current pane's grid. The windows
-    // wallpaper carousel has no grid pages (it's a spatial strip, see
-    // moveCarousel) so it's excluded upstream via onCarousel, and this
-    // only ever sees it as a no-op pane.
+    // A screenful at a time through the current pane: what the pagePrev/
+    // pageNext keybinds drive, and what swipe-up/down does. The carousel has
+    // no grid pages (it's a spatial strip, see moveCarousel), so a "page"
+    // there is one strip's worth of bars - the same "everything visible has
+    // been replaced" step the grids take. The swipe path never reaches that
+    // branch: a vertical drag over the carousel is excluded upstream via
+    // onCarousel, since the strip is horizontal and paging it off a vertical
+    // swipe would read as the gesture going sideways.
     function pageMove(dir: int) {
         if (pane === "apps") {
             const next = pageJump(selected, matches.length, appPageSize, dir);
@@ -878,6 +933,8 @@ Singleton {
             const next = pageJump(wallpaperSelected, wallpaperMatches.length, wallpaperPageSize, dir);
             Anim.staggerIfPageChanged(wallpaperPageSize, wallpaperSelected, next);
             wallpaperSelected = next;
+        } else if (pane === "walls") {
+            moveCarousel(dir * Math.max(1, Settings.wallsVisible));
         } else if (pane === "clips") {
             const next = pageJump(clipSelected, clipMatches.length, clipPageSize, dir);
             Anim.staggerIfPageChanged(clipPageSize, clipSelected, next);
@@ -920,7 +977,7 @@ Singleton {
     }
 
     // ---------- keybinds ----------
-    readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down" })
+    readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down", pagePrev: "PageUp", pageNext: "PageDown" })
     // capture (Keybindings tab, click-to-record): capturingBind names the
     // action being recorded; captureHeldKeys tracks which physical keys
     // are still down so the bind only commits once every key of the

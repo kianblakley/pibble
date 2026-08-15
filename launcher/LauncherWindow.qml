@@ -183,6 +183,28 @@ PanelWindow {
         value: root.screen ? root.screen.height : 0
     }
 
+    // The "grow" reveal's circle, published for the text scramble's per-label
+    // gate (see ui/ScrambleText.qml): a label the reveal hasn't reached is not
+    // on screen, however opaque it is, and must not spend its scramble behind
+    // the mask. Anim is a service and can't reach up here for it, so it's
+    // pushed down - and left negative ("nothing is masking") for the launch
+    // styles that fade instead of growing, and for a reveal that has landed.
+    Binding {
+        target: Anim
+        property: "maskRadius"
+        value: LauncherState.growMode && LauncherState.reveal < 1 ? LauncherState.revealDiameter / 2 : -1
+    }
+    Binding {
+        target: Anim
+        property: "maskX"
+        value: LauncherState.originX
+    }
+    Binding {
+        target: Anim
+        property: "maskY"
+        value: LauncherState.originY
+    }
+
     function open(targetPane: string): void {
         fadeOut.stop(); // reopening mid-dismiss is allowed
         root.flushRemap();
@@ -252,7 +274,6 @@ PanelWindow {
             LauncherState.pane = "";
         LauncherState.pane = home;
         LauncherState.paneBeforeSettings = LauncherState.homePane();
-        LauncherState.settingsTab = "general";
         LauncherState.selected = 0;
         LauncherState.wallpaperSelected = 0;
         LauncherState.carouselStep = 0;
@@ -539,6 +560,14 @@ PanelWindow {
         ScriptAction {
             script: root.shown = false
         }
+        // now off-screen: put the settings filmstrip back on its first tab.
+        // Same reason the launch score below is bumped here rather than at the
+        // click - the tabs carry a Behavior on x, so resetting this on the way
+        // *in* (with the rest of resetState) slid the whole filmstrip back from
+        // wherever it was left, in plain view, right through the entrance.
+        ScriptAction {
+            script: LauncherState.settingsTab = "general"
+        }
         // now off-screen: safe to bump the launch score (see
         // pendingRecordEntry above)
         ScriptAction {
@@ -616,7 +645,7 @@ PanelWindow {
             if (superseded)
                 superseded = false;
             else if (exitCode !== 0)
-                Notifier.error("Wallpaper command failed", Settings.wallCommand);
+                Notifier.error("Wallpaper command failed", Settings.wallCommand + "\n\nChange it in Settings > Pages > Wallpapers command.");
             else if (wall)
                 root.commitWallpaper(wall);
             if (root.queuedWall) {
@@ -635,9 +664,11 @@ PanelWindow {
     // arguments) does so in milliseconds, so a command still alive this
     // long has taken effect and is simply staying resident: commit it and
     // leave onExited above to report a failure that arrives much later.
+    // Kept short (rather than a multi-second margin) so the resident case
+    // notifies about as fast as the exits-immediately case does.
     Timer {
         id: wallGrace
-        interval: 3000
+        interval: 800
         onTriggered: {
             if (root.pendingWall) {
                 root.commitWallpaper(root.pendingWall);
@@ -713,15 +744,20 @@ PanelWindow {
         // cells record expandOrigin synchronously on the change above
         Qt.callLater(() => LauncherState.expandAnimStart());
         // Skip the on-demand decode when the clip's native size already
-        // fits the thumb cap (480x640): the thumb (built with magick's
-        // "only shrink if larger" >) IS the full-res image there, so
-        // decoding again would just swap the Image source to identical
-        // pixels - and any source change makes QML clear the current
-        // pixmap and reload async, flashing blank for no visual gain.
+        // fits the thumb cap (307200 pixels): the thumb (built with
+        // magick's "only shrink if larger" >) IS the full-res image
+        // there, so decoding again would just swap the Image source to
+        // identical pixels - and any source change makes QML clear the
+        // current pixmap and reload async, flashing blank for no visual
+        // gain. Pixel count and not a bounding box, because that is the
+        // shape of the cap the thumbnail pass applies (see Clipboard's
+        // thumbnails command); testing the two sides separately would
+        // call a shrunken thumb full-res and leave the expanded view on
+        // it forever.
         const d = (clip.dims || "").split("x");
         const iw = parseInt(d[0]) || 0;
         const ih = parseInt(d[1]) || 0;
-        if (clip.image && (iw > 480 || ih > 640)) {
+        if (clip.image && iw * ih > 307200) {
             LauncherState.expandedFullId = clip.id;
             clipFullImg.forId = clip.id;
             clipFullImg.command = ["bash", "-c", `
@@ -1213,7 +1249,7 @@ PanelWindow {
 
         // typing from the clock jumps into whatever's next in the cycle
         // order - custom pages included, not just the built-in three:
-        // now that a page can read pibble.searchText (see PageContext)
+        // now that a page can read pibble.textInput (see PageContext)
         // there's no reason to skip past one looking for a built-in.
         // The text itself isn't touched here; it's already sitting in
         // this same field, which every page (built-in or custom) reads
@@ -1316,6 +1352,12 @@ PanelWindow {
                 event.accepted = true;
             } else if (ks === (kb.navUp ?? "Up")) {
                 LauncherState.navigate(0, -1);
+                event.accepted = true;
+            } else if (ks === (kb.pageNext ?? "PageDown")) {
+                LauncherState.pageMove(1);
+                event.accepted = true;
+            } else if (ks === (kb.pagePrev ?? "PageUp")) {
+                LauncherState.pageMove(-1);
                 event.accepted = true;
             }
         }

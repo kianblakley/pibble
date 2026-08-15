@@ -1,5 +1,6 @@
 import QtQuick
 import "root:/services"
+import "root:/ui"
 
 // The wallpapers pane. Which of the two selectors shows is
 // Settings.wallpaperStyle; the empty state is shared, since only one of
@@ -38,7 +39,7 @@ Item {
     // in only once the last exiting tile has fully sprung out
     // (Anim.tile(400), matching wallSpringOut/wcSpringOut) instead of
     // popping in on top of tiles still animating away.
-    Text {
+    ScrambleText {
         id: emptyLabel
         visible: LauncherState.pane === "walls" && opacity > 0
         anchors.centerIn: parent
@@ -49,7 +50,11 @@ Item {
         y: LauncherState.powerPull - LauncherState.rebootPull
     }
         opacity: 0
-        text: Wallpapers.list.length === 0 ? "no wallpapers found" : "no matches"
+        content: Wallpapers.list.length === 0 ? "no wallpapers found" : "no matches"
+        // pinned to the resting string's box, so this centered label doesn't
+        // shuffle about on every reroll - see the apps pane's copy of this
+        width: restWidth
+        height: restHeight
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
 

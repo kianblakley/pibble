@@ -19,7 +19,7 @@ Item {
     id: root
 
     width: 780
-    height: 34 + 8 + pagesFlick.height + 2 + pagesSub.implicitHeight
+    height: 34 + 8 + pagesFlick.height + 2 + pagesSub.height
     readonly property int rowH: 32
     // small left inset applied to every row's content
     // (both the checkbox/label and the revealed delete
@@ -128,7 +128,7 @@ Item {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Pages"
+            content: "Pages"
         }
         ResetButton {
             key: "pages"
@@ -437,7 +437,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 18
                                 height: 18
-                                radius: 4
+                                radius: Theme.radius(4)
                                 color: pageDelete.confirming ? Qt.alpha("#e5484d", 0.85) : Qt.alpha(Theme.muted, 0.2)
                                 border.width: 1
                                 border.color: pageDelete.confirming ? "#e5484d" : Qt.alpha(Theme.muted, 0.6)
@@ -515,7 +515,7 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 18
                                     height: 18
-                                    radius: 4
+                                    radius: Theme.radius(4)
                                     color: root.pageOn(pageRow.modelData) ? Qt.alpha(Theme.accent, 0.85) : "transparent"
                                     border.width: 1
                                     border.color: broken ? Qt.alpha(Theme.muted, 0.6) : (root.pageOn(pageRow.modelData) ? Theme.accent : Qt.alpha(Theme.muted, 0.6))
@@ -541,7 +541,7 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 18
                                     height: 18
-                                    radius: 4
+                                    radius: Theme.radius(4)
                                     color: "transparent"
                                     border.width: 1
                                     border.color: Qt.alpha(Theme.accent, 0.6)
@@ -553,9 +553,20 @@ Item {
                                         font { family: Theme.fontFamily; pixelSize: 13 }
                                     }
                                 }
-                                Text {
+                                ScrambleText {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: root.pageLabel(pageRow.modelData)
+                                    height: restHeight
+                                    content: root.pageLabel(pageRow.modelData)
+                                    // A reorder never gets here - the row
+                                    // itself moves and keeps its own label
+                                    // (see the Repeater's model above). What
+                                    // this covers is a row rebuilt around a
+                                    // different page when one is uploaded or
+                                    // trashed: it arrives at full opacity with
+                                    // nothing fading it in, so `content`
+                                    // landing on it is the only cue that this
+                                    // label is new.
+                                    replayOnChange: true
                                     color: pageRow.isAdd ? Theme.accent : (root.pageOn(pageRow.modelData) ? Theme.fg : Theme.muted)
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                                 }
@@ -692,13 +703,13 @@ Item {
                 Behavior on height {
                     NumberAnimation { duration: Anim.menu(180); easing.type: Easing.OutCubic }
                 }
-                radius: 3
+                radius: Theme.radius(3)
                 color: Qt.alpha(Theme.muted, 0.15)
 
                 Rectangle {
                     id: pagesScrollThumb
                     width: parent.width
-                    radius: 3
+                    radius: Theme.radius(3)
                     color: Qt.alpha(Theme.accent, pagesScrollArea.pressed ? 0.85 : 0.6)
                     // floored so it stays grabbable once the
                     // list is long enough that the honest
@@ -757,6 +768,6 @@ Item {
         id: pagesSub
         anchors.top: pagesListWrap.bottom
         anchors.topMargin: 2
-        text: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
+        content: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
     }
 }

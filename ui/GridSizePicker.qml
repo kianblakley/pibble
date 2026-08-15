@@ -74,7 +74,8 @@ Item {
     }
 
     width: 780
-    height: root.gridH + 14 + sizeLabel.implicitHeight
+    // sizeLabel's resting height, not its implicit one - see SettingHint
+    height: root.gridH + 14 + sizeLabel.height
 
     Item {
         id: canvas
@@ -123,7 +124,7 @@ Item {
                 y: root.offsetY + (tile.mergingIntoBar ? 0 : tile.row * root.step)
                 width: root.tileSize
                 height: tile.isBarBody ? root.activeH : root.tileSize
-                radius: 5
+                radius: Theme.radius(5)
                 opacity: tile.inBounds ? 1 : 0
                 scale: tile.inBounds ? 1 : 0
                 color: tile.previewed ? Qt.alpha(Theme.accent, 0.35) : "transparent"
@@ -169,12 +170,17 @@ Item {
         }
     }
 
-    Text {
+    ScrambleText {
         id: sizeLabel
         anchors.top: canvas.bottom
         anchors.topMargin: 12
         anchors.horizontalCenter: parent.horizontalCenter
-        text: root.wallsBars ? (root.shownVisible + " visible") : (root.shownCols + " × " + root.shownRows)
+        height: restHeight
+        // Left off replayOnChange deliberately: this reads out the grid the
+        // pointer is currently over, and it changes on every cell the pointer
+        // crosses - a resolve per step would mean it is never legible while
+        // the user is actually choosing.
+        content: root.wallsBars ? (root.shownVisible + " visible") : (root.shownCols + " × " + root.shownRows)
         color: Theme.fg
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
     }

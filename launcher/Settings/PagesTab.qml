@@ -14,6 +14,12 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
+    // Every tab is laid out at once and the inactive ones are slid out behind
+    // the filmstrip's clip, at full opacity - so nothing else tells a label in
+    // here that it can't be seen. Every ScrambleText below this item reads it
+    // (see ui/ScrambleText.qml) and sits the run out until this tab is the one
+    // showing, which is what makes a tab switch its labels' arrival.
+    readonly property bool scrambleSuppressed: root.slideIndex !== root.activeIndex
 
     x: 20 + (root.slideIndex - root.activeIndex) * 840
     Behavior on x {
@@ -43,7 +49,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Clock"
+            content: "Clock"
         }
         ResetButton {
             key: "clock"
@@ -71,7 +77,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Grid size"
+            content: "Grid size"
         }
         ResetButton {
             key: SettingsSchema.gridTargets[LauncherState.gridTarget].resetKey
@@ -90,13 +96,16 @@ Column {
                     id: gridTargetChip
                     required property string modelData
                     readonly property bool active: LauncherState.gridTarget === modelData
-                    width: gridTargetText.implicitWidth
+                    // resting width, so the underline under the active chip
+                    // and the chips after it hold still through the run
+                    width: gridTargetText.restWidth
                     height: parent.height
 
-                    Text {
+                    ScrambleText {
                         id: gridTargetText
                         anchors.verticalCenter: parent.verticalCenter
-                        text: SettingsSchema.gridTargets[gridTargetChip.modelData].label
+                        height: restHeight
+                        content: SettingsSchema.gridTargets[gridTargetChip.modelData].label
                         color: gridTargetChip.active ? Theme.fg : Theme.muted
                         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                     }
@@ -105,7 +114,7 @@ Column {
                         anchors.topMargin: 4
                         width: parent.width
                         height: 2
-                        radius: 1
+                        radius: Theme.radius(1)
                         color: Theme.accent
                         opacity: gridTargetChip.active ? 1 : 0
                         Behavior on opacity {
@@ -125,11 +134,46 @@ Column {
         target: LauncherState.gridTarget
     }
 
-    SettingRow { key: "animStyle"; label: "Grid animation" }
+    // tile grid decorations: the live search query above the tiles (apps/
+    // walls-grid/clips), and a page-of-tiles dot indicator below them
+    Item {
+        width: 780
+        height: 34
 
-    SettingRow { key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
+        SettingLabel {
+            anchors.left: parent.left
+            content: "Helper elements"
+        }
+        ResetButton {
+            key: "pageIndicators"
+            anchors.right: parent.right
+        }
+        ChipRow {
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            anchors.verticalCenter: parent.verticalCenter
+            // laid out to the width of the stepper directly below rather than
+            // to its own words' natural spacing, so the first tick box starts
+            // on the same left edge as that row's ‹ arrow - the two are the
+            // leftmost ink of two adjacent right-aligned blocks, and a chip row
+            // that overhangs it by a few pixels reads as a misalignment rather
+            // than as a different kind of control. The 34 is this row's own
+            // right margin, i.e. the reset button it stops short of.
+            targetWidth: iconThemeRow.controlsWidth - 34
+            items: [
+                { id: "query", label: "search query" },
+                { id: "dots", label: "page indicator" }
+            ]
+            isOn: Settings.pageIndicatorEnabled
+            toggle: SettingsSchema.toggleIndicator
+        }
+    }
+
+    SettingRow { id: iconThemeRow; key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
 
     SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }
+
+    SettingRow { key: "wallpaperLive"; label: "Wallpapers live preview" }
 
     // wallpaper path
     Item {
@@ -138,7 +182,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Wallpapers path"
+            content: "Wallpapers path"
         }
         ResetButton {
             key: "wallpaperDir"
@@ -148,19 +192,19 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
-            width: 420
+            width: 444
             height: 34
-            radius: 8
+            radius: Theme.radius(8)
             color: Qt.alpha(Theme.accent, pathInput.activeFocus ? 0.16 : 0.08)
             border.width: 1
             border.color: pathInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
 
-            Text {
+            ScrambleText {
                 anchors.fill: parent
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: pathInput.text.length === 0
-                text: "type the path to your wallpapers"
+                content: "type the path to your wallpapers"
                 color: Theme.muted
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
             }
@@ -209,7 +253,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Wallpapers command"
+            content: "Wallpapers command"
         }
         ResetButton {
             key: "wallCommand"
@@ -219,19 +263,19 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
-            width: 508
+            width: 444
             height: 34
-            radius: 8
+            radius: Theme.radius(8)
             color: Qt.alpha(Theme.accent, cmdInput.activeFocus ? 0.16 : 0.08)
             border.width: 1
             border.color: cmdInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
 
-            Text {
+            ScrambleText {
                 anchors.fill: parent
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: cmdInput.text.length === 0
-                text: "type the command to be executed when a wallpaper is selected"
+                content: "type the command to be executed when a wallpaper is selected"
                 color: Theme.muted
                 elide: Text.ElideRight
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
@@ -272,13 +316,10 @@ Column {
             id: commandHint
             anchors.top: commandRow.bottom
             anchors.topMargin: 2
-            text: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
+            content: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
         }
     }
 
     SettingRow { key: "clipsMax"; label: "Clipboard entries" }
-
-    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
-
 }
 

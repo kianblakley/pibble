@@ -1,6 +1,7 @@
 import QtQuick
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // The apps pane: a paged grid of app tiles ranked by launch frequency and
 // filtered by the shared query, plus the empty state that replaces it.
@@ -23,8 +24,12 @@ Item {
     Item {
         id: drawer
         anchors.centerIn: parent
+        // extra top/bottom room for the optional query label and page dots,
+        // reserved only when each is on so a disabled one leaves no gap
+        readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 32 : 0
+        readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
         width: Settings.appsCols * 174 + (Settings.appsCols - 1) * 24 + 52
-        height: grid.height + 52
+        height: grid.height + 52 + drawer.queryH + drawer.dotsH
         // Its own instance of the shared power/reboot rubber band: one
         // Translate per pane, all bound to the same pull, so no pane has to
         // reach across the tree for a sibling's transform.
@@ -48,11 +53,18 @@ Item {
             NumberAnimation { target: drawer; property: "anchors.verticalCenterOffset"; from: 40; to: 0; duration: Anim.tile(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
         }
 
+        PageQueryLabel {
+            anchors.top: parent.top
+            anchors.topMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            queryText: LauncherState.query
+        }
+
         Grid {
             id: grid
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
-            anchors.topMargin: 26
+            anchors.topMargin: 26 + drawer.queryH
             columns: Settings.appsCols
             columnSpacing: 24
             rowSpacing: 24
@@ -138,14 +150,14 @@ Item {
                                 visible: cell.isSelected
                                 anchors.fill: parent
                                 anchors.margins: -5
-                                radius: 23
+                                radius: Theme.radius(23)
                                 color: "transparent"
                                 border.width: 3
                                 border.color: Qt.alpha(Theme.accent, 0.33)
                             }
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 18
+                                radius: Theme.radius(18)
                                 color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
                                 border.width: 1
                                 border.color: cell.isSelected ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
@@ -161,10 +173,16 @@ Item {
                                     source: Icons.url(cell.shownEntry ? cell.shownEntry.icon : "")
                                     visible: status === Image.Ready
                                 }
-                                Text {
+                                ScrambleText {
                                     anchors.centerIn: parent
                                     visible: !icon.visible
-                                    text: (cell.shownEntry ? cell.shownEntry.name : "").slice(0, 2).toUpperCase()
+                                    content: (cell.shownEntry ? cell.shownEntry.name : "").slice(0, 2).toUpperCase()
+                                    // a slot taking a different app - a page
+                                    // turn, or the filter narrowing - never
+                                    // moves the tile, so the text resolving
+                                    // again is the whole of the transition
+                                    replayOnChange: true
+                                    replayStagger: Anim.stagger(cell.index, Settings.appsCols, 60)
                                     color: Theme.accent
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(16); weight: Font.Bold }
                                 }
@@ -205,11 +223,23 @@ Item {
                             }
                         }
 
-                        Text {
+                        ScrambleText {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            width: Math.min(implicitWidth, 76)
+                            // restWidth, not implicitWidth: the caption keeps
+                            // the width of the app's real name while it's
+                            // still noise, so it doesn't breathe wider and
+                            // narrower under a centered tile mid-scramble.
+                            // paceWidth is the same cap, so a name long enough
+                            // to elide resolves across the part on screen
+                            // rather than sweeping past it in a fraction of
+                            // the span
+                            paceWidth: 76
+                            width: Math.min(restWidth, paceWidth)
                             height: 16
-                            text: cell.shownEntry ? cell.shownEntry.name : ""
+                            content: cell.shownEntry ? cell.shownEntry.name : ""
+                            // see the initials label above
+                            replayOnChange: true
+                            replayStagger: Anim.stagger(cell.index, Settings.appsCols, 60)
                             elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.fg
@@ -244,6 +274,15 @@ Item {
             }
         }
 
+        PageDots {
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            pageCount: LauncherState.appPageSize > 0
+                ? Math.ceil(LauncherState.matches.length / LauncherState.appPageSize) : 0
+            currentPage: LauncherState.appPage
+        }
+
     }
 
     // Empty state: fades in only once the last exiting tile has
@@ -253,12 +292,17 @@ Item {
     // ready to fade in again next time. Centered on the pane like
     // the wallpaper/clip empty states below, not inside `drawer`
     // (whose box stays the full grid size regardless of match count).
-    Text {
+    ScrambleText {
         id: emptyLabel
         visible: LauncherState.pane === "apps" && opacity > 0
         anchors.centerIn: parent
         opacity: 0
-        text: Apps.all.length === 0 ? "no apps found" : "no matches"
+        content: Apps.all.length === 0 ? "no apps found" : "no matches"
+        // pinned to the resting string's box, so a centered label (as every
+        // one out here is) doesn't shuffle sideways on every reroll, or up and
+        // down with the line height of whichever font carries a symbol
+        width: restWidth
+        height: restHeight
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
 

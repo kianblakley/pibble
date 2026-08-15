@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Widgets
 import "root:/config"
 import "root:/services"
+import "root:/ui"
 
 // Wallpaper selector, "carousel" style: an infinite horizontal strip of
 // narrow parallax windows with the selected wallpaper always centered.
@@ -84,8 +85,16 @@ Item {
         const atBreak = slotSpacing * edgeBreak - (barWidth * edgeRate / 2) * edgeBreak * edgeBreak;
         return atBreak + edgeClampedStep * (m - edgeBreak);
     }
+    // extra top/bottom room for the optional query label and page dots.
+    // The carousel is a spatial ring - there's no visual "page of tiles" to
+    // land on - but wallsCols/wallsRows (the grid pages' own size setting)
+    // still carves wallpaperMatches into pages the same way LauncherState
+    // already does for the grid style (wallpaperPageSize/wallpaperPage,
+    // unconditional on style), so the dots below reuse that directly.
+    readonly property int queryH: Settings.pageIndicatorEnabled("query") ? 52 : 0
+    readonly property int dotsH: Settings.pageIndicatorEnabled("dots") ? 20 : 0
     width: 2 * edgeOffset(halfVisible) + barWidth
-    height: barHeight + captionGap + 22
+    height: barHeight + captionGap + 22 + root.queryH + root.dotsH
     // Its own instance of the shared power/reboot rubber band: one Translate
     // per pane, all bound to the same pull, so no pane has to reach across the
     // tree for a sibling's transform.
@@ -191,7 +200,7 @@ Item {
             // slotSpacing - barWidth (the scale=1 gap) at every
             // rank, not just growing ones.
             x: parent.width / 2 - width / 2 + Math.sign(rank) * root.edgeOffset(Math.abs(rank))
-            y: 0
+            y: root.queryH
             width: root.barWidth
             height: root.barHeight
             z: -Math.abs(rank)
@@ -284,7 +293,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: -5
-                    radius: 17
+                    radius: Theme.radius(17)
                     color: "transparent"
                     border.width: 3
                     border.color: Qt.alpha(Theme.accent, 0.33)
@@ -293,7 +302,7 @@ Item {
                 ClippingRectangle {
                     id: thumb
                     anchors.fill: parent
-                    radius: 12
+                    radius: Theme.radius(12)
                     color: Qt.alpha(Theme.accent, 0.08 + 0.08 * cell.selFade)
 
                     Image {
@@ -308,23 +317,35 @@ Item {
                         // wide enough to cover the whole fade range
                         // (|rank| <= halfVisible + 1; past that the
                         // cell is fully transparent, so further
-                        // overshoot is invisible). The full-res
-                        // source (not the 480x270 tile thumbnail,
-                        // which is already cropped tight to a
-                        // landscape frame and has no spare width to
-                        // pan through) decoded at bar height keeps
-                        // the pan free of seams.
+                        // overshoot is invisible). What it pans
+                        // across is the cached `pan` variant: the
+                        // 480x270 tile thumbnail is cropped tight to
+                        // a landscape frame and has no spare width
+                        // left, while the original costs ~280ms to
+                        // decode at 5K even asked for at bar height
+                        // - and that was paid again for every cell
+                        // wrapping to the far end of the strip, all
+                        // of it queued on Qt Quick's one image
+                        // reader thread. Scrolling faster than the
+                        // reader drained then relabeled a cell
+                        // before its decode landed, which cancels
+                        // the request outright (assigning `source`
+                        // clears any load in flight), so cells went
+                        // and stayed blank until the strip stopped.
+                        // Same picture at 1920 wide decodes in
+                        // ~30ms. Until the background pass has
+                        // written one, the original stands in.
                         //
-                        // Video uses its cached still frame here
-                        // (Image can't decode the source file - see
-                        // the source binding below) in this same
-                        // wide/panned box, so it pans exactly like
-                        // every other type. The still keeps the
-                        // video's own aspect rather than the tile
-                        // grid's 16:9 crop (see the ffmpeg call in
-                        // Wallpapers' scan), which is what lets the shared
-                        // player below hand over to it - and back -
-                        // without the crop shifting.
+                        // A video's pan entry is the cached still
+                        // frame ffmpeg took (Image can't decode the
+                        // source file), so it lands in this same
+                        // wide/panned box like every other type. The
+                        // still keeps the video's own aspect rather
+                        // than the tile grid's 16:9 crop (see the
+                        // ffmpeg call in Wallpapers' scan), which is
+                        // what lets the shared player below hand
+                        // over to it - and back - without the crop
+                        // shifting.
                         width: root.barWidth + ((root.halfVisible + 1) * root.parallaxPx + 20) * 2
                         height: parent.height
                         anchors.verticalCenter: parent.verticalCenter
@@ -340,11 +361,19 @@ Item {
                         // spring below still needs something to fade -
                         // shownWall keeps the last-rendered wallpaper
                         // until a new one replaces it (see onWallChanged).
-                        // A video source can't be decoded by Image at
-                        // all, so it falls back to the (narrower,
-                        // tightly-cropped) static thumb instead of the
-                        // full-res pan source every other type gets.
-                        source: cell.shownWall ? "file://" + (cell.shownWall.video ? cell.shownWall.thumb : cell.shownWall.path) : ""
+                        source: {
+                            const w = cell.shownWall;
+                            if (!w)
+                                return "";
+                            if (w.pan)
+                                return "file://" + w.pan;
+                            // no pan variant cached yet. An image can stand
+                            // in as its own, slowly; a video has nothing to
+                            // fall back to at all (Image can't decode one),
+                            // so it stays empty until the generation pass
+                            // writes the still that is also its pan entry.
+                            return w.video ? "" : "file://" + w.path;
+                        }
                     }
                     // Only the centered window plays its .gif from the
                     // source file; side windows keep the still Image
@@ -372,7 +401,7 @@ Item {
                     // dragging back and forth across center:
                     // dropping out reloads the source below.
                     readonly property bool gifAnimating: cell.wallIndex >= 0 && cell.wallIndex === LauncherState.wallpaperSelected && Math.abs(cell.rank) < 1
-                        && Settings.wallpaperStyle !== "grid" && LauncherState.shown && !!cell.shownWall?.gif
+                        && Settings.wallpaperLive && Settings.wallpaperStyle !== "grid" && LauncherState.shown && !!cell.shownWall?.gif
                     AnimatedImage {
                         // Same (wider-than-bar) target width as the still
                         // Image above, not just barWidth: PreserveAspectCrop
@@ -407,7 +436,18 @@ Item {
                 // around).
                 Rectangle {
                     anchors.fill: parent
-                    radius: 12
+                    radius: Theme.radius(12)
+                    // Forced on rather than left to Rectangle's
+                    // default, which is "on iff radius > 0": with
+                    // Settings > General > "Rounded corners" off
+                    // every radius here is 0, and an aliased 1px
+                    // stroke on a cell that rests on half-pixel x
+                    // and is scaled below 1 by its rank (both
+                    // above) rasterizes to no coverage at all -
+                    // the whole left or right edge of a moving
+                    // cell simply drops out for a frame at a time.
+                    // Antialiased it thins instead of vanishing.
+                    antialiasing: true
                     color: "transparent"
                     border.width: 1
                     // same muted-to-full-accent brighten tiles
@@ -505,40 +545,42 @@ Item {
     // to the still frame underneath) file while it fades out
     // riding its own cell away, rather than blanking mid-slide.
     property string videoSource: ""
-    // absStep of the cell videoSource was last handed over from,
-    // updated in lockstep with videoSource itself (see below) so
-    // centerRank always measures from the slot the open file
-    // actually belongs to. Without this it tracked
-    // LauncherState.carouselStep directly, which jumps to the
-    // *destination* slot the instant navigation starts - fine
-    // while hopping video-to-video (videoSource jumps with it),
-    // but wrong leaving a video for a plain image: videoSource
-    // stays put (see onCenterWallChanged), so the fading-out
-    // player would ride the incoming cell's position instead of
-    // the outgoing one, flashing the old thumbnail over the tile
-    // being navigated to.
-    property int videoAbsStep: LauncherState.carouselStep
+    // Ring index videoSource sits at, captured with it. Only the
+    // *congruence* is kept, never a slot: absStep below is re-derived
+    // from it against the current carouselStep every time, so nothing
+    // here can be left pointing at a slot the file no longer belongs
+    // to. It used to hold the slot itself, assigned alongside
+    // videoSource - which was only ever right while centerWall kept
+    // changing. Every path that re-anchors carouselStep without
+    // changing the centered wallpaper (resetState's reset to 0 on each
+    // open, wallpaperMatches' own reset, onTotalSlotsChanged) left the
+    // old slot on the books, so reopening onto a centered video played
+    // it over whichever cell that stale slot had wrapped onto.
+    property int videoIndex: 0
     onCenterWallChanged: if (centerWall && centerWall.video) {
         videoSource = centerWall.path;
-        videoAbsStep = LauncherState.carouselStep;
+        videoIndex = LauncherState.wallpaperSelected;
     }
-    // Same ± totalSlots wrap the cells' own rebalance() applies to
-    // absStep (see cell.rebalance above), kept in sync here too: without
-    // it, videoAbsStep is the one position on this whole strip that
-    // never gets recycled, so a slot it drifted off from during a fast
-    // scroll stays on the books forever and can wrap back into view
-    // later - by then some other cell owns that geometric spot, and the
-    // stale player would paint the old video's frame over its content
-    // instead of staying retired off-screen like every real cell does.
-    function rebalanceVideo() {
-        while (root.videoAbsStep - LauncherState.carouselAnim > root.restSpan + 1)
-            root.videoAbsStep -= root.totalSlots;
-        while (root.videoAbsStep - LauncherState.carouselAnim < -(root.restSpan + 1))
-            root.videoAbsStep += root.totalSlots;
-    }
-    Connections {
-        target: LauncherState
-        function onCarouselAnimChanged() { root.rebalanceVideo(); }
+    // absStep of the cell videoSource belongs to: the slot congruent to
+    // videoIndex nearest the selection's own slot, the same short-way-
+    // around rule jumpCarousel picks a direction with. It is not simply
+    // LauncherState.carouselStep, which jumps to the *destination* slot
+    // the instant navigation starts - fine while hopping video-to-video
+    // (videoIndex jumps with it), but wrong leaving a video for a plain
+    // image: videoIndex stays put (see onCenterWallChanged), and the
+    // fading-out player has to ride the outgoing cell rather than flash
+    // the old thumbnail over the tile being navigated to. Landing off
+    // the visible span is fine and needs no recycling - the opacity
+    // below culls it exactly as it culls a cell at that rank.
+    readonly property int videoAbsStep: {
+        const count = LauncherState.wallpaperMatches.length;
+        const step = LauncherState.carouselStep;
+        if (count <= 0)
+            return step;
+        let delta = ((root.videoIndex - step) % count + count) % count;
+        if (delta > count / 2)
+            delta -= count;
+        return step + delta;
     }
     // videoSource === centerWall.path holds off the handover for
     // the frame or two after a switch between two videos, while
@@ -546,7 +588,7 @@ Item {
     // LauncherState.shown, not just the pane: the launcher keeps its last
     // pane while hidden, and decoding frames for a window nobody
     // is looking at costs the same as decoding for one they are.
-    readonly property bool videoShowing: LauncherState.shown && LauncherState.pane === "walls" && Settings.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
+    readonly property bool videoShowing: LauncherState.shown && LauncherState.pane === "walls" && Settings.wallpaperLive && Settings.wallpaperStyle !== "grid" && entranceDone && !!centerWall && !!centerWall.video && videoSource === centerWall.path
     // Rank of the slot the player stands in for: the cell
     // videoSource belongs to (see videoAbsStep above) - the one
     // it's riding into on a video-to-video handover, or the one
@@ -574,7 +616,7 @@ Item {
         // its own rank - see the notes there for why each is
         // shaped the way it is
         x: parent.width / 2 - width / 2 + Math.sign(root.centerRank) * root.edgeOffset(Math.abs(root.centerRank))
-        y: 0
+        y: root.queryH
         width: root.barWidth
         height: root.barHeight
         scale: Math.max(root.edgeFloor, 1 - Math.abs(root.centerRank) * root.edgeRate)
@@ -595,7 +637,7 @@ Item {
         }
         ClippingRectangle {
             anchors.fill: parent
-            radius: 12
+            radius: Theme.radius(12)
             color: "transparent"
             WallpaperVideoPool {
                 anchors.fill: parent
@@ -604,7 +646,10 @@ Item {
                 // the bindings under an invisible pane keep running): without
                 // it, navigating the *grid* onto a video would have this pool
                 // open the file too, for a strip nobody is looking at.
-                current: Settings.wallpaperStyle === "grid" ? "" : root.videoSource
+                // wallpaperLive gates `current`, not just videoShowing above:
+                // the sticky videoSource would otherwise still have the pool
+                // open (and hold) a file the surface is never going to show.
+                current: !Settings.wallpaperLive || Settings.wallpaperStyle === "grid" ? "" : root.videoSource
                 live: root.videoShowing
                 // Only while the launcher is down, so the file
                 // opens land with nothing on screen to stutter
@@ -614,8 +659,10 @@ Item {
                 // keeps the grid's own pool from opening the same
                 // files a second time over. Settings.preload off
                 // trades that freeze back for the ~150MiB per video
-                // this holds.
-                warming: Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                // this holds; Settings.wallpaperLive off means no
+                // video is ever shown here, so there is nothing to
+                // pay for either way.
+                warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
                 // exactly the box - and therefore exactly the crop
                 // - the centered cell's still Image uses at rank 0,
                 // parallax included: without it the video would sit
@@ -632,19 +679,32 @@ Item {
         // for the same reason the cell's is (see wrap above).
         Rectangle {
             anchors.fill: parent
-            radius: 12
+            radius: Theme.radius(12)
+            // shares the cell stroke's placement, so it shares its
+            // reason for forcing this on - see the note there
+            antialiasing: true
             color: "transparent"
             border.width: 1
             border.color: Theme.accent
         }
     }
 
-    Text {
+    PageQueryLabel {
         anchors.top: parent.top
-        anchors.topMargin: root.barHeight + root.captionGap
+        anchors.topMargin: 10
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(implicitWidth, root.width)
-        text: {
+        queryText: LauncherState.query
+    }
+
+    ScrambleText {
+        anchors.top: parent.top
+        anchors.topMargin: root.queryH + root.barHeight + root.captionGap
+        anchors.horizontalCenter: parent.horizontalCenter
+        // restWidth, not implicitWidth, and paceWidth as the same cap - see
+        // the grid caption's copy of this
+        paceWidth: root.width
+        width: Math.min(restWidth, paceWidth)
+        content: {
             if (LauncherState.carouselEmpty)
                 return "";
             const count = LauncherState.wallpaperMatches.length;
@@ -661,5 +721,18 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         color: Theme.fg
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
+    }
+
+    PageDots {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        // carouselEmpty, not a filtered-length check: the ring itself never
+        // drops non-matching wallpapers (see wallpaperMatches above), so the
+        // dots track that same full, unfiltered page count while any tile
+        // still matches - only a query with no match anywhere collapses them.
+        pageCount: LauncherState.wallpaperPageSize > 0 && !LauncherState.carouselEmpty
+            ? Math.ceil(LauncherState.wallpaperMatches.length / LauncherState.wallpaperPageSize) : 0
+        currentPage: LauncherState.wallpaperPage
     }
 }

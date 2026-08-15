@@ -11,7 +11,7 @@ Rectangle {
     signal pressed
     width: 28
     height: 28
-    radius: 8
+    radius: Theme.radius(8)
     color: Qt.alpha(Theme.accent, hover.containsMouse ? 0.22 : 0.11)
     border.width: 1
     border.color: Qt.alpha(Theme.accent, 0.33)
