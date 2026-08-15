@@ -130,7 +130,12 @@ Item {
                 loops: MediaPlayer.Infinite
                 videoOutput: surface
                 audioOutput: AudioOutput { muted: true }
-                onErrorOccurred: () => Notifier.mediaBackendFailure()
+                // ResourceError is what a missing/broken playback backend comes
+                // back as; the rest (a codec it won't take, a file it can't
+                // read) are about this one file and must not be reported as a
+                // missing dependency. See Notifier.mediaPlaybackFailure for why
+                // the classification happens here rather than there.
+                onErrorOccurred: (error, errorString) => Notifier.mediaPlaybackFailure(error === MediaPlayer.ResourceError, errorString)
             }
         }
     }

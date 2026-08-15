@@ -639,7 +639,7 @@ Item {
             anchors.fill: parent
             radius: Theme.radius(12)
             color: "transparent"
-            WallpaperVideoPool {
+            WallpaperVideoSurface {
                 anchors.fill: parent
                 // style-gated as well as bound to videoSource, which keeps
                 // moving in grid mode (centerWall is only the selection, and
