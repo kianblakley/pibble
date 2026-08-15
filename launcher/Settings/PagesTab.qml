@@ -14,6 +14,12 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
+    // Every tab is laid out at once and the inactive ones are slid out behind
+    // the filmstrip's clip, at full opacity - so nothing else tells a label in
+    // here that it can't be seen. Every ScrambleText below this item reads it
+    // (see ui/ScrambleText.qml) and sits the run out until this tab is the one
+    // showing, which is what makes a tab switch its labels' arrival.
+    readonly property bool scrambleSuppressed: root.slideIndex !== root.activeIndex
 
     x: 20 + (root.slideIndex - root.activeIndex) * 840
     Behavior on x {
@@ -43,7 +49,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Clock"
+            content: "Clock"
         }
         ResetButton {
             key: "clock"
@@ -71,7 +77,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Tile page indicators"
+            content: "Tile page indicators"
         }
         ResetButton {
             key: "pageIndicators"
@@ -98,7 +104,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Grid size"
+            content: "Grid size"
         }
         ResetButton {
             key: SettingsSchema.gridTargets[LauncherState.gridTarget].resetKey
@@ -117,13 +123,16 @@ Column {
                     id: gridTargetChip
                     required property string modelData
                     readonly property bool active: LauncherState.gridTarget === modelData
-                    width: gridTargetText.implicitWidth
+                    // resting width, so the underline under the active chip
+                    // and the chips after it hold still through the run
+                    width: gridTargetText.restWidth
                     height: parent.height
 
-                    Text {
+                    ScrambleText {
                         id: gridTargetText
                         anchors.verticalCenter: parent.verticalCenter
-                        text: SettingsSchema.gridTargets[gridTargetChip.modelData].label
+                        height: restHeight
+                        content: SettingsSchema.gridTargets[gridTargetChip.modelData].label
                         color: gridTargetChip.active ? Theme.fg : Theme.muted
                         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                     }
@@ -177,7 +186,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Wallpapers path"
+            content: "Wallpapers path"
         }
         ResetButton {
             key: "wallpaperDir"
@@ -194,12 +203,12 @@ Column {
             border.width: 1
             border.color: pathInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
 
-            Text {
+            ScrambleText {
                 anchors.fill: parent
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: pathInput.text.length === 0
-                text: "type the path to your wallpapers"
+                content: "type the path to your wallpapers"
                 color: Theme.muted
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
             }
@@ -248,7 +257,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Wallpapers command"
+            content: "Wallpapers command"
         }
         ResetButton {
             key: "wallCommand"
@@ -265,12 +274,12 @@ Column {
             border.width: 1
             border.color: cmdInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
 
-            Text {
+            ScrambleText {
                 anchors.fill: parent
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: cmdInput.text.length === 0
-                text: "type the command to be executed when a wallpaper is selected"
+                content: "type the command to be executed when a wallpaper is selected"
                 color: Theme.muted
                 elide: Text.ElideRight
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
@@ -311,7 +320,7 @@ Column {
             id: commandHint
             anchors.top: commandRow.bottom
             anchors.topMargin: 2
-            text: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
+            content: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
         }
     }
 

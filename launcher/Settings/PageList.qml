@@ -19,7 +19,7 @@ Item {
     id: root
 
     width: 780
-    height: 34 + 8 + pagesFlick.height + 2 + pagesSub.implicitHeight
+    height: 34 + 8 + pagesFlick.height + 2 + pagesSub.height
     readonly property int rowH: 32
     // small left inset applied to every row's content
     // (both the checkbox/label and the revealed delete
@@ -128,7 +128,7 @@ Item {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Pages"
+            content: "Pages"
         }
         ResetButton {
             key: "pages"
@@ -553,9 +553,20 @@ Item {
                                         font { family: Theme.fontFamily; pixelSize: 13 }
                                     }
                                 }
-                                Text {
+                                ScrambleText {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: root.pageLabel(pageRow.modelData)
+                                    height: restHeight
+                                    content: root.pageLabel(pageRow.modelData)
+                                    // A reorder never gets here - the row
+                                    // itself moves and keeps its own label
+                                    // (see the Repeater's model above). What
+                                    // this covers is a row rebuilt around a
+                                    // different page when one is uploaded or
+                                    // trashed: it arrives at full opacity with
+                                    // nothing fading it in, so `content`
+                                    // landing on it is the only cue that this
+                                    // label is new.
+                                    replayOnChange: true
                                     color: pageRow.isAdd ? Theme.accent : (root.pageOn(pageRow.modelData) ? Theme.fg : Theme.muted)
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                                 }
@@ -757,6 +768,6 @@ Item {
         id: pagesSub
         anchors.top: pagesListWrap.bottom
         anchors.topMargin: 2
-        text: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
+        content: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
     }
 }

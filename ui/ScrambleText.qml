@@ -52,13 +52,12 @@ Text {
     // How many characters of `content` the resolve is paced across, for a
     // label whose visible extent is only the head of its string - see
     // Anim.scrambled(). 0 (the default) paces across all of it.
+    //
+    // Deliberately the only lever a label has over the effect, and it moves
+    // *which* characters the sweep is spread over, never how long the label
+    // gets: the duration is one shared figure (Anim.scrambleSpan) that nothing
+    // may lengthen for itself, so everything arriving together lands together.
     property int paceLength: 0
-    // The longest this label's resolve may take, in ms, for one that isn't
-    // resolving alongside anything: the shared 460ms ceiling exists to keep a
-    // grid's labels finishing together, and a paragraph held to it reads as a
-    // wipe rather than a resolve (see Anim.scrambleSpan). 0 takes the shared
-    // one - the right answer for anything in a wave.
-    property int spanCap: 0
 
     // Whether a change of `content` replays the effect, for a string swapped
     // under a label that never went anywhere: a grid slot taking a different
@@ -167,7 +166,41 @@ Text {
         const center = item.mapToItem(null, (item === root ? sizer.advanceWidth : item.width) / 2, 0);
         return Anim.unmasked(center.x, center.y);
     }
-    readonly property bool onScreen: root.shownItem.visible && root.stackedOpacity > 0.05 && root.unmasked
+    // Whether an ancestor has declared that nothing beneath it may run the
+    // effect - for a reason neither the opacity above nor the reveal circle
+    // below can see. The settings pane is both cases:
+    //
+    //  - its filmstrip lays every tab out at once and slides the inactive ones
+    //    sideways behind a clip, at full opacity and fully unmasked. Without
+    //    this, four tabs' worth of labels resolve together behind the one on
+    //    screen, and the tab the user eventually switches to has been sitting
+    //    there settled since the pane opened.
+    //  - the pane has a motion switch of its own (Settings.hiddenMenuAnimations,
+    //    which Anim.menu rides), and a pane the user has asked to appear
+    //    instantly shouldn't spend half a second resolving - the same reason
+    //    the flyouts turn `scramble` off per-label.
+    //
+    // An ancestor declares `scrambleSuppressed` and its whole subtree follows,
+    // which is the only way to reach labels nested this far down without
+    // threading a property through every control in between. Folded in here
+    // rather than into `scramble` so that lifting it reads as an arrival: a
+    // label forgets its run on the way out (see onOnScreenChanged) and starts
+    // a fresh one when its tab comes back round.
+    //
+    // Every ancestor is read even once one has said yes, so this stays
+    // subscribed to all of them - the same reason stackedOpacity multiplies
+    // the whole chain rather than stopping at the first zero. An ancestor that
+    // doesn't declare it reads as undefined, which is neither true nor a
+    // dependency.
+    readonly property bool ancestorSuppressed: {
+        let suppressed = false;
+        for (let item = root.shownItem; item; item = item.parent) {
+            if (item.scrambleSuppressed === true)
+                suppressed = true;
+        }
+        return suppressed;
+    }
+    readonly property bool onScreen: root.shownItem.visible && root.stackedOpacity > 0.05 && root.unmasked && !root.ancestorSuppressed
 
     // Where on the shared clock this label's own run began, or -1 for one that
     // hasn't come on screen yet (and so hasn't started).
@@ -236,7 +269,7 @@ Text {
     }
 
     text: root.scramble && Anim.scrambleActive && root.startedAt >= 0
-        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun, root.paceLength, root.spanCap)
+        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun, root.paceLength)
         : root.content
 
     TextMetrics {

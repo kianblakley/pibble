@@ -274,25 +274,36 @@ Singleton {
         }
     }
 
-    // How long a string of `len` characters spends resolving. Long strings
-    // resolve faster per character rather than dragging the run out, so a
-    // clipboard preview and an app name finish within sight of each other -
-    // and the floor is deliberately near a tile's own entrance (root.duration,
-    // 400ms), because a label that resolves quicker than the tile carrying it
-    // has finished before that tile is fully on screen. A calendar's two-digit
-    // day numbers were the case that showed this up: they landed looking
-    // untouched while every longer label around them was visibly resolving.
+    // How long any label spends resolving - one duration for every string in
+    // the shell, whatever its length and wherever it sits. Everything that
+    // arrives together therefore lands together, and no label can be given a
+    // longer run than its neighbours.
     //
-    // The 460ms ceiling is what holds a wave together, and `cap` lifts it for
-    // a label resolving on its own instead: a notification body is the only
-    // long string on its card, with nobody to finish alongside, and under the
-    // shared ceiling three lines of it get wiped through in the time a
-    // six-letter caption takes - the same "it never scrambled" the pacing
-    // below is there to fix, one step further out. 0 takes the shared ceiling,
-    // which is what everything in a grid wants.
-    function scrambleSpan(len: int, cap: int): int {
-        return Math.min(300 + len * 14, cap > 0 ? cap : 460);
-    }
+    // It used to grow with the string (a floor, a per-character term and a
+    // ceiling, with one label overriding the ceiling for itself), which kept
+    // long text legible as it resolved but meant "how long does this take"
+    // had a different answer per label. Flat is the deliberate choice, and
+    // these are the two things it costs - both known, neither a bug to fix by
+    // reintroducing a curve:
+    //
+    //  - long strings sweep fast. The resolve crosses the string left to
+    //    right in this same duration however many characters there are, so a
+    //    three-line notification body arrives faster than it can be read.
+    //    ScrambleText.paceLength narrows *which* characters the sweep is
+    //    spread across, which is the remaining lever for that, and it doesn't
+    //    touch the duration.
+    //  - short strings can no longer finish early, which is what the old
+    //    floor was protecting: 460ms comfortably outlasts a tile's own 400ms
+    //    entrance (root.duration), so a two-character label still can't
+    //    resolve before the tile carrying it has landed.
+    //
+    // 575ms: a quarter longer than the 460 the effect was first tuned to,
+    // which is where it landed after being made adjustable and tried at a
+    // range of lengths. A constant rather than a setting on purpose - it is
+    // the one number the whole effect is timed against, and the point of
+    // having a single number is that nothing, a label or a user, can put one
+    // label out of step with the rest.
+    readonly property int scrambleSpan: 575
 
     // `source` as it looks `elapsed` ms into the run (negative while a label
     // is still waiting out its stagger delay): characters resolve left to
@@ -308,9 +319,13 @@ Singleton {
     // resolved from the first frame instead; by the caller's own account
     // nothing can see it. 0 paces across the whole string, as everything but
     // that one label wants.
-    function scrambled(source: string, elapsed: int, seed: int, paceLen: int, spanCap: int): string {
+    //
+    // Note this narrows the sweep without lengthening the run: the duration is
+    // the same flat figure either way (see scrambleSpan), so a label using
+    // this still lands alongside everything else.
+    function scrambled(source: string, elapsed: int, seed: int, paceLen: int): string {
         const len = paceLen > 0 && paceLen < source.length ? paceLen : source.length;
-        const span = root.scrambleSpan(len, spanCap);
+        const span = root.scrambleSpan;
         if (len === 0 || elapsed >= span)
             return source;
         // Anything still asking for noise is what keeps the clock running -
@@ -333,9 +348,63 @@ Singleton {
             // flipping through times rather than as symbols
             const alphabet = ch >= "0" && ch <= "9" ? root.scrambleDigits
                 : root.scrambleThin.indexOf(ch) >= 0 ? root.scrambleThin : root.scrambleAlphabet;
-            out += alphabet.charAt(root.scrambleHash(seed, i, frame) % alphabet.length);
+            // On the last frame before this character locks, the real one is
+            // held out of the noise: drawn there it is still there after the
+            // lock, so the instant the character lands reads as a glyph that
+            // failed to reroll rather than as the character arriving. Only
+            // that frame - a real character turning up earlier in the run is
+            // gone again 45ms later, which reads as a flicker, not a landing.
+            //
+            // indexOf is -1 for anything the alphabet doesn't hold, which is
+            // most letters, and scrambleIndex takes that as "nothing to hold
+            // out". Digits and the thin set are always their own alphabet's
+            // members; the symbol set overlaps punctuation like % and ~.
+            const lastFrame = (frame + 1) * root.scrambleHold >= (i + 1) / len * span;
+            out += root.scrambleGlyph(alphabet, seed, i, frame, lastFrame ? alphabet.indexOf(ch) : -1);
         }
         return out;
+    }
+
+    // The glyph character `i` shows on `frame`: a pick out of `alphabet` that
+    // is never the glyph that character showed on the frame before, and never
+    // `avoid` (-1 for none). A reroll that lands on the glyph already there
+    // reads as a dropped frame - on the clock's ten digits that would be one
+    // reroll in ten, which is unmissable on a label that does nothing else.
+    //
+    // Walked forward from frame 0 rather than derived against the previous
+    // frame's hash, because what that frame *drew* is not what its hash alone
+    // says: the pick may itself have been displaced by this same rule, and
+    // holding out the raw value instead would let the displaced one through.
+    //
+    // The walk is bounded by the run rather than by the clock: scrambled()
+    // hands back the finished string once elapsed reaches the span, so `frame`
+    // never gets past the span divided by the hold - ten steps at the default
+    // duration - and only characters still showing noise are asked at all.
+    function scrambleGlyph(alphabet: string, seed: int, i: int, frame: int, avoid: int): string {
+        let idx = -1;
+        for (let f = 0; f <= frame; f++)
+            idx = root.scrambleIndex(root.scrambleHash(seed, i, f), alphabet.length, idx, f === frame ? avoid : -1);
+        return alphabet.charAt(idx);
+    }
+
+    // `h` folded into [0, n) with up to two indices held out of it, so that
+    // every glyph still allowed stays equally likely - rerolling until the
+    // pick differs would need somewhere to keep the rejected ones, and this
+    // has to stay a pure function of the frame (see scrambleHash). The two are
+    // skipped in ascending order, which is what puts the shifted pick where an
+    // even spread would have. Every alphabet is far longer than two, so there
+    // is always something left to land on.
+    function scrambleIndex(h: int, n: int, banA: int, banB: int): int {
+        const lo = Math.min(banA, banB);
+        const hi = Math.max(banA, banB);
+        const first = lo >= 0 ? lo : hi;
+        const second = (lo >= 0 && hi > lo) ? hi : -1;
+        let idx = h % (n - (first >= 0 ? 1 : 0) - (second >= 0 ? 1 : 0));
+        if (first >= 0 && idx >= first)
+            idx++;
+        if (second >= 0 && idx >= second)
+            idx++;
+        return idx;
     }
 
     // Deterministic per (label, character, frame) rather than Math.random():

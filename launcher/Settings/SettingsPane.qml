@@ -1,6 +1,8 @@
 import QtQuick
+import "root:/config"
 import "root:/launcher"
 import "root:/services"
+import "root:/ui"
 
 // The settings pane: a header of tab links over a horizontal filmstrip of
 // tab columns. Every tab is laid out at once and slid sideways rather than
@@ -18,6 +20,14 @@ Item {
     function resetEntrance(): void {
         root.opacity = 0.004;
     }
+
+    // This pane has a motion switch of its own (every duration in here goes
+    // through Anim.menu), and it governs the scramble too: a pane the user has
+    // asked to appear instantly has no entrance for the text to resolve
+    // alongside. Read by every ScrambleText in the pane, header and tabs
+    // alike - see ui/ScrambleText.qml, and the tabs' own copy of this for the
+    // filmstrip half of it.
+    readonly property bool scrambleSuppressed: !Settings.hiddenMenuAnimations
 
     // built-ins first, then one slot per custom page that opts
     // into a settings tab (see LauncherState.customSettingsTabs) - in
@@ -204,8 +214,8 @@ Item {
             function onSettingsTabChanged() { header.ensureActiveTabVisible(); }
         }
 
-        Text {
-            text: "SETTINGS"
+        ScrambleText {
+            content: "SETTINGS"
             color: Theme.muted
             font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13); letterSpacing: 3 }
         }
@@ -247,8 +257,13 @@ Item {
                         Item {
                             id: tabLink
                             required property var modelData
+                            required property int index
                             readonly property bool active: LauncherState.settingsTab === modelData.id
-                            width: tabLinkText.implicitWidth
+                            // the resting label's width: the links sit in a
+                            // Row and carry an underline the width of the
+                            // link, both of which would shuffle sideways if
+                            // this tracked the noise
+                            width: tabLinkText.restWidth
                             height: 24
                             opacity: modelData.phase === "entering" ? 0 : 1
 
@@ -275,9 +290,13 @@ Item {
                                 easing.type: Easing.OutCubic
                             }
 
-                            Text {
+                            ScrambleText {
                                 id: tabLinkText
-                                text: tabLink.modelData.label
+                                content: tabLink.modelData.label
+                                // the links all arrive on one line with the
+                                // pane behind them, so nothing else would
+                                // stagger them across it (see ClockPage)
+                                scrambleDelay: tabLink.index * 45
                                 color: tabLink.active ? Theme.fg : Theme.muted
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
                             }
@@ -430,6 +449,8 @@ Item {
                 id: customTab
                 required property var modelData
                 readonly property int slideIndex: root.tabOrder.indexOf(modelData.pageId)
+                // see the built-in tabs' copy of this
+                readonly property bool scrambleSuppressed: customTab.slideIndex !== root.tabIndex
                 x: 20 + (slideIndex - root.tabIndex) * 840
                 // a freshly-appearing tab's slideIndex starts at -1 for
                 // one tick - LauncherState.customSettingsTabs (which this

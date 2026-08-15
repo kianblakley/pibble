@@ -14,6 +14,12 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
+    // Every tab is laid out at once and the inactive ones are slid out behind
+    // the filmstrip's clip, at full opacity - so nothing else tells a label in
+    // here that it can't be seen. Every ScrambleText below this item reads it
+    // (see ui/ScrambleText.qml) and sits the run out until this tab is the one
+    // showing, which is what makes a tab switch its labels' arrival.
+    readonly property bool scrambleSuppressed: root.slideIndex !== root.activeIndex
 
     x: 20 + (root.slideIndex - root.activeIndex) * 840
     Behavior on x {
@@ -30,7 +36,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Flyouts"
+            content: "Flyouts"
         }
         ResetButton {
             key: "flyouts"
@@ -65,7 +71,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            text: "Pibble alerts"
+            content: "Pibble alerts"
         }
         ResetButton {
             key: "pibbleAlerts"

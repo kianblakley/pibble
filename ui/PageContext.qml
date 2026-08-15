@@ -145,7 +145,7 @@ QtObject {
         // opened right behind another), where a raw elapsed would hand a page
         // arriving on the second run text that had already resolved on the
         // first.
-        return Anim.scrambled(text, Anim.scrambleElapsed - Anim.scrambleRunStarted - Anim.staggerOffset(s, cols ?? 1, 60), (Anim.scrambleRun << 8) ^ (s * 31 + text.length), 0, 0);
+        return Anim.scrambled(text, Anim.scrambleElapsed - Anim.scrambleRunStarted - Anim.staggerOffset(s, cols ?? 1, 60), (Anim.scrambleRun << 8) ^ (s * 31 + text.length), 0);
     }
     // Internal only - not something a page is meant to read. It's how
     // getSetting/setSetting/pageActive know which page they're talking

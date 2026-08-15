@@ -18,7 +18,9 @@ Row {
             id: chip
             required property var modelData
             readonly property bool on: root.isOn(modelData.id)
-            width: chipBox.width + 6 + chipText.implicitWidth
+            // the resting label's width: the chips sit in a Row, so one that
+            // grew with its noise would slide every chip after it sideways
+            width: chipBox.width + 6 + chipText.restWidth
             height: 28
             anchors.verticalCenter: parent.verticalCenter
 
@@ -40,12 +42,13 @@ Row {
                     font { family: Icons.family; pixelSize: 13 }
                 }
             }
-            Text {
+            ScrambleText {
                 id: chipText
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: chipBox.right
                 anchors.leftMargin: 6
-                text: chip.modelData.label
+                height: restHeight
+                content: chip.modelData.label
                 color: chip.on ? Theme.fg : Theme.muted
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
             }

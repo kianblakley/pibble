@@ -56,7 +56,7 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: undefined
         y: 6
-        text: "Custom colors"
+        content: "Custom colors"
     }
     Row {
         id: resetRow
@@ -306,13 +306,21 @@ Item {
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
-                            Text {
-                                text: slotChip.modelData.label
+                            ScrambleText {
+                                // both lines are pinned to their resting box:
+                                // they sit in a Column inside a fixed-height
+                                // chip, so a line that grew with its noise
+                                // would shove the hex under it down and back
+                                height: restHeight
+                                content: slotChip.modelData.label
                                 color: slotChip.active ? Theme.fg : Theme.muted
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }
-                            Text {
-                                text: slotChip.hex.toUpperCase()
+                            ScrambleText {
+                                height: restHeight
+                                // no replay on change: this tracks the picker
+                                // as it is dragged, so it would never settle
+                                content: slotChip.hex.toUpperCase()
                                 color: Qt.alpha(Theme.muted, 0.8)
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }

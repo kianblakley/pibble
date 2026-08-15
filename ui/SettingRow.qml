@@ -12,14 +12,14 @@ Item {
     property string hint: ""
     property int valueWidth: 190
     width: 780
-    height: 34 + (hint ? hintLabel.implicitHeight + 2 : 0)
+    height: 34 + (hint ? hintLabel.height + 2 : 0)
     Item {
         id: mainLine
         width: parent.width
         height: 34
         SettingLabel {
             anchors.left: parent.left
-            text: root.label
+            content: root.label
         }
         Row {
             anchors.right: parent.right
@@ -30,7 +30,7 @@ Item {
                 onPressed: SettingsSchema.adjust(root.key, -1)
             }
             SettingValue {
-                text: SettingsSchema.display(root.key)
+                content: SettingsSchema.display(root.key)
                 width: root.valueWidth
             }
             StepperButton {
@@ -47,6 +47,6 @@ Item {
         visible: root.hint !== ""
         anchors.top: mainLine.bottom
         anchors.topMargin: 2
-        text: root.hint
+        content: root.hint
     }
 }

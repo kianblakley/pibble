@@ -924,17 +924,15 @@ Scope {
                                     // probe below.
                                     paceLength: Math.min(bodyProbe.text.length,
                                         bodyProbe.positionAt(bodyClip.width, Math.max(0, bodyClip.collapsedH - bodyClip.lineH / 2)))
-                                    // and paced over its own ceiling rather
-                                    // than the wave's: three lines is a lot of
-                                    // text to wipe through in the 460ms a word
-                                    // gets, and this label has nothing on the
-                                    // card to finish alongside - the app name
-                                    // and summary above are done long before
-                                    // it either way. Kept well inside the
-                                    // card's own dwell (notifTimeout, 5s by
-                                    // default) so the body is settled and
-                                    // readable for the whole of it.
-                                    spanCap: 900
+                                    // This label used to take longer than the
+                                    // rest of the shell to resolve, on the
+                                    // grounds that it has nothing on the card
+                                    // to finish alongside. It doesn't any
+                                    // more: the duration is one figure for
+                                    // every string in the shell (see
+                                    // Anim.scrambleSpan), and the pacing above
+                                    // is all that separates a body from a
+                                    // caption.
                                     wrapMode: Text.Wrap
                                     maximumLineCount: 24
                                     textFormat: Text.PlainText
