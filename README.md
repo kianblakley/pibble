@@ -2,6 +2,12 @@
     <img src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/title-readme.png" alt="pibble">
 </h1>
 
+<p align=center>
+    <img src="https://img.shields.io/github/license/kianblakley/pibble?color=gold&style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble?color=gold&style=flat-square" alt="Last commit">
+    <img src="https://img.shields.io/github/languages/top/kianblakley/pibble?color=gold&style=flat-square" alt="Top language">
+</p>
+
 ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png)
 
 ## Features
@@ -67,7 +73,7 @@ cd pibble
 |---|---|---|
 | Cycle pages | `Tab` / `Shift+Tab` | swipe left/right |
 | Navigate tiles in the current page | `Arrow keys or scrollwheel` | press |
-| Jump a whole page of tiles within the current page | `PageUp` / `PageDown` | swipe up/down |
+| Jump a page of tiles within the current page | `PageUp` / `PageDown` | swipe up/down |
 | Activate the selected tile | `Enter` | press |
 | Reveal power button | `Ctrl+P` | swipe down from the top edge |
 | Reveal reboot button | `Ctrl+R` | swipe up from the bottom edge |
@@ -82,7 +88,7 @@ cd pibble
 | `start` | Start the daemon |
 | `stop` | Stop the daemon |
 | `restart` | Restart the daemon |
-| `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id (or `settings`), opens/switches straight to that page |
+| `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id, opens/switches straight to that page |
 | `replay` | Re-fire one recent notification; repeated presses step back through history |
 
 ## Configuring
