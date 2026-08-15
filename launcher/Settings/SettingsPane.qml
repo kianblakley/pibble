@@ -453,11 +453,6 @@ Item {
             id: animationsTab
             slideIndex: 2
             activeIndex: root.tabIndex
-            // that tab has slack in it (its previews are sized to whatever is
-            // left over), so it is handed another tab's height to come out at
-            // rather than setting its own - Pages', which is the column its
-            // previews were sized against
-            targetHeight: pagesTab.height
         }
         NavigationTab {
             id: navigationTab

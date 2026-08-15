@@ -69,11 +69,6 @@ Item {
     // for it has arrived. Applied to every duration a preview takes from the
     // real code, never to the real code itself - and 0 stays 0, so an "off"
     // style still lands instantly.
-    //
-    // A preview opts out by simply not calling this on its durations, which is
-    // what the settings one does: it is the only one showing three motions in a
-    // row, and halved it ran long enough that a user stepping the row next to
-    // it was waiting on a box that had stopped saying anything new.
     property real slowdown: 2
     function slow(ms: int): int {
         return Math.round(ms * root.slowdown);
@@ -156,8 +151,15 @@ Item {
         layer.effect: MultiEffect {
             maskEnabled: true
             maskSource: stageMask
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 0.05
+            // No threshold/spread: those remap the mask's alpha through a
+            // second smoothstep, and at this size (a 6px radius, against
+            // hundreds on the launcher's own reveal) that remap is the only
+            // thing the eye catches - too narrow a spread turns the corner's
+            // antialiased fringe into a stair-step, too wide one turns the
+            // whole mask into pass-everything and the corner stops being
+            // rounded at all. Left at the defaults, the mask's own alpha
+            // (0 outside the radius, 1 inside, antialiased between) is used
+            // as-is, which is exactly the curve the Rectangle already drew.
         }
     }
 

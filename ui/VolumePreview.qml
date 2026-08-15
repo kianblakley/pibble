@@ -23,7 +23,7 @@ AnimPreview {
         readonly property real restY: (root.stageHeight - height) / 2
         x: (root.stageWidth - width) / 2
         y: card.restY
-        width: root.u(76)
+        width: root.u(84)
         height: root.u(16)
         radius: Theme.radius(root.u(8))
         color: Qt.alpha(Theme.muted, 0.22)

@@ -17,10 +17,6 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
-    // The height this tab is asked to come out at - the Pages tab's. Injected
-    // by SettingsPane rather than reached for from here, same as every other
-    // cross-tab figure.
-    required property real targetHeight
     // Every tab is laid out at once and the inactive ones are slid out behind
     // the filmstrip's clip, at full opacity - so nothing else tells a label in
     // here that it can't be seen. Every ScrambleText below this item reads it
@@ -40,31 +36,13 @@ Column {
 
     spacing: 14
 
-    // How much bigger than their design size the previews are drawn. Everything
-    // else on this tab is fixed - six header lines, the tile grid (which is
-    // drawn at the picker's size, not this one), the scramble row's two lines
-    // of chips, and the gaps between them - so whatever targetHeight has over
-    // that is the previews', divided between them in proportion to the sizes
-    // they were drawn at. Solved rather than picked by hand: the rows grow with
-    // the user's type scale, and a figure tuned against one scale would leave
-    // the tab short at another. Never below 1, so a font scale that leaves no
-    // slack shrinks nothing.
-    //
-    // Nothing here may depend on previewUnit, or the two would define each
-    // other.
-    readonly property real fixedHeight: 6 * launchRow.fixedHeight + tilesPreview.height + scrambleRow.height + root.spacing * 6
-    readonly property real previewBase: launchPreview.baseHeight + volumePreview.baseHeight + notifPreview.baseHeight + menuPreview.baseHeight + powerPreview.baseHeight
-    readonly property real previewUnit: Math.max(1, (root.targetHeight - root.fixedHeight) / root.previewBase)
-
-    // playDelay staggers the arrival replay down the column, in the same
-    // 35ms-a-slot beat Anim.staggerOffset gives a "bloom" grid
-
-    AnimSettingRow {
-        id: launchRow
-        key: "launchAnimation"
-        label: "Launch animation"
-        LaunchPreview { id: launchPreview; playDelay: 0; unit: root.previewUnit }
-    }
+    // How much bigger than their design size the previews are drawn. One
+    // figure, picked here, for every preview on the tab. This was solved
+    // instead - the tab was handed the Pages tab's height and the previews took
+    // whatever the rows left over - which tied one tab's size to another's
+    // contents and meant a row added over there resized the pictures over here.
+    // A tab is as tall as what is on it; this one now is too.
+    readonly property real previewUnit: 1.5
 
     // The scramble is the one row that isn't a switch at all: one chip per
     // surface the effect shows up on, and there are more of those than one line
@@ -138,34 +116,48 @@ Column {
         }
     }
 
+    // How a preview is asked for a repeat, said once for the column rather
+    // than under each of six boxes. Nothing about a picture that has finished
+    // moving says it can be made to move again.
+    SettingHint { content: "hover an element to replay its animation" }
+
+    // playDelay staggers the arrival replay down the column, in the same
+    // 35ms-a-slot beat Anim.staggerOffset gives a "bloom" grid
+
+    AnimSettingRow {
+        key: "launchAnimation"
+        label: "Launch animation"
+        LaunchPreview { playDelay: 0; unit: root.previewUnit }
+    }
+
     AnimSettingRow {
         key: "animStyle"
         label: "Tiles"
         // no unit: these are the grid picker's own tiles, at its size
-        TilesPreview { id: tilesPreview; playDelay: 70 }
+        TilesPreview { playDelay: 70 }
     }
 
     AnimSettingRow {
         key: "hiddenMenuAnimations"
         label: "Settings"
-        MenuPreview { id: menuPreview; playDelay: 105; unit: root.previewUnit }
+        MenuPreview { playDelay: 105; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "powerAnimations"
         label: "Power prompts"
-        PowerPreview { id: powerPreview; playDelay: 140; unit: root.previewUnit }
+        PowerPreview { playDelay: 140; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "notifAnim"
         label: "Notifications"
-        NotifPreview { id: notifPreview; playDelay: 175; unit: root.previewUnit }
+        NotifPreview { playDelay: 175; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "volAnim"
         label: "Volume"
-        VolumePreview { id: volumePreview; playDelay: 210; unit: root.previewUnit }
+        VolumePreview { playDelay: 210; unit: root.previewUnit }
     }
 }

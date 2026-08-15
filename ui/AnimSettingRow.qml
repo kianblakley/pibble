@@ -2,7 +2,7 @@ import QtQuick
 import "root:/config"
 import "root:/services"
 
-// A SettingRow with a live preview of what the value does centred underneath
+// A SettingRow with a live preview of what the value does standing under
 // it - the shape every row on the Animations tab takes, and the shape the tile
 // picker already takes on the Pages tab (a header line, then the thing itself).
 // Same `key` contract as SettingRow: SettingsSchema reads, steps and resets it.
@@ -20,10 +20,12 @@ Column {
     property int valueWidth: 190
     width: 780
     spacing: 8
-    // everything this row is besides the preview under it - the header line
-    // and the gap over the preview. Read by the Animations tab, which sizes
-    // every preview off the height its rows *don't* take (see previewUnit).
-    readonly property real fixedHeight: 34 + root.spacing
+    // Where the preview sits: centred under the ‹ › stepper it answers to,
+    // rather than under the column. The 34 is the reset button this row's
+    // controls end with, which the preview is no more aligned to than the
+    // chip rows elsewhere are (see ChipRow's targetWidth): what a preview
+    // stands under is the pair of arrows that change it.
+    readonly property real previewShift: root.width / 2 - 34 - (controls.width - 34) / 2
 
     Item {
         width: parent.width
@@ -34,6 +36,7 @@ Column {
             content: root.label
         }
         Row {
+            id: controls
             anchors.right: parent.right
             spacing: 8
             height: parent.height
@@ -56,9 +59,14 @@ Column {
         }
     }
     // sized to whatever preview it was handed (each one centres itself in
-    // here), so a row is exactly as tall as the thing it demonstrates
+    // here), so a row is exactly as tall as the thing it demonstrates. The
+    // slot keeps the column's full width and is shifted whole, rather than
+    // being narrowed onto the stepper: a preview only ever has to centre
+    // itself in its parent, and a slot narrowed to the stepper's width would
+    // pull every preview in from its edges too.
     Item {
         id: previewSlot
+        x: root.previewShift
         width: parent.width
         height: childrenRect.height
     }

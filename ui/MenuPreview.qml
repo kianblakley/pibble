@@ -17,22 +17,16 @@ AnimPreview {
 
     replayOn: Settings.hiddenMenuAnimations
 
-    // The one preview that doesn't take AnimPreview's slowdown: it is also the
-    // only one showing three motions in a row, and halved the sequence ran long
-    // enough that a user stepping the row next to it was waiting on a box that
-    // had stopped saying anything new. Every duration below is Anim.menu()'s
-    // own, exactly as the pane runs it.
-    //
-    // The pauses between the three moves are this preview's own - the pane
-    // arriving and the filmstrip stepping twice are three separate motions, and
-    // run back to back they read as one long slide.
+    // Every duration below is Anim.menu()'s own - exactly as the pane runs
+    // it - taken through slow() like every other preview's. The pause between
+    // the two moves is this preview's own: the pane arriving and the filmstrip
+    // stepping are separate motions, and run back to back they read as one
+    // long slide.
 
     property real drop: 0
-    // which tab is showing, 0-based - the filmstrip's whole position. It walks
-    // all the way along rather than stopping at the second: one move could be
-    // the pane sliding anything sideways, two in a row is a filmstrip.
+    // which tab is showing, 0-based - the filmstrip's whole position
     property real tabPos: root.tabs - 1
-    readonly property int tabs: 3
+    readonly property int tabs: 2
 
     Item {
         id: pane
@@ -109,30 +103,19 @@ AnimPreview {
         id: menuIn
         PropertyAction { target: root; property: "tabPos"; value: 0 }
         ParallelAnimation {
-            NumberAnimation { target: pane; property: "opacity"; from: 0; to: 1; duration: Anim.menu(200); easing.type: Easing.OutCubic }
-            NumberAnimation { target: pane; property: "scale"; from: 0.9; to: 1; duration: Anim.menu(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-            NumberAnimation { target: root; property: "drop"; from: root.u(10); to: 0; duration: Anim.menu(500); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+            NumberAnimation { target: pane; property: "opacity"; from: 0; to: 1; duration: root.slow(Anim.menu(200)); easing.type: Easing.OutCubic }
+            NumberAnimation { target: pane; property: "scale"; from: 0.9; to: 1; duration: root.slow(Anim.menu(500)); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+            NumberAnimation { target: root; property: "drop"; from: root.u(10); to: 0; duration: root.slow(Anim.menu(500)); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
         }
         // long enough that the entrance has visibly finished before the tab
         // change starts - two motions in one box only read as two if nothing
         // overlaps them
-        PauseAnimation { duration: Anim.menu(260) }
-        NumberAnimation {
-            target: root
-            property: "tabPos"
-            to: 1
-            duration: Anim.menu(420)
-            easing.type: Easing.OutCubic
-        }
-        // and on to the third, after the beat a user takes to read the tab
-        // they just landed on - back to back the two slides read as one long
-        // one rather than as two tab changes
-        PauseAnimation { duration: Anim.menu(300) }
+        PauseAnimation { duration: root.slow(Anim.menu(260)) }
         NumberAnimation {
             target: root
             property: "tabPos"
             to: root.tabs - 1
-            duration: Anim.menu(420)
+            duration: root.slow(Anim.menu(420))
             easing.type: Easing.OutCubic
         }
     }

@@ -73,19 +73,18 @@ Singleton {
     // no chip: it has no text of its own, every label it uncovers belonging to
     // whichever page it uncovers.
     //
-    // Within the second line the two menus come before the two flyouts, which
-    // is not the order the ids fall in: the tab's chip grid sizes each column
-    // to its widest word, and this pairing is the one that leaves the least
-    // slack under the pages above it.
+    // Within the second line the two flyouts bracket the two menus rather than
+    // sitting together, which is not the order the ids fall in - chosen by
+    // hand for the pairing.
     readonly property var scrambleSectionChips: [
         { id: "clock", label: "clock" },
         { id: "apps", label: "apps" },
         { id: "walls", label: "wallpapers" },
         { id: "clips", label: "clipboard" },
-        { id: "settings", label: "settings" },
+        { id: "volume", label: "volume" },
         { id: "power", label: "power" },
         { id: "notifs", label: "notifications" },
-        { id: "volume", label: "volume" }
+        { id: "settings", label: "settings" }
     ]
     readonly property int scrambleChipColumns: 4
 
