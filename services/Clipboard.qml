@@ -194,7 +194,7 @@ Singleton {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick (magick or convert) is used to downscale clipboard image thumbnails - install one to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots."
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi

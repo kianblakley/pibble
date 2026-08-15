@@ -15,6 +15,8 @@ import "root:/ui"
 // corner directly. Same-app arrivals replace the visible card (it slides out
 // and the new one fires next; if the card hasn't appeared yet the content just
 // swaps in place); other apps queue and fire after the current one dismisses.
+// pibble's own error and missing-dependency alerts are the one exception -
+// they queue against each other like separate senders (see Notifier.keyOf).
 //
 // The tint colour is the dominant colour of the app icon (Canvas pixel
 // average, cached per icon), falling back to the flyout theme accent.
@@ -129,10 +131,12 @@ Scope {
                 if (i >= 0)
                     queue.splice(i, 1);
             }
-            // identity for replace-within-app: the name when given, else the
-            // desktop-entry hint (Discord and friends send no appName)
+            // identity for replace-within-app; derived in Notifier so it can't
+            // drift from the `key` its viewOf snapshot carries (compared
+            // against above). pibble's own error/dependency alerts get a unique
+            // key each and so queue instead of replacing - see Notifier.keyOf
             function appKey(n): string {
-                return String(n.appName ?? "") || String(n.desktopEntry ?? "");
+                return Notifier.keyOf(n);
             }
             function snapshot(n) {
                 current = n;

@@ -15,15 +15,20 @@ QtObject {
     readonly property var pageOrder: ["clock", "apps", "walls", "clips"]
     readonly property var clockShow: ({ date: true, battery: true, weather: true })
     // per-page tile grid decorations: the live search query above the tiles,
-    // and a page-of-tiles dot indicator below them
-    readonly property var pageIndicators: ({ query: true, dots: true })
+    // and a page-of-tiles dot indicator below them. Both off out of the box -
+    // the grid reads cleaner without them, and neither is load-bearing (the
+    // query is echoed by what the grid filters to, the dots by the tiles
+    // themselves changing)
+    readonly property var pageIndicators: ({ query: false, dots: false })
     readonly property var flyouts: ({ volume: true, notifs: true })
     // per-surface switches for the text scramble, and the whole of that
     // setting (see Anim.scrambleAllowed). One key per surface the user can
     // point at: every built-in page of the launcher's stage, each flyout, the
-    // settings pane and the power prompts. A custom page has no key here and
-    // needs none - an unknown one reads as on (see Settings.scrambleEnabled).
-    readonly property var scrambleSections: ({ clock: true, apps: true, walls: true, clips: true, volume: true, notifs: true, settings: true, power: true })
+    // settings pane and the power prompts. All off out of the box - it is much
+    // the loudest thing the shell does, so it is opt-in. A custom page has no
+    // key here and needs none - an unknown one reads as off too (see
+    // Settings.scrambleEnabled).
+    readonly property var scrambleSections: ({ clock: false, apps: false, walls: false, clips: false, volume: false, notifs: false, settings: false, power: false })
     readonly property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
     readonly property var keybinds: ({
         cycle: "Tab",
@@ -54,4 +59,7 @@ QtObject {
     readonly property int clipsCols: 4
     readonly property int clipsRows: 3
     readonly property int clipsMax: 120
+
+    // battery % the low-battery alert fires at (see Battery.checkLevel)
+    readonly property int batteryAlertLevel: 5
 }

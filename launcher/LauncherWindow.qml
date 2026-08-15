@@ -638,7 +638,7 @@ PanelWindow {
             if (superseded)
                 superseded = false;
             else if (exitCode !== 0)
-                Notifier.error("Wallpaper command failed", Settings.wallCommand);
+                Notifier.error("Wallpaper command failed", Settings.wallCommand + "\n\nChange it in Settings > Pages > Wallpapers command.");
             else if (wall)
                 root.commitWallpaper(wall);
             if (root.queuedWall) {

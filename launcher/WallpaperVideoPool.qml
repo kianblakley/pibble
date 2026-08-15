@@ -130,7 +130,7 @@ Item {
                 loops: MediaPlayer.Infinite
                 videoOutput: surface
                 audioOutput: AudioOutput { muted: true }
-                onErrorOccurred: (error, errorString) => Notifier.mediaBackendFailure(errorString)
+                onErrorOccurred: () => Notifier.mediaBackendFailure()
             }
         }
     }

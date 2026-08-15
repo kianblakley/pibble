@@ -151,6 +151,8 @@ Singleton {
             return (Settings.notifTimeout / 1000).toFixed(0) + " s";
         case "replayCount":
             return "" + Settings.replayCount;
+        case "batteryAlertLevel":
+            return Settings.batteryAlertLevel + "%";
         case "notifStyle":
             return Settings.notifStyle;
         case "notifAnim":
@@ -231,6 +233,9 @@ Singleton {
             break;
         case "replayCount":
             Settings.replayCount = Math.max(1, Math.min(5, Settings.replayCount + dir));
+            break;
+        case "batteryAlertLevel":
+            Settings.batteryAlertLevel = Math.max(5, Math.min(50, Settings.batteryAlertLevel + dir * 5));
             break;
         case "notifStyle":
             Settings.notifStyle = root.cycle(Settings.notifStyle, ["bubble", "pill"], dir);
@@ -399,6 +404,9 @@ Singleton {
             break;
         case "replayCount":
             Settings.replayCount = 1;
+            break;
+        case "batteryAlertLevel":
+            Settings.batteryAlertLevel = Defaults.batteryAlertLevel;
             break;
         case "notifStyle":
             Settings.notifStyle = "bubble";

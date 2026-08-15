@@ -22,9 +22,10 @@ JsonAdapter {
         settings.saveRequested();
     }
 
-    // Membership tests for the three object-valued toggle sets. All three
-    // default to on for an unknown key, so a category added in a later release
-    // is enabled for configs written before it existed.
+    // Membership tests for the object-valued toggle sets. They default to on
+    // for an unknown key, so a category added in a later release is enabled for
+    // configs written before it existed - scrambleEnabled is the one exception
+    // (see there).
     function flyoutEnabled(name: string): bool {
         return (settings.flyouts ?? {})[name] !== false;
     }
@@ -37,8 +38,12 @@ JsonAdapter {
     function gesturesEnabled(): bool {
         return settings.gestures !== false;
     }
+    // The one set that reads an unknown key as *off* rather than on: the
+    // scramble ships off everywhere (see Defaults.scrambleSections), so a
+    // custom page - which has no key here at all - has to land off too, or it
+    // would be the only surface in the shell scrambling out of the box.
     function scrambleEnabled(name: string): bool {
-        return (settings.scrambleSections ?? {})[name] !== false;
+        return (settings.scrambleSections ?? {})[name] === true;
     }
 
     property int appsCols: Defaults.appsCols
@@ -81,9 +86,10 @@ JsonAdapter {
     // ride - but switchable on its own, being much the louder of the two.
     // One key per surface the user can point at, since the effect is welcome on
     // a pane they opened and unwelcome on a notification that arrived while
-    // they were doing something else. Unknown keys default to on, so a custom
-    // page (which has no key) scrambles, as does a surface added in a later
-    // release for configs written before it existed.
+    // they were doing something else. Every one of them ships off - it is the
+    // loudest thing the shell does - and an unknown key (a custom page) reads
+    // as off with them, which is the one membership test that works that way
+    // round (see scrambleEnabled).
     property var scrambleSections: Defaults.scrambleSections
     // independent of animStyle: gates the settings pane's entrance spring and
     // every control in it, which is not a "grid" (see Anim.menu(), including
@@ -206,6 +212,10 @@ JsonAdapter {
     // trashed, wallpaper changed), battery (low battery warning)
     property var pibbleAlerts: Defaults.pibbleAlerts
 
+    // discharging battery % the low-battery alert fires at; gated by the
+    // "battery" chip in pibbleAlerts above (heal() clamps to 5-50)
+    property int batteryAlertLevel: Defaults.batteryAlertLevel
+
     property real volWidth: 420
     property string volAnim: "pop"
     // volume OSD content style: pill (a level bar) or sine (equalizer)
@@ -251,6 +261,10 @@ JsonAdapter {
         // hand-edited values down
         if (settings.wallsVisible < 3 || settings.wallsVisible > 9 || settings.wallsVisible % 2 === 0) {
             settings.wallsVisible = Math.max(3, Math.min(9, settings.wallsVisible % 2 === 0 ? settings.wallsVisible - 1 : settings.wallsVisible));
+            settings.save();
+        }
+        if (settings.batteryAlertLevel < 5 || settings.batteryAlertLevel > 50) {
+            settings.batteryAlertLevel = Math.max(5, Math.min(50, settings.batteryAlertLevel));
             settings.save();
         }
         if (settings.replayCount < 1 || settings.replayCount > 5) {

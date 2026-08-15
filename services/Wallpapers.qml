@@ -158,7 +158,7 @@ Singleton {
                     root.list = [];
                     if (root.lastMissingDir !== root.dir) {
                         root.lastMissingDir = root.dir;
-                        Notifier.error("Wallpaper folder not found", root.dir);
+                        Notifier.error("Wallpaper folder not found", root.dir + "\n\nChange it in Settings > Pages > Wallpapers path.");
                     }
                     return;
                 }
@@ -310,7 +310,7 @@ Singleton {
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
                                     warnedMagick=1
-                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick's magick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
