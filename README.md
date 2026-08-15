@@ -94,7 +94,7 @@ cd pibble
 ## Configuring
 
 ### Settings
-pibble has an extensive in-app settings page (`Ctrl+S`, or press the bottom right corner) covering appearance, animations, resource usage, layouts, navigation and flyouts.
+pibble has an extensive in-app settings page (`Ctrl+S` to open) covering appearance, animations, resource usage, layouts, navigation and flyouts.
 
 ### Namespaces
 
