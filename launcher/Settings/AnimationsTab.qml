@@ -95,6 +95,19 @@ Column {
                 key: "textScramble"
                 anchors.right: parent.right
             }
+            // How a preview is asked for a repeat, said once for the column
+            // rather than under each of six boxes - nothing about a picture
+            // that has finished moving says it can be made to move again. It
+            // hangs off this row's label line the way every other row's hint
+            // hangs off its own (see SettingRow), rather than standing in the
+            // column under two lines of chips: a line of text with the height
+            // of the chip grid over it read as a caption for the chips.
+            SettingHint {
+                anchors.left: parent.left
+                anchors.top: parent.bottom
+                anchors.topMargin: 2
+                content: "hover an element to replay its animation"
+            }
         }
         ChipRow {
             id: chipGrid
@@ -116,11 +129,6 @@ Column {
         }
     }
 
-    // How a preview is asked for a repeat, said once for the column rather
-    // than under each of six boxes. Nothing about a picture that has finished
-    // moving says it can be made to move again.
-    SettingHint { content: "hover an element to replay its animation" }
-
     // playDelay staggers the arrival replay down the column, in the same
     // 35ms-a-slot beat Anim.staggerOffset gives a "bloom" grid
 
@@ -132,32 +140,32 @@ Column {
 
     AnimSettingRow {
         key: "animStyle"
-        label: "Tiles"
+        label: "Tile animations"
         // no unit: these are the grid picker's own tiles, at its size
         TilesPreview { playDelay: 70 }
     }
 
     AnimSettingRow {
         key: "hiddenMenuAnimations"
-        label: "Settings"
+        label: "Settings animations"
         MenuPreview { playDelay: 105; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "powerAnimations"
-        label: "Power prompts"
+        label: "Power prompt animations"
         PowerPreview { playDelay: 140; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "notifAnim"
-        label: "Notifications"
+        label: "Notification animation"
         NotifPreview { playDelay: 175; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "volAnim"
-        label: "Volume"
+        label: "Volume animation"
         VolumePreview { playDelay: 210; unit: root.previewUnit }
     }
 }

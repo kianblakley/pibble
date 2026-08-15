@@ -15,18 +15,10 @@ import "root:/services"
 // off-screen layer's contents are not guaranteed to survive. The circle is
 // drawn as the revealed ground instead - and since the whole screen is what
 // arrives, that is the same picture either way.
-//
-// The stage does wear a mask, but for its rounded corners rather than for the
-// reveal (see AnimPreview.stageRadius): that one is applied to the stage from
-// outside, off a shape drawn by an item parked off-screen - not by a layer
-// nested inside the clip, which is what the paragraph above rules out.
 AnimPreview {
     id: root
 
     replayOn: Settings.launchAnimation
-    // the reveal runs out past the stage's corners, so the whole stage is
-    // masked rather than each shape rounded - see AnimPreview.stageRadius
-    stageRadius: Theme.radius(root.u(6))
 
     readonly property bool fadeMode: Settings.launchAnimation === "fade"
     readonly property bool noneMode: Settings.launchAnimation === "none"

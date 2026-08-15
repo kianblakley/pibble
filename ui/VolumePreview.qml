@@ -15,6 +15,10 @@ AnimPreview {
 
     readonly property string mode: Settings.volAnim
     replayOn: root.mode
+    readonly property real cardHeight: 16
+    // the card rests centred in the stage, which leaves half the screen's
+    // spare height empty above it - see contentTop
+    contentTop: (root.baseHeight - root.cardHeight) / 2
     Rectangle {
         id: card
         // centred in the stage rather than down on its edge as the real OSD
@@ -24,7 +28,7 @@ AnimPreview {
         x: (root.stageWidth - width) / 2
         y: card.restY
         width: root.u(84)
-        height: root.u(16)
+        height: root.u(root.cardHeight)
         radius: Theme.radius(root.u(8))
         color: Qt.alpha(Theme.muted, 0.22)
 

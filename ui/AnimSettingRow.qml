@@ -68,6 +68,10 @@ Column {
         id: previewSlot
         x: root.previewShift
         width: parent.width
-        height: childrenRect.height
+        // the preview's *bottom* edge, not its height: a preview whose picture
+        // starts partway down its stage is pulled up by that inset (see
+        // AnimPreview.contentTop), so the empty band it carries is spent
+        // closing the gap to the stepper rather than added to the column.
+        height: childrenRect.y + childrenRect.height
     }
 }

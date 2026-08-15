@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import "root:/services"
 
 // The little stage every row on the Animations tab draws its preview into,
@@ -74,37 +73,6 @@ Item {
         return Math.round(ms * root.slowdown);
     }
 
-    // The stage's own corner radius, for a preview whose picture *is* the
-    // screen rather than a card standing on one (the launch reveal, the power
-    // prompt): those fill the stage edge to edge, and square corners read as
-    // unfinished beside the rounded cards the rest of the set draws. 0 - the
-    // default - leaves the stage square and costs nothing.
-    //
-    // A clip can't do this (a clip is always the item's rect, and the launch
-    // reveal is a circle that runs out past the corners), so a stage that asks
-    // for it is rendered to a layer and masked to a rounded rect - the same
-    // mask the launcher's own reveal uses, at 100x56 instead of full screen.
-    property real stageRadius: 0
-    // Kept genuinely visible and parked off-screen rather than `visible: false`:
-    // an invisible item's layer never renders (see LauncherWindow's growMask,
-    // which this copies).
-    Item {
-        id: stageMask
-        visible: true
-        layer.enabled: root.stageRadius > 0
-        x: -100000
-        y: -100000
-        width: stage.width
-        height: stage.height
-
-        Rectangle {
-            anchors.fill: parent
-            antialiasing: true
-            radius: root.stageRadius
-            color: "white"
-        }
-    }
-
     // Whether this preview may run at all: its own visibility (the settings
     // pane is only mapped while that pane is showing), and the tab's - which
     // the filmstrip expresses by sliding inactive tabs sideways behind a clip
@@ -139,28 +107,24 @@ Item {
         onTriggered: root.started()
     }
 
+    // How much of the top of the stage the preview's resting pose leaves empty,
+    // in design px like every other length here. A stage is a screen and some
+    // of them draw a card sitting in the middle of it, so the box a preview
+    // occupies and the picture inside it start in different places - and down a
+    // column of six, aligning the boxes leaves the pictures at six different
+    // distances from the stepper they answer to. The item is pulled up by its
+    // own inset instead, so what lines up is the ink.
+    property real contentTop: 0
+
     width: root.u(root.baseWidth)
     height: root.u(root.baseHeight)
     anchors.horizontalCenter: parent.horizontalCenter
+    y: -root.u(root.contentTop)
 
     Item {
         id: stage
         anchors.fill: parent
         clip: root.screen
-        layer.enabled: root.stageRadius > 0
-        layer.effect: MultiEffect {
-            maskEnabled: true
-            maskSource: stageMask
-            // No threshold/spread: those remap the mask's alpha through a
-            // second smoothstep, and at this size (a 6px radius, against
-            // hundreds on the launcher's own reveal) that remap is the only
-            // thing the eye catches - too narrow a spread turns the corner's
-            // antialiased fringe into a stair-step, too wide one turns the
-            // whole mask into pass-everything and the corner stops being
-            // rounded at all. Left at the defaults, the mask's own alpha
-            // (0 outside the radius, 1 inside, antialiased between) is used
-            // as-is, which is exactly the curve the Rectangle already drew.
-        }
     }
 
     MouseArea {

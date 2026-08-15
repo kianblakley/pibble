@@ -16,6 +16,8 @@ AnimPreview {
     id: root
 
     replayOn: Settings.hiddenMenuAnimations
+    // the tab links are the highest ink the pane draws - see contentTop
+    contentTop: 8
 
     // Every duration below is Anim.menu()'s own - exactly as the pane runs
     // it - taken through slow() like every other preview's. The pause between

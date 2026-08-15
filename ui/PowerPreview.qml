@@ -24,13 +24,18 @@ AnimPreview {
     id: root
 
     replayOn: Settings.powerAnimations
-    // the dim and the sinking launcher behind it both fill the stage (and the
-    // latter overhangs it), so the corners are the stage's own to round
-    stageRadius: Theme.radius(root.u(6))
     // 0..1, resting armed - the pose the prompt holds while it waits for the
     // Return that confirms it
     property real progress: 1
     onProgressChanged: ringCanvas.requestPaint()
+    // The dim's own 0..1, on the pull's clock but not on its curve. Taken
+    // straight off progress it inherited that OutCubic: most of the darkening
+    // landed in the first third of the run, and the ring then closed against a
+    // screen that had already stopped changing. Linear instead, over exactly
+    // the pull's duration, so the room darkens at an even rate and settles on
+    // the frame the ring shuts.
+    property real dim: 1
+    readonly property int pullDuration: root.slow(Anim.power(320))
 
     // the ring, the gap under it and the prompt bar, moved as one so the pair
     // lands centred rather than each being centred on its own
@@ -61,7 +66,7 @@ AnimPreview {
     Rectangle {
         anchors.fill: parent
         color: "black"
-        opacity: 0.45 * root.progress
+        opacity: 0.45 * root.dim
     }
 
     Canvas {
@@ -107,13 +112,23 @@ AnimPreview {
     }
 
     onStarted: powerIn.restart()
-    NumberAnimation {
+    ParallelAnimation {
         id: powerIn
-        target: root
-        property: "progress"
-        from: 0
-        to: 1
-        duration: root.slow(Anim.power(320))
-        easing.type: Easing.OutCubic
+        NumberAnimation {
+            target: root
+            property: "progress"
+            from: 0
+            to: 1
+            duration: root.pullDuration
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: root
+            property: "dim"
+            from: 0
+            to: 1
+            duration: root.pullDuration
+            easing.type: Easing.Linear
+        }
     }
 }

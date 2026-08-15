@@ -17,6 +17,9 @@ AnimPreview {
 
     readonly property bool noAnim: Settings.notifAnim === "none"
     replayOn: Settings.notifAnim
+    // the bubble sits above the card, so it is what tops the picture - see
+    // contentTop
+    contentTop: 6
 
     // the card's per-line enter progress, on the flyout's own 650ms clock:
     // 380ms windows offset 90ms apart, quint-out
