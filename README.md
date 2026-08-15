@@ -1,5 +1,5 @@
 <h1 align=center>
-    pibble
+    <img src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/title-readme.png" alt="pibble">
 </h1>
 
 ![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png)
@@ -63,16 +63,16 @@ cd pibble
 
 ### Keybindings
 
-| Key | Gesture | Action |
+| Action | Key | Gesture |
 |---|---|---|
-| `Tab` / `Shift+Tab` | swipe left/right | Cycle pages |
-| `Arrow keys or scrollwheel` | | Navigate tiles in the current page |
-| `PageUp` / `PageDown` | swipe up/down | Jump a whole page of tiles at a time, within the current page |
-| `Enter` | press | Activate the selected tile |
-| `Ctrl+P` | swipe down from the top edge | Reveal power button |
-| `Ctrl+R` | swipe up from the bottom edge | Reveal reboot button |
-| `Ctrl+S` | press bottom right corner | Open settings |
-| `Escape` | right-edge swipe | Go back or close the launcher |
+| Cycle pages | `Tab` / `Shift+Tab` | swipe left/right |
+| Navigate tiles in the current page | `Arrow keys or scrollwheel` | press |
+| Jump a whole page of tiles within the current page | `PageUp` / `PageDown` | swipe up/down |
+| Activate the selected tile | `Enter` | press |
+| Reveal power button | `Ctrl+P` | swipe down from the top edge |
+| Reveal reboot button | `Ctrl+R` | swipe up from the bottom edge |
+| Open settings | `Ctrl+S` | press bottom right corner |
+| Go back or close the launcher | `Escape` | right-edge swipe |
 
 ### `./pibble` commands
 
@@ -102,6 +102,9 @@ Each window has a layer-shell namespace which can be used to apply background ef
 
 ### Custom pages
 
+Custom page API coming.
+
+<!--
 To add your own page to pibble, create a folder within `custom-pages/` that contains a `main.qml` file. Pibble uses the name of your folder to determine the page name in settings as well as in `./pibble toggle [page]`
 
 ```
@@ -138,13 +141,12 @@ To access a `pibble` property use `pibble.property` as defined in the table belo
 | `textInput` | `string` | the current value of pibble's hidden text input |
 | `releaseFocus()` | function | call this to give keyboard focus back to pibble if your page took it |
 | `tileIn(item, slot, cols)` | function | makes `item` play pibble's tile spawn animation set in `SETTINGS > Animations > Pages` — pass `slot`/`cols` if it's one tile among several, so they can stagger in one after another |
-| `scramble(text, slot, cols)` | function | returns `text` mid-way through the glyph scramble pibble's own labels play as a page opens (`SETTINGS > Animations > Text scramble`) — use it inside a `text:` binding, and pass `slot`/`cols` to stagger several labels like `tileIn` does |
 | `setSetting(key, value)` / `getSetting(key, fallback)` | function | save/load your page's settings |
 
 Note: Splitting your page across multiple files requires you to declare `import "." as Local`, then use `Local.Foo {}` instead of plain `Foo {}` to access them.
 
 An example custom-page has been provided at `custom-pages/calendar.example/`. To see it in action remove `.example` from the folder name or upload it via `SETTINGS > Pages > Add a page...`.
 
-
+-->
 
 
