@@ -475,7 +475,7 @@ Scope {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: width / 2
+                    radius: Theme.radius(width / 2)
                     antialiasing: true
                     gradient: Gradient {
                         GradientStop { position: 0; color: Qt.lighter(window.tintColor, 1.18) }
@@ -486,7 +486,7 @@ Scope {
                 Rectangle {
                     id: ring
                     anchors.fill: parent
-                    radius: width / 2
+                    radius: Theme.radius(width / 2)
                     antialiasing: true
                     color: "transparent"
                     border.width: 2
@@ -637,7 +637,7 @@ Scope {
                 width: rich ? Theme.fontSize(336)
                     : Math.min(Theme.fontSize(344), Math.max(Theme.fontSize(210), Math.ceil(natW)))
                 height: stripH + contentBox.height + 22
-                radius: 16
+                radius: Theme.radius(16)
                 antialiasing: true
                 color: Theme.flyoutSurface
                 visible: window.phase === "show" || window.phase === "dismiss"
@@ -710,14 +710,14 @@ Scope {
                     Rectangle {
                         width: card.width
                         height: card.stripH + 16
-                        radius: 16
+                        radius: Theme.radius(16)
                         color: Qt.alpha(window.tintColor, 0.2)
                     }
 
                     ClippingRectangle {
                         width: card.width
                         height: card.stripH + 16
-                        radius: 16
+                        radius: Theme.radius(16)
                         color: "transparent"
 
                         Image {
@@ -744,7 +744,7 @@ Scope {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 40
                         height: 40
-                        radius: 20
+                        radius: Theme.radius(20)
                         color: Qt.alpha(window.tintColor, 0.25)
                         border.width: 2
                         border.color: Qt.alpha(window.tintColor, 0.4)
@@ -774,7 +774,7 @@ Scope {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 5
                                 height: 5
-                                radius: 2.5
+                                radius: Theme.radius(2.5)
                                 antialiasing: true
                                 color: window.tintColor
                             }
@@ -1026,7 +1026,7 @@ Scope {
                                 visible: card.expanded && window.view.own && window.view.summary === "Clipboard watcher not running"
                                 width: watcherCopyText.implicitWidth + 24
                                 height: 28
-                                radius: 8
+                                radius: Theme.radius(8)
                                 color: Qt.alpha(Theme.notification.accent, watcherCopyHover.hovered ? 0.28 : 0.16)
                                 border.width: 1
                                 border.color: Qt.alpha(Theme.notification.accent, 0.5)

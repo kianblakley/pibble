@@ -34,7 +34,9 @@ QtObject {
         navLeft: "Left",
         navRight: "Right",
         navUp: "Up",
-        navDown: "Down"
+        navDown: "Down",
+        pagePrev: "PageUp",
+        pageNext: "PageDown"
     })
 
     // the retired Mono preset's palette, which the custom theme is seeded from

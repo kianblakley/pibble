@@ -91,6 +91,13 @@ JsonAdapter {
     property bool powerAnimations: true
 
     // shared across the launcher and both flyouts
+    // off squares every corner in the shell at once - every radius in the
+    // tree goes through Theme.radius(), which returns 0 while this is off.
+    // The launch reveal's growing circle is the one thing that doesn't: that
+    // radius is animation geometry rather than a corner, and the compositor
+    // blur region traced to match it is a true ellipse (see
+    // LauncherState.revealBlurDiameter).
+    property bool roundedCorners: true
     property real fontScale: 1.0
     property string fontFamily: ""
     property string iconTheme: ""

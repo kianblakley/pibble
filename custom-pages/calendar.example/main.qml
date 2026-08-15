@@ -156,7 +156,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 28
                 height: 28
-                radius: 8
+                radius: root.pibble.radius(8)
                 opacity: 0
                 color: prevArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                 border.width: 1
@@ -203,7 +203,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 28
                 height: 28
-                radius: 8
+                radius: root.pibble.radius(8)
                 opacity: 0
                 color: nextArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                 border.width: 1
@@ -294,7 +294,7 @@ Item {
 
                         width: root.cell
                         height: root.cell
-                        radius: 16
+                        radius: root.pibble.radius(16)
                         opacity: 0
                         color: isToday ? root.pibble.activeTileColor : (cellArea.containsMouse ? root.pibble.tileColor : "transparent")
                         border.width: isSelected ? 1 : 0

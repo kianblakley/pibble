@@ -54,7 +54,7 @@ Item {
                 readonly property bool active: root.current === modelData.id
                 width: 80
                 height: 80
-                radius: 12
+                radius: Theme.radius(12)
                 color: Qt.alpha(Theme.accent, active ? 0.16 : 0.06)
                 border.width: active ? 2 : 1
                 border.color: active ? Theme.accent : Qt.alpha(Theme.accent, 0.25)
@@ -71,7 +71,7 @@ Item {
                                 required property var modelData
                                 width: 18
                                 height: 18
-                                radius: 5
+                                radius: Theme.radius(5)
                                 color: modelData
                                 border.width: 1
                                 border.color: Qt.rgba(1, 1, 1, 0.15)

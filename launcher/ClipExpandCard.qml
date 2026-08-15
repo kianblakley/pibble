@@ -120,7 +120,7 @@ Item {
             visible: root.isImg
             width: parent.width
             height: root.imgFit.height
-            radius: 12
+            radius: Theme.radius(12)
             color: "transparent"
 
             Image {
@@ -239,13 +239,13 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 6
             height: parent.height
-            radius: 3
+            radius: Theme.radius(3)
             color: Qt.alpha(Theme.muted, 0.15)
 
             Rectangle {
                 id: scrollThumb
                 width: parent.width
-                radius: 3
+                radius: Theme.radius(3)
                 color: Qt.alpha(Theme.accent, scrollDrag.pressed ? 0.85 : 0.6)
                 height: Math.min(scrollTrack.height, Math.max(12, textFlick.visibleArea.heightRatio * scrollTrack.height))
                 y: {

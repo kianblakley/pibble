@@ -124,7 +124,7 @@ Item {
                 y: root.offsetY + (tile.mergingIntoBar ? 0 : tile.row * root.step)
                 width: root.tileSize
                 height: tile.isBarBody ? root.activeH : root.tileSize
-                radius: 5
+                radius: Theme.radius(5)
                 opacity: tile.inBounds ? 1 : 0
                 scale: tile.inBounds ? 1 : 0
                 color: tile.previewed ? Qt.alpha(Theme.accent, 0.35) : "transparent"

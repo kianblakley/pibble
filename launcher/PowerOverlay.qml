@@ -257,7 +257,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            radius: 28
+            radius: Theme.radius(28)
             color: Qt.alpha(Theme.accent, LauncherState.backProgress >= 1 ? 0.2 : 0.11)
             border.width: 1
             border.color: Qt.alpha(Theme.accent, 0.33)
@@ -300,7 +300,7 @@ Item {
             anchors.margins: 32
             width: 56
             height: 56
-            radius: 28
+            radius: Theme.radius(28)
             antialiasing: true
             color: Qt.alpha(Theme.accent, cornerZone.overButton ? 0.2 : 0.11)
             border.width: 1

@@ -103,6 +103,8 @@ Singleton {
             return root.styleName(Settings.animStyle);
         case "textScramble":
             return Settings.textScramble ? "on" : "off";
+        case "roundedCorners":
+            return Settings.roundedCorners ? "on" : "off";
         case "fontScale":
             return Math.round(Settings.fontScale * 100) + "%";
         case "dimOpacity":
@@ -164,6 +166,9 @@ Singleton {
             break;
         case "textScramble":
             Settings.textScramble = !Settings.textScramble;
+            break;
+        case "roundedCorners":
+            Settings.roundedCorners = !Settings.roundedCorners;
             break;
         case "fontScale":
             Settings.fontScale = Math.max(0.7, Math.min(1.6, Math.round((Settings.fontScale + dir * 0.1) * 100) / 100));
@@ -311,6 +316,9 @@ Singleton {
             // would read as the master not having come back
             Settings.textScramble = true;
             Settings.scrambleSections = Defaults.scrambleSections;
+            break;
+        case "roundedCorners":
+            Settings.roundedCorners = true;
             break;
         case "fontScale":
             Settings.fontScale = 1.0;

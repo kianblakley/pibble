@@ -92,6 +92,18 @@ Singleton {
         return Math.round(px * Settings.fontScale);
     }
 
+    // Every corner radius the shell draws goes through here, so Settings >
+    // General > "Rounded corners" can square all of them with one switch -
+    // pass the radius the corner wants when rounding is on. The only radius
+    // that deliberately bypasses this is the launch reveal's growing circle
+    // (LauncherWindow's growMask, and LaunchPreview's stand-in for it): that
+    // one is animation geometry rather than a corner, and the compositor blur
+    // region traced to match it is a true ellipse either way (see
+    // LauncherState.revealBlurDiameter).
+    function radius(px: real): real {
+        return Settings.roundedCorners ? px : 0;
+    }
+
     // "matugen" ("Dynamic"): near-black card, bubble tinted from the app icon;
     // the volume level bar still follows the wallpaper palette
     readonly property bool tintNotificationsFromIcon: Settings.theme === "matugen"

@@ -37,7 +37,7 @@ AnimPreview {
         y: bubble.y + bubble.height / 2
         width: 68
         height: 26
-        radius: 6
+        radius: Theme.radius(6)
         color: Qt.alpha(Theme.muted, 0.22)
         transform: Scale {
             origin.x: card.width / 2
@@ -58,7 +58,7 @@ AnimPreview {
                 y: 5 + index * 7 + 4 * (1 - root.lineO(index))
                 width: modelData
                 height: 3
-                radius: 1.5
+                radius: Theme.radius(1.5)
                 color: index === 0 ? Qt.alpha(Theme.accent, 0.85) : Qt.alpha(Theme.muted, 0.6)
                 opacity: root.lineO(index)
             }
@@ -72,7 +72,7 @@ AnimPreview {
         y: 6
         width: 16
         height: 16
-        radius: 8
+        radius: Theme.radius(8)
         antialiasing: true
         color: Theme.accent
     }

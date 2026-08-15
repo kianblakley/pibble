@@ -25,7 +25,7 @@ AnimPreview {
         y: card.restY
         width: 76
         height: 16
-        radius: 8
+        radius: Theme.radius(8)
         color: Qt.alpha(Theme.muted, 0.22)
 
         Rectangle {
@@ -35,7 +35,7 @@ AnimPreview {
             anchors.right: parent.right
             anchors.rightMargin: 9
             height: 4
-            radius: 2
+            radius: Theme.radius(2)
             color: Qt.alpha(Theme.accent, 0.22)
 
             Rectangle {

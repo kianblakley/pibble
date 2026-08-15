@@ -150,14 +150,14 @@ Item {
                                 visible: cell.isSelected
                                 anchors.fill: parent
                                 anchors.margins: -5
-                                radius: 23
+                                radius: Theme.radius(23)
                                 color: "transparent"
                                 border.width: 3
                                 border.color: Qt.alpha(Theme.accent, 0.33)
                             }
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 18
+                                radius: Theme.radius(18)
                                 color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
                                 border.width: 1
                                 border.color: cell.isSelected ? Theme.accent : Qt.alpha(Theme.accent, 0.33)

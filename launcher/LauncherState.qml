@@ -863,10 +863,14 @@ Singleton {
         const nextPage = ((curPage + dir) % pages + pages) % pages;
         return Math.min(count - 1, nextPage * pageSize + w);
     }
-    // swipe-up/down: page through the current pane's grid. The windows
-    // wallpaper carousel has no grid pages (it's a spatial strip, see
-    // moveCarousel) so it's excluded upstream via onCarousel, and this
-    // only ever sees it as a no-op pane.
+    // A screenful at a time through the current pane: what the pagePrev/
+    // pageNext keybinds drive, and what swipe-up/down does. The carousel has
+    // no grid pages (it's a spatial strip, see moveCarousel), so a "page"
+    // there is one strip's worth of bars - the same "everything visible has
+    // been replaced" step the grids take. The swipe path never reaches that
+    // branch: a vertical drag over the carousel is excluded upstream via
+    // onCarousel, since the strip is horizontal and paging it off a vertical
+    // swipe would read as the gesture going sideways.
     function pageMove(dir: int) {
         if (pane === "apps") {
             const next = pageJump(selected, matches.length, appPageSize, dir);
@@ -876,6 +880,8 @@ Singleton {
             const next = pageJump(wallpaperSelected, wallpaperMatches.length, wallpaperPageSize, dir);
             Anim.staggerIfPageChanged(wallpaperPageSize, wallpaperSelected, next);
             wallpaperSelected = next;
+        } else if (pane === "walls") {
+            moveCarousel(dir * Math.max(1, Settings.wallsVisible));
         } else if (pane === "clips") {
             const next = pageJump(clipSelected, clipMatches.length, clipPageSize, dir);
             Anim.staggerIfPageChanged(clipPageSize, clipSelected, next);
@@ -918,7 +924,7 @@ Singleton {
     }
 
     // ---------- keybinds ----------
-    readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down" })
+    readonly property var bindDefaults: ({ cycle: "Tab", reverseCycle: "Shift+Tab", launch: "Return", exit: "Escape", settings: "Ctrl+S", power: "Ctrl+P", reboot: "Ctrl+R", navLeft: "Left", navRight: "Right", navUp: "Up", navDown: "Down", pagePrev: "PageUp", pageNext: "PageDown" })
     // capture (Keybindings tab, click-to-record): capturingBind names the
     // action being recorded; captureHeldKeys tracks which physical keys
     // are still down so the bind only commits once every key of the

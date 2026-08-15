@@ -293,7 +293,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: -5
-                    radius: 17
+                    radius: Theme.radius(17)
                     color: "transparent"
                     border.width: 3
                     border.color: Qt.alpha(Theme.accent, 0.33)
@@ -302,7 +302,7 @@ Item {
                 ClippingRectangle {
                     id: thumb
                     anchors.fill: parent
-                    radius: 12
+                    radius: Theme.radius(12)
                     color: Qt.alpha(Theme.accent, 0.08 + 0.08 * cell.selFade)
 
                     Image {
@@ -436,7 +436,7 @@ Item {
                 // around).
                 Rectangle {
                     anchors.fill: parent
-                    radius: 12
+                    radius: Theme.radius(12)
                     color: "transparent"
                     border.width: 1
                     // same muted-to-full-accent brighten tiles
@@ -626,7 +626,7 @@ Item {
         }
         ClippingRectangle {
             anchors.fill: parent
-            radius: 12
+            radius: Theme.radius(12)
             color: "transparent"
             WallpaperVideoPool {
                 anchors.fill: parent
@@ -668,7 +668,7 @@ Item {
         // for the same reason the cell's is (see wrap above).
         Rectangle {
             anchors.fill: parent
-            radius: 12
+            radius: Theme.radius(12)
             color: "transparent"
             border.width: 1
             border.color: Theme.accent

@@ -29,7 +29,7 @@ Row {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 18
                 height: 18
-                radius: 4
+                radius: Theme.radius(4)
                 color: chip.on ? Qt.alpha(Theme.accent, 0.85) : "transparent"
                 border.width: 1
                 border.color: chip.on ? Theme.accent : Qt.alpha(Theme.muted, 0.6)

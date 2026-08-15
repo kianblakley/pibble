@@ -43,7 +43,7 @@ AnimPreview {
                 y: 8
                 width: 16
                 height: 3
-                radius: 1.5
+                radius: Theme.radius(1.5)
                 color: Qt.alpha(Theme.muted, 0.6)
             }
         }
@@ -52,7 +52,7 @@ AnimPreview {
             y: 14
             width: 16
             height: 2
-            radius: 1
+            radius: Theme.radius(1)
             color: Theme.accent
         }
 
@@ -78,14 +78,14 @@ AnimPreview {
                     Rectangle {
                         width: 30
                         height: parent.height
-                        radius: 1.5
+                        radius: Theme.radius(1.5)
                         color: Qt.alpha(Theme.muted, 0.6)
                     }
                     Rectangle {
                         anchors.right: parent.right
                         width: 18
                         height: parent.height
-                        radius: 1.5
+                        radius: Theme.radius(1.5)
                         color: Qt.alpha(Theme.accent, 0.55)
                     }
                 }

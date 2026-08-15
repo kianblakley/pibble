@@ -37,6 +37,8 @@ Column {
             { action: "navRight", label: "Navigate right" },
             { action: "navUp", label: "Navigate up" },
             { action: "navDown", label: "Navigate down" },
+            { action: "pagePrev", label: "Previous page of tiles" },
+            { action: "pageNext", label: "Next page of tiles" },
             { action: "launch", label: "Activate" },
             { action: "settings", label: "Settings" },
             { action: "power", label: "Power off prompt" },
@@ -74,7 +76,7 @@ Column {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Metrics.keybindBoxWidth
                 height: 34
-                radius: 8
+                radius: Theme.radius(8)
                 color: Qt.alpha(Theme.accent, capturing ? 0.3 : 0.11)
                 border.width: 1
                 border.color: capturing ? Theme.accent : Qt.alpha(Theme.accent, 0.33)

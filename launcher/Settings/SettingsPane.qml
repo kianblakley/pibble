@@ -310,7 +310,7 @@ Item {
                                 anchors.bottom: parent.bottom
                                 width: parent.width
                                 height: 2
-                                radius: 1
+                                radius: Theme.radius(1)
                                 color: Theme.accent
                                 opacity: tabLink.active ? 1 : 0
                                 Behavior on opacity {

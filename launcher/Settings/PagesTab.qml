@@ -114,7 +114,7 @@ Column {
                         anchors.topMargin: 4
                         width: parent.width
                         height: 2
-                        radius: 1
+                        radius: Theme.radius(1)
                         color: Theme.accent
                         opacity: gridTargetChip.active ? 1 : 0
                         Behavior on opacity {
@@ -186,7 +186,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             width: 444
             height: 34
-            radius: 8
+            radius: Theme.radius(8)
             color: Qt.alpha(Theme.accent, pathInput.activeFocus ? 0.16 : 0.08)
             border.width: 1
             border.color: pathInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
@@ -257,7 +257,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             width: 444
             height: 34
-            radius: 8
+            radius: Theme.radius(8)
             color: Qt.alpha(Theme.accent, cmdInput.activeFocus ? 0.16 : 0.08)
             border.width: 1
             border.color: cmdInput.activeFocus ? Theme.accent : Qt.alpha(Theme.accent, 0.33)

@@ -288,7 +288,7 @@ Item {
                                 id: tile
                                 width: parent.width
                                 height: cell.tileH
-                                radius: 12
+                                radius: Theme.radius(12)
                                 opacity: 0
                                 color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
                                 border.width: 1
@@ -298,7 +298,7 @@ Item {
                                     visible: cell.isSelected
                                     anchors.fill: parent
                                     anchors.margins: -5
-                                    radius: 17
+                                    radius: Theme.radius(17)
                                     color: "transparent"
                                     border.width: 3
                                     border.color: Qt.alpha(Theme.accent, 0.33)
@@ -308,7 +308,7 @@ Item {
                                     visible: cell.shownClip !== null && cell.shownClip.image === true
                                     anchors.fill: parent
                                     anchors.margins: 4
-                                    radius: 9
+                                    radius: Theme.radius(9)
                                     color: "transparent"
 
                                     Image {

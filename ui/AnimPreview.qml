@@ -105,7 +105,7 @@ Item {
     Rectangle {
         visible: root.screen
         anchors.fill: parent
-        radius: 5
+        radius: Theme.radius(5)
         color: "transparent"
         border.width: 1
         border.color: root.outline

@@ -74,7 +74,7 @@ Item {
             y: 0
             width: root.dotSize
             height: root.dotSize
-            radius: root.dotSize / 2
+            radius: Theme.radius(root.dotSize / 2)
             color: Qt.alpha(Theme.accent, 0.28)
 
             // starts invisible/collapsed regardless of isGhost's initial
@@ -106,7 +106,7 @@ Item {
         id: blob
         y: 0
         height: root.dotSize
-        radius: height / 2
+        radius: Theme.radius(height / 2)
         color: Theme.accent
         x: root.currentPage * root.pitch
         width: root.dotSize

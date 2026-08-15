@@ -66,7 +66,8 @@ cd pibble
 | Key | Gesture | Action |
 |---|---|---|
 | `Tab` / `Shift+Tab` | swipe left/right | Cycle pages |
-| `Arrow keys or scrollwheel` | swipe up/down | Navigate tiles in the current page |
+| `Arrow keys or scrollwheel` | | Navigate tiles in the current page |
+| `PageUp` / `PageDown` | swipe up/down | Jump a whole page of tiles at a time, within the current page |
 | `Enter` | press | Activate the selected tile |
 | `Ctrl+P` | swipe down from the top edge | Reveal power button |
 | `Ctrl+R` | swipe up from the bottom edge | Reveal reboot button |
@@ -131,6 +132,7 @@ To access a `pibble` property use `pibble.property` as defined in the table belo
 | `font` | `string` | curent value of `SETTINGS > General > Font` |
 | `fontScale` | `real` | current value of `SETTINGS > General > Font size`. It's a multiplier, e.g. `1.2` — turn a size into a real pixel value with `Math.round(px * fontScale)` |
 | `iconFont` | `string` | the name of pibble's icon font, you are required to find your own unicode |
+| `radius(px)` | function | returns `px` while `SETTINGS > General > Rounded corners` is on and `0` while it's off — bind your corners through it (`radius: pibble.radius(8)`) so your page squares itself alongside the rest of the shell |
 | `pageActive` | `bool` | `true` while your page is the one currently showing |
 | `launcherOpen` | `bool` | `true` while the launcher is open at all |
 | `textInput` | `string` | the current value of pibble's hidden text input |

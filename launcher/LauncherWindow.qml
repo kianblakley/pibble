@@ -1341,6 +1341,12 @@ PanelWindow {
             } else if (ks === (kb.navUp ?? "Up")) {
                 LauncherState.navigate(0, -1);
                 event.accepted = true;
+            } else if (ks === (kb.pageNext ?? "PageDown")) {
+                LauncherState.pageMove(1);
+                event.accepted = true;
+            } else if (ks === (kb.pagePrev ?? "PageUp")) {
+                LauncherState.pageMove(-1);
+                event.accepted = true;
             }
         }
 

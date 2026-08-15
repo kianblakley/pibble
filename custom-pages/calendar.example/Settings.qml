@@ -73,7 +73,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 28
                         height: 28
-                        radius: 8
+                        radius: root.pibble.radius(8)
                         color: prevArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                         border.width: 1
                         border.color: root.pibble.borderColor
@@ -105,7 +105,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 28
                         height: 28
-                        radius: 8
+                        radius: root.pibble.radius(8)
                         color: nextArea.containsMouse ? root.pibble.activeTileColor : root.pibble.tileColor
                         border.width: 1
                         border.color: root.pibble.borderColor

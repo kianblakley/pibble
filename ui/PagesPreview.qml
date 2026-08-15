@@ -38,7 +38,7 @@ AnimPreview {
                 id: wrap
                 width: parent.width
                 height: parent.height
-                radius: 5
+                radius: Theme.radius(5)
                 color: Qt.alpha(Theme.accent, 0.35)
                 border.width: 1
                 border.color: Theme.accent

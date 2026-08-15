@@ -54,11 +54,21 @@ QtObject {
     // Use it for anything you want to grow/shrink with that setting, not
     // just text - padding, tile size, whatever.
     readonly property real fontScale: Settings.fontScale
+    // Corner rounding, filtered through Settings > General > "Rounded
+    // corners": hands back the radius you pass while that's on, and 0 while
+    // it's off. Bind your corners through it - `radius: pibble.radius(8)` -
+    // and your page squares itself alongside the rest of the shell instead of
+    // being the one thing left rounded.
+    function radius(px) {
+        return Theme.radius(px ?? 0);
+    }
     // Three shades of the accent color, pre-mixed to the same numbers the
     // built-in tile grids (Apps/Walls/Clips) use, so your own tiles match:
     // tileColor = idle background, activeTileColor = a stronger version for
     // hover/selected/highlighted, borderColor = the outline color. Pick
-    // whatever corner-radius suits your tile - the built-ins vary theirs too.
+    // whatever corner-radius suits your tile - the built-ins vary theirs too -
+    // and put it through radius() below so it honors the rounded-corners
+    // setting.
     readonly property color tileColor: Qt.alpha(Theme.accent, 0.11)
     readonly property color activeTileColor: Qt.alpha(Theme.accent, 0.22)
     readonly property color borderColor: Qt.alpha(Theme.accent, 0.33)

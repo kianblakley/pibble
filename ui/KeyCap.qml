@@ -32,13 +32,13 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.topMargin: 3
-        radius: 6
+        radius: Theme.radius(6)
         color: Qt.alpha(Theme.fg, 0.16)
     }
     Rectangle {
         width: parent.width
         height: parent.height - 3
-        radius: 6
+        radius: Theme.radius(6)
         color: Qt.alpha(Theme.accent, 0.14)
         border.width: 1
         border.color: Qt.alpha(Theme.accent, 0.4)

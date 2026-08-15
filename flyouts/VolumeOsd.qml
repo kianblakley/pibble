@@ -145,7 +145,7 @@ Scope {
             width: Settings.volWidth
             // equalizer variants need a taller card than the pill
             height: window.eq ? 108 : 56
-            radius: window.eq ? 18 : 28
+            radius: Theme.radius(window.eq ? 18 : 28)
             // rests 90px above the screen bottom; the slide exit drops it
             // past the window (= screen) bottom edge. Bounce is built in:
             // the exit overshoot lands off-screen, so only the entry
@@ -227,13 +227,13 @@ Scope {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: 4
+                    radius: Theme.radius(4)
                     color: Qt.alpha(Theme.active.accent, 0.15)
                 }
                 Rectangle {
                     width: parent.width * Math.min(1, root.volume)
                     height: parent.height
-                    radius: 4
+                    radius: Theme.radius(4)
                     color: root.muted ? Qt.alpha(Theme.active.muted, 0.8) : Theme.active.accent
                     Behavior on width {
                         NumberAnimation { duration: 70; easing.type: Easing.OutCubic }
@@ -283,7 +283,7 @@ Scope {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.bottom: parent.verticalCenter
                             width: eqRow.barW
-                            radius: 3
+                            radius: Theme.radius(3)
                             height: eqBar.half
                             color: eqBar.barColor
                             Behavior on color {
@@ -294,7 +294,7 @@ Scope {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: parent.verticalCenter
                             width: eqRow.barW
-                            radius: 3
+                            radius: Theme.radius(3)
                             height: eqBar.half
                             color: eqBar.barColor
                             opacity: 0.55

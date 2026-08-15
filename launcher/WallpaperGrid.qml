@@ -153,7 +153,7 @@ Item {
                         visible: cell.isSelected
                         anchors.fill: thumb
                         anchors.margins: -5
-                        radius: 19
+                        radius: Theme.radius(19)
                         color: "transparent"
                         border.width: 3
                         border.color: Qt.alpha(Theme.accent, 0.33)
@@ -162,7 +162,7 @@ Item {
                         id: thumb
                         width: 240
                         height: 135
-                        radius: 14
+                        radius: Theme.radius(14)
                         color: Qt.alpha(Theme.accent, cell.isSelected ? 0.22 : 0.11)
 
                         // Only the selected tile plays its .gif (from
@@ -240,7 +240,7 @@ Item {
                     // the carousel cell's thumbnail stroke below.
                     Rectangle {
                         anchors.fill: thumb
-                        radius: 14
+                        radius: Theme.radius(14)
                         color: "transparent"
                         border.width: 1
                         border.color: cell.isSelected ? Theme.accent : Qt.alpha(Theme.accent, 0.33)
@@ -359,7 +359,7 @@ Item {
 
         ClippingRectangle {
             anchors.fill: parent
-            radius: 14
+            radius: Theme.radius(14)
             color: "transparent"
             WallpaperVideoPool {
                 anchors.fill: parent
@@ -383,7 +383,7 @@ Item {
         // above).
         Rectangle {
             anchors.fill: parent
-            radius: 14
+            radius: Theme.radius(14)
             color: "transparent"
             border.width: 1
             border.color: Theme.accent
