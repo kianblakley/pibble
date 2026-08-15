@@ -8,9 +8,15 @@ import "root:/services"
 // springIn (see it) with the same from-state, duration, easing and stagger
 // offset, slowed so a "bloom" cascade reads as a cascade.
 //
-// Three across and two down rather than a square: "slide" moves a whole row at
+// Four across and three down rather than a square: "slide" moves a whole row at
 // a time and "cascade" runs along one, and neither reads as itself on a grid
 // with as many rows as it has columns.
+//
+// The one preview that doesn't take the tab's size unit: these are the grid
+// picker's tiles, at the picker's own size and spacing, and a pane's tiles
+// drawn larger than the picker's would read as a different control rather than
+// the same one. It is a fixed block in the tab's height budget instead - see
+// AnimationsTab.previewUnit.
 //
 // Anim.staggerOffset, not Anim.stagger: the offsets themselves, with no
 // staggering window over them - nothing here is a page turn, so that window is
@@ -21,9 +27,10 @@ AnimPreview {
     replayOn: Settings.animStyle
     screen: false
 
-    readonly property int cols: 3
-    readonly property int rows: 2
-    readonly property int tileSize: 24
+    readonly property int cols: 4
+    readonly property int rows: 3
+    // GridSizePicker's own figures - see its tileSize/tileGap
+    readonly property int tileSize: 26
     readonly property int gap: 6
     baseWidth: root.cols * root.tileSize + (root.cols - 1) * root.gap
     baseHeight: root.rows * root.tileSize + (root.rows - 1) * root.gap
@@ -34,18 +41,19 @@ AnimPreview {
         Item {
             id: cell
             required property int index
-            x: root.u((index % root.cols) * (root.tileSize + root.gap))
-            y: root.u(Math.floor(index / root.cols) * (root.tileSize + root.gap))
-            width: root.u(root.tileSize)
-            height: root.u(root.tileSize)
+            x: (index % root.cols) * (root.tileSize + root.gap)
+            y: Math.floor(index / root.cols) * (root.tileSize + root.gap)
+            width: root.tileSize
+            height: root.tileSize
 
             Rectangle {
                 id: wrap
                 width: parent.width
                 height: parent.height
-                radius: Theme.radius(root.u(5))
+                radius: Theme.radius(5)
                 color: Qt.alpha(Theme.accent, 0.35)
-                border.width: 1
+                // a committed picker tile's own border, not a hovered one's
+                border.width: 2
                 border.color: Theme.accent
             }
 

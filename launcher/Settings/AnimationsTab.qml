@@ -42,15 +42,16 @@ Column {
     spacing: 14
 
     // How much bigger than their design size the previews are drawn. Everything
-    // else on this tab is fixed - six header lines, the scramble's chip row and
+    // else on this tab is fixed - six header lines, the tile grid (which is
+    // drawn at the picker's size, not this one), the scramble's chip row and
     // the gaps between them - so whatever General's column has over that is the
     // previews', divided between them in proportion to the sizes they were
     // drawn at. Solved rather than picked by hand: the rows grow with the
     // user's type scale, and a figure tuned against one scale would leave the
     // tab short at another. Never below 1, so a font scale that leaves no slack
     // shrinks nothing.
-    readonly property real fixedHeight: 6 * launchRow.fixedHeight + scrambleRow.height + root.spacing * 7
-    readonly property real previewBase: launchPreview.baseHeight + tilesPreview.baseHeight + volumePreview.baseHeight + notifPreview.baseHeight + menuPreview.baseHeight + powerPreview.baseHeight + scramblePreview.baseHeight
+    readonly property real fixedHeight: 6 * launchRow.fixedHeight + tilesPreview.height + scrambleRow.height + root.spacing * 7
+    readonly property real previewBase: launchPreview.baseHeight + volumePreview.baseHeight + notifPreview.baseHeight + menuPreview.baseHeight + powerPreview.baseHeight + scramblePreview.baseHeight
     readonly property real previewUnit: Math.max(1, (root.targetHeight - root.fixedHeight) / root.previewBase)
 
     // playDelay staggers the arrival replay down the column, in the same
@@ -66,7 +67,8 @@ Column {
     AnimSettingRow {
         key: "animStyle"
         label: "Tiles"
-        TilesPreview { id: tilesPreview; playDelay: 35; unit: root.previewUnit }
+        // no unit: these are the grid picker's own tiles, at its size
+        TilesPreview { id: tilesPreview; playDelay: 35 }
     }
 
     AnimSettingRow {

@@ -3,9 +3,9 @@ import "root:/services"
 
 // The little stage every row on the Animations tab draws its preview into,
 // centred under the row it belongs to exactly as the tile picker's canvas sits
-// under its own (see GridSizePicker). Nothing frames it: the box the user sees
-// is whatever the preview itself draws, which for most of them is one 16:9
-// screen wearing the picker's own tile styling.
+// under its own (see GridSizePicker). Nothing frames it - a box drawn around a
+// picture of a box read as part of the picture - so what the user sees is
+// whatever the preview itself draws into a 16:9 stage.
 //
 // A preview *rests* on the pose its animation settles at and replays on demand:
 // when the value it demonstrates changes (`replayOn`), when the pointer crosses
@@ -29,10 +29,9 @@ Item {
     property int playDelay: 0
     signal started
 
-    // Whether this preview is a screen: a clipped stage inside one of the tile
-    // picker's tiles. True for everything that animates something onto a
-    // display; false for the two that *are* the thing (the tile grid, and the
-    // scramble's own word).
+    // Whether this preview is a screen, i.e. whether its stage clips. True for
+    // everything that animates something onto a display; false for the one that
+    // *is* the thing it stands for (the tile grid).
     property bool screen: true
 
     // The picture's design size, and how much larger than that it is actually
@@ -57,7 +56,6 @@ Item {
     function uf(px: int): int {
         return Theme.fontSize(Math.round(px * root.unit));
     }
-    property color outline: Qt.alpha(Theme.muted, 0.3)
 
     default property alias contents: stage.data
     readonly property real stageWidth: stage.width
@@ -69,8 +67,9 @@ Item {
     // notification pop is over before the eye that went looking for it has
     // arrived. Applied to every duration a preview takes from the real code,
     // never to the real code itself - and 0 stays 0, so an "off" style still
-    // lands instantly.
-    readonly property real slowdown: 2.2
+    // lands instantly. A preview whose motion is one short move (rather than a
+    // sequence to follow) sets its own, higher figure.
+    property real slowdown: 2.2
     function slow(ms: int): int {
         return Math.round(ms * root.slowdown);
     }
@@ -116,22 +115,7 @@ Item {
     Item {
         id: stage
         anchors.fill: parent
-        // inset by the outline's own width, so a fill that reaches the edge
-        // sits inside the tile rather than under it
-        anchors.margins: root.screen ? 1 : 0
         clip: root.screen
-    }
-    // Drawn after the stage, so the tile's edge stays crisp over whatever ran
-    // up against it - and so the corner rounding reads, which a rectangular
-    // clip alone can't give the fill behind it. Same radius the picker's tiles
-    // use, where the mismatch is a pixel at each corner.
-    Rectangle {
-        visible: root.screen
-        anchors.fill: parent
-        radius: Theme.radius(root.u(5))
-        color: "transparent"
-        border.width: 1
-        border.color: root.outline
     }
 
     MouseArea {

@@ -2,9 +2,13 @@ import QtQuick
 import "root:/config"
 import "root:/services"
 
-// The text scramble itself, on one word - the one preview that isn't a picture
-// of a surface, because the effect *is* text and there is nothing else to draw
-// it as. Nothing here reimplements it either: this is an ordinary ScrambleText
+// The text scramble itself, on one word in a box - the one preview that isn't a
+// picture of a surface, because the effect *is* text and there is nothing else
+// to draw it as. The box is the card the volume and notification previews stand
+// up, in the same fill, so the sample reads as belonging to the same set as the
+// pictures above it.
+//
+// Nothing here reimplements the effect: this is an ordinary ScrambleText
 // replayed on cue, so it resolves at exactly the span, hold and alphabet every
 // label in the shell resolves at (which is also why this is the one preview
 // slowdown can't reach - Anim.scrambleSpan is one shared figure that nothing is
@@ -19,24 +23,33 @@ AnimPreview {
     id: root
 
     replayOn: Settings.scrambleSections
-    screen: false
-    // a fixed box the word is centred in, rather than one sized to the word:
-    // the tab solves its preview sizes off these design figures, and a box that
-    // measured its own text would resize as the effect ran
-    baseWidth: 120
-    baseHeight: 26
 
-    onStarted: sample.replay()
+    onStarted: sampleText.replay()
 
+    // The ground the sample sits on: sized from the label's *resting* box, not
+    // its live one. Bound to the live width it breathed in and out a dozen
+    // times a second for the length of a run - the noise routinely pulls in a
+    // fallback glyph wider than the one it stands in for, and a centred box
+    // takes half of every such change out of its left edge.
+    Rectangle {
+        anchors.centerIn: sampleText
+        width: sampleText.restWidth + root.u(24)
+        height: sampleText.restHeight + root.u(6)
+        radius: Theme.radius(root.u(6))
+        // the volume and notification previews' card, exactly
+        color: Qt.alpha(Theme.muted, 0.22)
+    }
     ScrambleText {
-        id: sample
+        id: sampleText
         anchors.centerIn: parent
-        // pinned to the resting box: a label whose noise pulls in a fallback
-        // glyph would otherwise walk out of centre on every reroll
+        horizontalAlignment: Text.AlignHCenter
+        // pinned to that same resting box, for the same reason the ground is
+        // sized off it: a label free to grow with its noise walks around inside
+        // the box it is centred in
         width: restWidth
         height: restHeight
-        content: "Preview"
+        content: "scramble"
         color: Theme.fg
-        font { family: Theme.fontFamily; pixelSize: root.uf(15) }
+        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(17) }
     }
 }

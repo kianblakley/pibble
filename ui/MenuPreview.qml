@@ -18,8 +18,11 @@ AnimPreview {
     replayOn: Settings.hiddenMenuAnimations
 
     property real drop: 0
-    // 0 on the first tab, 1 on the second - the filmstrip's whole position
-    property real tabPos: 1
+    // which tab is showing, 0-based - the filmstrip's whole position. It walks
+    // all the way along rather than stopping at the second: one move could be
+    // the pane sliding anything sideways, two in a row is a filmstrip.
+    property real tabPos: root.tabs - 1
+    readonly property int tabs: 3
 
     Item {
         id: pane
@@ -33,7 +36,7 @@ AnimPreview {
         // tab links across the top, with the underline riding to whichever is
         // showing, exactly as the pane's header does
         Repeater {
-            model: 3
+            model: root.tabs
 
             Rectangle {
                 required property int index
@@ -60,11 +63,11 @@ AnimPreview {
             id: film
             x: -root.tabPos * root.stageWidth
             y: root.u(22)
-            width: root.stageWidth * 2
+            width: root.stageWidth * root.tabs
             height: root.u(26)
 
             Repeater {
-                model: 6
+                model: root.tabs * 3
 
                 Item {
                     required property int index
@@ -108,6 +111,17 @@ AnimPreview {
             target: root
             property: "tabPos"
             to: 1
+            duration: root.slow(Anim.menu(420))
+            easing.type: Easing.OutCubic
+        }
+        // and on to the third, after the beat a user takes to read the tab
+        // they just landed on - back to back the two slides read as one long
+        // one rather than as two tab changes
+        PauseAnimation { duration: Anim.menu(300) }
+        NumberAnimation {
+            target: root
+            property: "tabPos"
+            to: root.tabs - 1
             duration: root.slow(Anim.menu(420))
             easing.type: Easing.OutCubic
         }

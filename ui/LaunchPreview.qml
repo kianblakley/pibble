@@ -19,9 +19,6 @@ AnimPreview {
     id: root
 
     replayOn: Settings.launchAnimation
-    // a filled picker tile: this row's value is what the screen *is*, so it
-    // wears the accent the picker gives a committed one
-    outline: Theme.accent
 
     readonly property bool fadeMode: Settings.launchAnimation === "fade"
     readonly property bool noneMode: Settings.launchAnimation === "none"

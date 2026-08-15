@@ -357,7 +357,7 @@ Singleton {
     }
     // settings remembers where it was opened from
     property string paneBeforeSettings: "clock"
-    property string settingsTab: "animations"
+    property string settingsTab: "general"
     // which page's grid the tile picker on the Grids tab is editing
     property string gridTarget: "apps"
     function toggleSettings() {

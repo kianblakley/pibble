@@ -15,10 +15,16 @@ AnimPreview {
 
     readonly property string mode: Settings.volAnim
     replayOn: root.mode
-
+    // one short move, over in a fraction of what the sequenced previews take -
+    // at the shared figure the whole thing is finished before the eye that went
+    // looking for it has arrived
+    slowdown: 3.6
     Rectangle {
         id: card
-        readonly property real restY: root.stageHeight - height - root.u(7)
+        // centred in the stage rather than down on its edge as the real OSD
+        // is: the tile is a stand-in for a screen, not a screen, and a card
+        // sitting on its bottom edge read as a card falling out of the tile
+        readonly property real restY: (root.stageHeight - height) / 2
         x: (root.stageWidth - width) / 2
         y: card.restY
         width: root.u(76)
