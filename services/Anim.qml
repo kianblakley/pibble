@@ -141,38 +141,124 @@ Singleton {
     // underneath it. Weighted towards the geometric shapes, since those are
     // what carry the effect at a glance.
     //
-    // Three things every candidate has to clear, all of which otherwise show
-    // up as the label growing and shrinking as the noise rerolls - which is
-    // what the effect looks like when it goes wrong, and unmissable on a line
-    // of small text:
+    // Nothing here is picked or dropped for how big it looks, because size is
+    // not what moves a label: Qt lays a line out on the font's metrics, and
+    // ink is free to overflow the em box in every direction without shifting
+    // anything around it. A full block is no more disruptive than a full stop
+    // so long as both are drawn from the same face.
     //
-    //  - it has to sit inside the band ordinary text occupies. Measured
-    //    against the em, every glyph here runs from 0% to about 74%, the same
-    //    band a digit or a capital fills. That rules out the shading and part
-    //    blocks (░▒▓█▌▐▄▀, -30% to 102%), which make a label visibly taller
-    //    than the letters they stand in for, and it rules out descenders
-    //    (¶§@µ$¢/\|†‡, down to -18%), which put ink below a baseline that a
-    //    line of caps - the clock's date - otherwise keeps clean.
-    //  - it should be in the shell font rather than reached by substitution.
-    //    A substituted glyph doesn't just bring its own width - it brings its
-    //    own ascent into the line, which shifts the *whole* string's baseline
-    //    for as long as it is on screen. The quadrant and shaded squares
-    //    (▣▤▥▦▧▨▩), half circles (◐◑) and corner triangles (◢◣◤◥) are missing
-    //    from common monospace faces (JetBrains Mono among them) and are out
-    //    for that reason; the plain squares, diamonds and circles are in every
-    //    one of them.
-    //  - no <, > or &: a couple of labels render as StyledText (the clipboard
-    //    previews), where those would be read as markup rather than drawn.
+    // What does move a label is a glyph the shell font doesn't have. Reaching
+    // one by substitution pulls a second face into the line, and that face
+    // brings its own metrics with it: the string gets wider (the shaded
+    // squares and corner triangles come back two cells wide out of the faces
+    // JetBrains Mono falls back to) and the line's baseline moves to clear
+    // whichever of the two ascents is taller, which drags the *whole* string
+    // down - characters that have already landed included. That is the
+    // repositioning, and it is a question about the user's font rather than
+    // about the glyph, since Theme.fontFamily is a setting.
+    //
+    // So this is the pool of everything worth showing, and the alphabet is
+    // whatever survives being measured against the shell font
+    // (rebuildScrambleAlphabet below). Under a face that has the shaded
+    // squares they take part; under one that doesn't they are dropped, rather
+    // than shifting every label unlucky enough to draw one.
+    //
+    // The one rule measuring can't discover: no <, > or &, since a couple of
+    // labels render as StyledText (the clipboard previews), where those would
+    // be read as markup rather than drawn.
     //
     // Every glyph is BMP, so charAt() below indexes whole characters.
-    readonly property string scrambleAlphabet: "■□▪▫◆◇◈●○◉▲▼◀▶¤£°±×÷¬•~=+*#%?!^"
-    readonly property string scrambleDigits: "0123456789"
-    // Narrow characters get narrow stand-ins, so a string keeps its silhouette
-    // while it resolves: a colon replaced by a full square is four times its
-    // width, which on the clock shoves the rest of the time out of a label
-    // sized for "19:25". Same in-band rule as the set above - no descenders,
-    // which is why ; , and _ aren't here.
-    readonly property string scrambleThin: ":.-~^'"
+    readonly property string scrambleCandidates: "■□▪▫◆◇◈●○◉▲▼◀▶¤£°±×÷¬•~=+*#%?!^"
+        + "░▒▓█▌▐▄▀"           // full-em blocks
+        + "▣▤▥▦▧▨▩◧◨◩◪"        // shaded and part-filled squares
+        + "◐◑◒◓◢◣◤◥"           // half circles, corner triangles
+        + "¶§@µ$¢/\\|†‡◊"       // descenders
+        + "⬛⬜⬥⬦⧫⏹⏺"           // outsized shapes
+    // Plain ASCII, so no face is without it. The floor the probe can never
+    // take the alphabet below: a font with none of the shapes still scrambles,
+    // and so does a label drawn in the frames before there is a resolved font
+    // family to measure anything against.
+    readonly property string scrambleCore: "~=+*#%?!^"
+    // Filled in by rebuildScrambleAlphabet() - not a binding, since building
+    // it means writing to the probes below and reading them back, which is
+    // exactly the kind of round trip a binding can't express.
+    property string scrambleAlphabet: root.scrambleCore
+
+    // Which of the candidates the shell font can actually draw without moving
+    // the line, rebuilt whenever that font changes - the answer belongs to the
+    // font, and the font is a setting the user can turn (and one that arrives
+    // late, since the settings file loads async, so the first run of this is
+    // against whatever Qt defaulted to and the real one follows).
+    Component.onCompleted: root.rebuildScrambleAlphabet()
+    Connections {
+        target: Theme
+        function onFontFamilyChanged(): void {
+            root.rebuildScrambleAlphabet();
+        }
+    }
+    function rebuildScrambleAlphabet(): void {
+        // The font's own ascent, which is what a line of it puts its baseline
+        // at. Every candidate has to leave it exactly where it is.
+        const baseline = root.scrambleBaseline("M");
+        // The widest an ordinary character gets here - the cell, in the
+        // monospace face this is usually pointed at. A stand-in wider than
+        // half again as much is a glyph that came back occupying *two* of
+        // them, which is what the shaded squares and corner triangles do out
+        // of a fallback and what visibly stretches the string; anything under
+        // that is ordinary variation, which ScrambleText.restWidth already
+        // ratchets over once rather than breathing on every reroll.
+        let cell = 0;
+        for (const ref of "MW@%0")
+            cell = Math.max(cell, root.scrambleAdvance(ref));
+        cell *= 1.5;
+
+        let alphabet = root.scrambleCore;
+        for (const ch of root.scrambleCandidates) {
+            if (alphabet.indexOf(ch) >= 0)
+                continue;
+            if (root.scrambleAdvance(ch) > cell + 0.5)
+                continue;
+            // Measured in both kinds of company, because the two ways a
+            // substituted ascent can differ show up in different ones: mixed
+            // into shell-font text only a *taller* fallback wins the line, but
+            // the opening frames of a run are all noise, with no shell-font
+            // run left to set the line's metrics, and there a shorter one
+            // lifts the baseline just as visibly.
+            if (Math.abs(root.scrambleBaseline("M" + ch + "M") - baseline) > 0.5)
+                continue;
+            if (Math.abs(root.scrambleBaseline(ch + ch + ch + ch) - baseline) > 0.5)
+                continue;
+            alphabet += ch;
+        }
+        root.scrambleAlphabet = alphabet;
+    }
+    // Advance off TextMetrics and baseline off a Text, each because the other
+    // can't say it: a Text's implicitWidth includes ink overhang, so a glyph
+    // painting past its cell (which the full blocks do, by design) reads a
+    // pixel wider than the cell it actually occupies - and overhang is the
+    // whole thing this is trying not to punish. TextMetrics has no baseline at
+    // all, and its boundingRect carries the same overhang.
+    function scrambleAdvance(text: string): real {
+        widthProbe.text = text;
+        return widthProbe.advanceWidth;
+    }
+    function scrambleBaseline(text: string): real {
+        baselineProbe.text = text;
+        return baselineProbe.baselineOffset;
+    }
+    // Measured far larger than anything the shell draws at, so a difference of
+    // a fraction of a percent is still whole pixels here rather than something
+    // rounding hides. Which face a glyph is reached through doesn't depend on
+    // the size it was asked for, so one probe size answers for every label.
+    TextMetrics {
+        id: widthProbe
+        font.family: Theme.fontFamily
+        font.pixelSize: 96
+    }
+    Text {
+        id: baselineProbe
+        font: widthProbe.font
+    }
 
     function beginScramble(): void {
         if (!root.scrambleOn)
@@ -344,10 +430,16 @@ Singleton {
                 out += ch;
                 continue;
             }
-            // digits stand in for digits, so the clock reads as a clock
-            // flipping through times rather than as symbols
-            const alphabet = ch >= "0" && ch <= "9" ? root.scrambleDigits
-                : root.scrambleThin.indexOf(ch) >= 0 ? root.scrambleThin : root.scrambleAlphabet;
+            // One alphabet for everything the label holds. Digits and narrow
+            // punctuation used to be routed to sets of their own - digits to
+            // digits so the clock read as a clock flipping through times, a
+            // colon to another narrow character so a string kept its
+            // silhouette - but both stood the effect down exactly where it is
+            // most visible, and the width worry behind the second one was
+            // misplaced: the faces this is drawn in are monospace, so a colon
+            // and a full square occupy the same cell, and a proportional one
+            // is what ScrambleText.restWidth's ratchet is already for.
+            const alphabet = root.scrambleAlphabet;
             // On the last frame before this character locks, the real one is
             // held out of the noise: drawn there it is still there after the
             // lock, so the instant the character lands reads as a glyph that
@@ -356,9 +448,9 @@ Singleton {
             // gone again 45ms later, which reads as a flicker, not a landing.
             //
             // indexOf is -1 for anything the alphabet doesn't hold, which is
-            // most letters, and scrambleIndex takes that as "nothing to hold
-            // out". Digits and the thin set are always their own alphabet's
-            // members; the symbol set overlaps punctuation like % and ~.
+            // now everything but the punctuation it happens to overlap (% and
+            // ~ among them), and scrambleIndex takes that as "nothing to hold
+            // out".
             const lastFrame = (frame + 1) * root.scrambleHold >= (i + 1) / len * span;
             out += root.scrambleGlyph(alphabet, seed, i, frame, lastFrame ? alphabet.indexOf(ch) : -1);
         }
@@ -368,8 +460,10 @@ Singleton {
     // The glyph character `i` shows on `frame`: a pick out of `alphabet` that
     // is never the glyph that character showed on the frame before, and never
     // `avoid` (-1 for none). A reroll that lands on the glyph already there
-    // reads as a dropped frame - on the clock's ten digits that would be one
-    // reroll in ten, which is unmissable on a label that does nothing else.
+    // reads as a dropped frame, and how often that happens is the alphabet's
+    // length: rare across the sixty-odd glyphs a full face yields, but one
+    // reroll in nine on a font pared back to scrambleCore, which is
+    // unmissable on a label that does nothing else.
     //
     // Walked forward from frame 0 rather than derived against the previous
     // frame's hash, because what that frame *drew* is not what its hash alone
@@ -392,8 +486,8 @@ Singleton {
     // pick differs would need somewhere to keep the rejected ones, and this
     // has to stay a pure function of the frame (see scrambleHash). The two are
     // skipped in ascending order, which is what puts the shifted pick where an
-    // even spread would have. Every alphabet is far longer than two, so there
-    // is always something left to land on.
+    // even spread would have. The alphabet is far longer than two even pared
+    // back to scrambleCore, so there is always something left to land on.
     function scrambleIndex(h: int, n: int, banA: int, banB: int): int {
         const lo = Math.min(banA, banB);
         const hi = Math.max(banA, banB);
