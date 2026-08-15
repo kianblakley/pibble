@@ -19,8 +19,6 @@ AnimPreview {
     id: root
 
     replayOn: Settings.launchAnimation
-    width: 100
-    height: 56
     // a filled picker tile: this row's value is what the screen *is*, so it
     // wears the accent the picker gives a committed one
     outline: Theme.accent

@@ -20,6 +20,10 @@ Column {
     property int valueWidth: 190
     width: 780
     spacing: 8
+    // everything this row is besides the preview under it - the header line
+    // and the gap over the preview. Read by the Animations tab, which sizes
+    // every preview off the height its rows *don't* take (see previewUnit).
+    readonly property real fixedHeight: 34 + root.spacing
 
     Item {
         width: parent.width

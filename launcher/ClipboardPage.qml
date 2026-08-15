@@ -294,13 +294,22 @@ Item {
                                 const ih = parseInt(d[1]) || 9;
                                 return Math.round(232 * ih / iw) + 8;
                             }
+                            // The shortest tile the grid draws: a text tile with
+                            // one line in it, which is the floor a wide image
+                            // shares rather than one of its own. A fixed 70 had
+                            // every landscape shot noticeably wider than 16:9
+                            // letterboxed inside a box taller than it asked
+                            // for, while the tile beside it holding one line of
+                            // text was shorter still.
+                            readonly property int minTileH: Math.max(44, Math.ceil(cell.lineHpx) + 26)
                             // Whether the clamps below had to hand this image a
                             // box of the wrong shape - a panorama wants less
-                            // height than 70, a phone screenshot far more than
-                            // 320. That's the one case the picture can't fill
-                            // its box and keep its aspect, and it's what the
-                            // Image's fillMode turns on.
-                            readonly property bool imgClamped: imgNatH > 0 && (imgNatH < 70 || imgNatH > 320)
+                            // height than a single line of text, a phone
+                            // screenshot far more than 320. That's the one case
+                            // the picture can't fill its box and keep its
+                            // aspect, and it's what the Image's fillMode turns
+                            // on.
+                            readonly property bool imgClamped: imgNatH > 0 && (imgNatH < cell.minTileH || imgNatH > 320)
                             readonly property real lineHpx: measureText.lineCount > 0
                                 ? measureText.paintedHeight / measureText.lineCount
                                 : Theme.fontSize(16)
@@ -309,7 +318,7 @@ Item {
                                 if (!c)
                                     return 0;
                                 if (c.image)
-                                    return Math.max(70, Math.min(320, cell.imgNatH));
+                                    return Math.max(cell.minTileH, Math.min(320, cell.imgNatH));
                                 // capped on whole lines rather than on raw pixels:
                                 // a snippet too long for the tile is cut by the
                                 // highlight's clip either way (TextEdit can't
@@ -319,7 +328,7 @@ Item {
                                 const lines = Math.max(1, measureText.lineCount);
                                 const rest = Math.max(1, measureRest.lineCount);
                                 const fits = Math.max(1, Math.floor((240 - 26) / lineHpx));
-                                return Math.max(44, Math.ceil(Math.min(lines, rest, fits) * lineHpx) + 26);
+                                return Math.max(cell.minTileH, Math.ceil(Math.min(lines, rest, fits) * lineHpx) + 26);
                             }
                             // whole lines of the painted string this tile has
                             // room for, i.e. where the label truncates
@@ -428,7 +437,7 @@ Item {
                                         // away, the way the wallpaper tiles fill
                                         // their fixed 16:9 boxes.
                                         //
-                                        // At the 70/320 clamps it can't have
+                                        // At the clamps it can't have
                                         // both, and there the aspect wins: the
                                         // shapes that reach a clamp are extreme
                                         // enough that cropping to the box keeps

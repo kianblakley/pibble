@@ -17,8 +17,6 @@ AnimPreview {
 
     readonly property bool noAnim: Settings.notifAnim === "none"
     replayOn: Settings.notifAnim
-    width: 100
-    height: 56
 
     // the card's per-line enter progress, on the flyout's own 650ms clock:
     // 380ms windows offset 90ms apart, quint-out
@@ -33,11 +31,11 @@ AnimPreview {
         property real squash: 1
         // the card hangs left of the circle with its top at the circle's
         // vertical centre, exactly as the flyout's does
-        x: bubble.x - 4 - width
+        x: bubble.x - root.u(4) - width
         y: bubble.y + bubble.height / 2
-        width: 68
-        height: 26
-        radius: Theme.radius(6)
+        width: root.u(68)
+        height: root.u(26)
+        radius: Theme.radius(root.u(6))
         color: Qt.alpha(Theme.muted, 0.22)
         transform: Scale {
             origin.x: card.width / 2
@@ -54,11 +52,11 @@ AnimPreview {
             Rectangle {
                 required property int index
                 required property int modelData
-                x: 6
-                y: 5 + index * 7 + 4 * (1 - root.lineO(index))
-                width: modelData
-                height: 3
-                radius: Theme.radius(1.5)
+                x: root.u(6)
+                y: root.u(5 + index * 7 + 4 * (1 - root.lineO(index)))
+                width: root.u(modelData)
+                height: root.u(3)
+                radius: Theme.radius(root.u(1.5))
                 color: index === 0 ? Qt.alpha(Theme.accent, 0.85) : Qt.alpha(Theme.muted, 0.6)
                 opacity: root.lineO(index)
             }
@@ -68,11 +66,11 @@ AnimPreview {
     // on screen
     Rectangle {
         id: bubble
-        x: root.stageWidth - width - 6
-        y: 6
-        width: 16
-        height: 16
-        radius: Theme.radius(8)
+        x: root.stageWidth - width - root.u(6)
+        y: root.u(6)
+        width: root.u(16)
+        height: root.u(16)
+        radius: Theme.radius(root.u(8))
         antialiasing: true
         color: Theme.accent
     }

@@ -23,19 +23,22 @@ AnimPreview {
     id: root
 
     replayOn: Settings.powerAnimations
-    width: 100
-    height: 56
 
     // 0..1, resting armed - the pose the prompt holds while it waits for the
     // Return that confirms it
     property real progress: 1
     onProgressChanged: ringCanvas.requestPaint()
 
-    // the launcher behind the prompt, sinking away from the pull
+    // the launcher behind the prompt, sinking away from the pull. Taller than
+    // the stage by the distance it sinks, so its top edge stays past the top of
+    // the screen the whole way down - shifting a screen-sized fill left a band
+    // of bare (and, under the dim below, noticeably darker) tile along the top
+    // edge, which read as part of the picture rather than as the fill having
+    // moved.
     Rectangle {
-        y: root.progress * 5
+        y: (root.progress - 1) * root.u(5)
         width: parent.width
-        height: parent.height
+        height: parent.height + root.u(5)
         color: Qt.alpha(Theme.muted, 0.16)
     }
     Rectangle {
@@ -47,13 +50,17 @@ AnimPreview {
     Canvas {
         id: ringCanvas
         anchors.horizontalCenter: parent.horizontalCenter
-        y: -height + root.progress * (height + 4)
-        width: 20
-        height: 20
+        y: -height + root.progress * (height + root.u(4))
+        width: root.u(20)
+        height: root.u(20)
+        // the arc is drawn at the size this ends up, not scaled to it: a Canvas
+        // is a texture, and it is the one thing in the set that a transform
+        // would soften
+        onWidthChanged: requestPaint()
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
-            const cx = width / 2, cy = height / 2, r = 7;
+            const cx = width / 2, cy = height / 2, r = root.u(7);
             const p = Math.max(0, Math.min(1, root.progress));
             // a fixed dash marks 12 o'clock the whole time; the ring never
             // closes onto it - both ends pull away from the dash as the pull
@@ -61,7 +68,7 @@ AnimPreview {
             const finalGap = 1.1;
             const tail = -Math.PI / 2 + (finalGap / 2) * p;
             const head = tail + (Math.PI * 2 - finalGap) * p;
-            ctx.lineWidth = 2.2;
+            ctx.lineWidth = root.u(2.2);
             ctx.lineCap = "butt";
             ctx.strokeStyle = Theme.accent;
             ctx.beginPath();
@@ -75,8 +82,8 @@ AnimPreview {
             if (p > 2 / 3) {
                 const dashAngle = head + finalGap / 2;
                 const dx = Math.cos(dashAngle), dy = Math.sin(dashAngle);
-                const dcx = cx + (r - 1.5) * dx, dcy = cy + (r - 1.5) * dy;
-                const halfLen = 0.05 + 3.2 * (p - 2 / 3) / (1 / 3);
+                const dcx = cx + (r - root.u(1.5)) * dx, dcy = cy + (r - root.u(1.5)) * dy;
+                const halfLen = root.u(0.05 + 3.2 * (p - 2 / 3) / (1 / 3));
                 ctx.beginPath();
                 ctx.moveTo(dcx - dx * halfLen, dcy - dy * halfLen);
                 ctx.lineTo(dcx + dx * halfLen, dcy + dy * halfLen);
@@ -87,7 +94,7 @@ AnimPreview {
 
     ScrambleText {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: ringCanvas.y + ringCanvas.height + 4
+        y: ringCanvas.y + ringCanvas.height + root.u(4)
         content: "power off?"
         color: Theme.fg
         // the prompt answers to the power switch, not to the settings pane this
@@ -101,7 +108,7 @@ AnimPreview {
         Behavior on opacity {
             NumberAnimation { duration: root.slow(Anim.power(160)); easing.type: Easing.OutCubic }
         }
-        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(10); letterSpacing: 1 }
+        font { family: Theme.fontFamily; pixelSize: root.uf(10); letterSpacing: root.u(1) }
     }
 
     onStarted: powerIn.restart()

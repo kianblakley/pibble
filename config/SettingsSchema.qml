@@ -101,8 +101,6 @@ Singleton {
             return "" + Settings.clipsMax;
         case "animStyle":
             return root.styleName(Settings.animStyle);
-        case "textScramble":
-            return Settings.textScramble ? "on" : "off";
         case "roundedCorners":
             return Settings.roundedCorners ? "on" : "off";
         case "fontScale":
@@ -163,9 +161,6 @@ Singleton {
             break;
         case "animStyle":
             Settings.animStyle = root.cycle(Settings.animStyle, root.tileAnimationChoices, dir);
-            break;
-        case "textScramble":
-            Settings.textScramble = !Settings.textScramble;
             break;
         case "roundedCorners":
             Settings.roundedCorners = !Settings.roundedCorners;
@@ -311,10 +306,8 @@ Singleton {
             Settings.animStyle = "bloom";
             break;
         case "textScramble":
-            // the master switch and its per-surface chips are one row, so they
-            // reset together - a reset that left five surfaces switched off
-            // would read as the master not having come back
-            Settings.textScramble = true;
+            // the row is its chips, so its reset is theirs (the key it is
+            // still named for is retired - see Settings.heal)
             Settings.scrambleSections = Defaults.scrambleSections;
             break;
         case "roundedCorners":

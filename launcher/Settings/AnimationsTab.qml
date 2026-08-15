@@ -17,6 +17,11 @@ Column {
 
     required property int slideIndex
     required property int activeIndex
+    // The height this tab is asked to come out at - the General tab's, which is
+    // the tallest of the built-ins and therefore what the filmstrip's viewport
+    // is sized to anyway. Injected by SettingsPane rather than reached for from
+    // here, same as every other cross-tab figure.
+    required property real targetHeight
     // Every tab is laid out at once and the inactive ones are slid out behind
     // the filmstrip's clip, at full opacity - so nothing else tells a label in
     // here that it can't be seen. Every ScrambleText below this item reads it
@@ -36,75 +41,100 @@ Column {
 
     spacing: 14
 
+    // How much bigger than their design size the previews are drawn. Everything
+    // else on this tab is fixed - six header lines, the scramble's chip row and
+    // the gaps between them - so whatever General's column has over that is the
+    // previews', divided between them in proportion to the sizes they were
+    // drawn at. Solved rather than picked by hand: the rows grow with the
+    // user's type scale, and a figure tuned against one scale would leave the
+    // tab short at another. Never below 1, so a font scale that leaves no slack
+    // shrinks nothing.
+    readonly property real fixedHeight: 6 * launchRow.fixedHeight + scrambleRow.height + root.spacing * 7
+    readonly property real previewBase: launchPreview.baseHeight + tilesPreview.baseHeight + volumePreview.baseHeight + notifPreview.baseHeight + menuPreview.baseHeight + powerPreview.baseHeight + scramblePreview.baseHeight
+    readonly property real previewUnit: Math.max(1, (root.targetHeight - root.fixedHeight) / root.previewBase)
+
     // playDelay staggers the arrival replay down the column, in the same
     // 35ms-a-slot beat Anim.staggerOffset gives a "bloom" grid
 
     AnimSettingRow {
+        id: launchRow
         key: "launchAnimation"
         label: "Launch animation"
-        LaunchPreview { playDelay: 0 }
+        LaunchPreview { id: launchPreview; playDelay: 0; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "animStyle"
-        label: "Pages"
-        PagesPreview { playDelay: 35 }
+        label: "Tiles"
+        TilesPreview { id: tilesPreview; playDelay: 35; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "volAnim"
         label: "Volume"
-        VolumePreview { playDelay: 70 }
+        VolumePreview { id: volumePreview; playDelay: 70; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "notifAnim"
         label: "Notifications"
-        NotifPreview { playDelay: 105 }
+        NotifPreview { id: notifPreview; playDelay: 105; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "hiddenMenuAnimations"
         label: "Settings"
-        MenuPreview { playDelay: 140 }
+        MenuPreview { id: menuPreview; playDelay: 140; unit: root.previewUnit }
     }
 
     AnimSettingRow {
         key: "powerAnimations"
         label: "Power prompts"
-        PowerPreview { playDelay: 175 }
+        PowerPreview { id: powerPreview; playDelay: 175; unit: root.previewUnit }
     }
 
-    // The scramble is the one row that isn't a single switch: a master on/off
-    // plus one chip per surface, since the effect is welcome on a pane the user
-    // opened and unwelcome on a notification that arrived while they were doing
-    // something else. Fewer chips than there are rows above - the launch reveal
-    // has no text of its own, and the two flyouts share one (see
-    // SettingsSchema.scrambleSectionChips).
-    AnimSettingRow {
-        key: "textScramble"
-        label: "Text scramble"
-        ScramblePreview { playDelay: 210 }
-    }
-
+    // The scramble is the one row that isn't a switch at all: one chip per
+    // surface, since the effect is welcome on a pane the user opened and
+    // unwelcome on a notification that arrived while they were doing something
+    // else. Fewer chips than there are rows above - the launch reveal has no
+    // text of its own, and the two flyouts share one (see
+    // SettingsSchema.scrambleSectionChips). There was a master on/off over
+    // them; it said nothing that unticking all four doesn't, and two switches
+    // for one effect only raised the question of which was in charge (an old
+    // config's "off" folds into the chips - see Settings.heal).
     Item {
+        id: scrambleRow
         width: 780
-        height: 28
+        height: 34
 
+        SettingLabel {
+            anchors.left: parent.left
+            content: "Text scramble"
+        }
+        ResetButton {
+            key: "textScramble"
+            anchors.right: parent.right
+        }
         ChipRow {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
-            // dimmed, not disabled, while the master switch is off: the chips
-            // still say what the effect would cover, and a user turning it back
-            // on gets the set they left rather than a reset one
-            opacity: Settings.textScramble ? 1 : 0.45
-            Behavior on opacity {
-                NumberAnimation { duration: Anim.menu(150); easing.type: Easing.OutCubic }
-            }
             items: SettingsSchema.scrambleSectionChips
             isOn: Settings.scrambleEnabled
             toggle: SettingsSchema.toggleScrambleSection
+        }
+    }
+    // the sample sits under the chips rather than between them and their label,
+    // so the row reads top to bottom as what the effect covers and then what it
+    // looks like
+    Item {
+        width: 780
+        height: scramblePreview.height
+
+        ScramblePreview {
+            id: scramblePreview
+            playDelay: 210
+            unit: root.previewUnit
         }
     }
 }

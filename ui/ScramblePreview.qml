@@ -10,31 +10,33 @@ import "root:/services"
 // slowdown can't reach - Anim.scrambleSpan is one shared figure that nothing is
 // allowed to lengthen for itself).
 //
-// It answers to the same switches as everything else: the master one this row
-// sets, and - since this label sits inside the settings pane like every other
-// control here - that pane's own chip. Unticking "settings" below stops the
-// sample along with the rest of the pane's labels, which is the honest answer
-// to "what does this look like now".
+// It answers to the same switches as everything else: the chips it sits under,
+// and - since this label lives inside the settings pane like every other
+// control here - that pane's own chip among them. Unticking "settings" stops
+// the sample along with the rest of the pane's labels, which is the honest
+// answer to "what does this look like now".
 AnimPreview {
     id: root
 
-    // both halves of the row: the master switch and the chips under it, either
-    // of which changes what the sample does
-    replayOn: [Settings.textScramble, Settings.scrambleSections]
+    replayOn: Settings.scrambleSections
     screen: false
-    width: sample.restWidth
-    height: sample.restHeight
+    // a fixed box the word is centred in, rather than one sized to the word:
+    // the tab solves its preview sizes off these design figures, and a box that
+    // measured its own text would resize as the effect ran
+    baseWidth: 120
+    baseHeight: 26
 
     onStarted: sample.replay()
 
     ScrambleText {
         id: sample
+        anchors.centerIn: parent
         // pinned to the resting box: a label whose noise pulls in a fallback
-        // glyph would otherwise shuffle the row on every reroll
+        // glyph would otherwise walk out of centre on every reroll
         width: restWidth
         height: restHeight
-        content: "scramble"
+        content: "Preview"
         color: Theme.fg
-        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
+        font { family: Theme.fontFamily; pixelSize: root.uf(15) }
     }
 }

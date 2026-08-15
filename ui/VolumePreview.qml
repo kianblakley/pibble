@@ -15,27 +15,25 @@ AnimPreview {
 
     readonly property string mode: Settings.volAnim
     replayOn: root.mode
-    width: 100
-    height: 56
 
     Rectangle {
         id: card
-        readonly property real restY: root.stageHeight - height - 7
+        readonly property real restY: root.stageHeight - height - root.u(7)
         x: (root.stageWidth - width) / 2
         y: card.restY
-        width: 76
-        height: 16
-        radius: Theme.radius(8)
+        width: root.u(76)
+        height: root.u(16)
+        radius: Theme.radius(root.u(8))
         color: Qt.alpha(Theme.muted, 0.22)
 
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
-            anchors.leftMargin: 9
+            anchors.leftMargin: root.u(9)
             anchors.right: parent.right
-            anchors.rightMargin: 9
-            height: 4
-            radius: Theme.radius(2)
+            anchors.rightMargin: root.u(9)
+            height: root.u(4)
+            radius: Theme.radius(root.u(2))
             color: Qt.alpha(Theme.accent, 0.22)
 
             Rectangle {

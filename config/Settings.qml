@@ -69,17 +69,20 @@ JsonAdapter {
     property var customPageData: ({})
 
     property string animStyle: "bloom"
-    // whether a pane's text resolves out of random glyphs as that pane opens
-    // (see Anim's scramble clock); rides animStyle - "none" leaves nothing to
-    // ride - but switchable on its own, being much the louder of the two
+    // Retired: the scramble's master on/off, now that the per-surface set below
+    // is the whole of that switch. Still declared because that is the only way
+    // to read it back off an old config - heal() folds a stored `false` into
+    // those surfaces and puts this back to true, once. Nothing else reads it.
     property bool textScramble: true
-    // which surfaces textScramble above actually covers: pages, flyouts,
-    // settings, power (see Anim.scrambleAllowed). Not one key per row of the
-    // Animations tab - the two flyouts share one, since a notification and a
-    // volume step are the same thing to a user deciding whether text arriving
-    // out of the corner of their eye should churn. Unknown keys default to on,
-    // so a surface added in a later release scrambles for configs written
-    // before it existed.
+    // which surfaces the text scramble covers: pages, flyouts, settings, power
+    // (see Anim.scrambleAllowed). Whether a pane's text resolves out of random
+    // glyphs as that pane opens; rides animStyle - "none" leaves nothing to
+    // ride - but switchable on its own, being much the louder of the two. Not
+    // one key per row of the Animations tab - the two flyouts share one, since
+    // a notification and a volume step are the same thing to a user deciding
+    // whether text arriving out of the corner of their eye should churn.
+    // Unknown keys default to on, so a surface added in a later release
+    // scrambles for configs written before it existed.
     property var scrambleSections: Defaults.scrambleSections
     // independent of animStyle: gates the settings pane's entrance spring and
     // every control in it, which is not a "grid" (see Anim.menu(), including
@@ -344,6 +347,19 @@ JsonAdapter {
         // client-side blur.
         if (settings.bgBlur === "snapshot") {
             settings.bgBlur = "xray";
+            settings.save();
+        }
+        // the scramble's master on/off retired into the per-surface chips it
+        // sat over - it only ever said what unticking all of them says. A
+        // stored "off" turns them all off, which is the same shell the user
+        // left; putting the key itself back to true is what makes this a no-op
+        // on the next load (and on a fresh adapter, which starts there).
+        if (settings.textScramble === false) {
+            const sections = Object.assign({}, Defaults.scrambleSections, settings.scrambleSections);
+            for (const surface of Object.keys(sections))
+                sections[surface] = false;
+            settings.scrambleSections = sections;
+            settings.textScramble = true;
             settings.save();
         }
     }

@@ -34,6 +34,29 @@ Item {
     // display; false for the two that *are* the thing (the tile grid, and the
     // scramble's own word).
     property bool screen: true
+
+    // The picture's design size, and how much larger than that it is actually
+    // drawn. Every length a preview lays out goes through u() - so a bigger
+    // unit grows the whole picture rather than handing a 100x56 box margins -
+    // and everything one draws is geometry or text, both of which the scene
+    // graph rasterises at whatever size they end up (nothing here is scaled
+    // through a texture, which is also why the one Canvas in the set sizes
+    // itself through u() instead of being transformed).
+    //
+    // The tab sets the unit, once, for all of them: it sizes its previews to
+    // whatever height it has left over - see AnimationsTab.previewUnit.
+    property real baseWidth: 100
+    property real baseHeight: 56
+    property real unit: 1
+    function u(px: real): real {
+        return px * root.unit;
+    }
+    // Font sizes take the same scaling but have to land on whole pixels, and
+    // go through Theme.fontSize on top of it so the user's type scale still
+    // applies.
+    function uf(px: int): int {
+        return Theme.fontSize(Math.round(px * root.unit));
+    }
     property color outline: Qt.alpha(Theme.muted, 0.3)
 
     default property alias contents: stage.data
@@ -86,8 +109,8 @@ Item {
         onTriggered: root.started()
     }
 
-    width: 100
-    height: 56
+    width: root.u(root.baseWidth)
+    height: root.u(root.baseHeight)
     anchors.horizontalCenter: parent.horizontalCenter
 
     Item {
@@ -105,7 +128,7 @@ Item {
     Rectangle {
         visible: root.screen
         anchors.fill: parent
-        radius: Theme.radius(5)
+        radius: Theme.radius(root.u(5))
         color: "transparent"
         border.width: 1
         border.color: root.outline

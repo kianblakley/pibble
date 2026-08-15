@@ -16,8 +16,6 @@ AnimPreview {
     id: root
 
     replayOn: Settings.hiddenMenuAnimations
-    width: 100
-    height: 56
 
     property real drop: 0
     // 0 on the first tab, 1 on the second - the filmstrip's whole position
@@ -39,20 +37,20 @@ AnimPreview {
 
             Rectangle {
                 required property int index
-                x: 8 + index * 22
-                y: 8
-                width: 16
-                height: 3
-                radius: Theme.radius(1.5)
+                x: root.u(8 + index * 22)
+                y: root.u(8)
+                width: root.u(16)
+                height: root.u(3)
+                radius: Theme.radius(root.u(1.5))
                 color: Qt.alpha(Theme.muted, 0.6)
             }
         }
         Rectangle {
-            x: 8 + root.tabPos * 22
-            y: 14
-            width: 16
-            height: 2
-            radius: Theme.radius(1)
+            x: root.u(8 + root.tabPos * 22)
+            y: root.u(14)
+            width: root.u(16)
+            height: root.u(2)
+            radius: Theme.radius(root.u(1))
             color: Theme.accent
         }
 
@@ -61,31 +59,31 @@ AnimPreview {
         Item {
             id: film
             x: -root.tabPos * root.stageWidth
-            y: 22
+            y: root.u(22)
             width: root.stageWidth * 2
-            height: 26
+            height: root.u(26)
 
             Repeater {
                 model: 6
 
                 Item {
                     required property int index
-                    x: Math.floor(index / 3) * root.stageWidth + 8
-                    y: (index % 3) * 8
-                    width: root.stageWidth - 16
-                    height: 3
+                    x: Math.floor(index / 3) * root.stageWidth + root.u(8)
+                    y: (index % 3) * root.u(8)
+                    width: root.stageWidth - root.u(16)
+                    height: root.u(3)
 
                     Rectangle {
-                        width: 30
+                        width: root.u(30)
                         height: parent.height
-                        radius: Theme.radius(1.5)
+                        radius: Theme.radius(root.u(1.5))
                         color: Qt.alpha(Theme.muted, 0.6)
                     }
                     Rectangle {
                         anchors.right: parent.right
-                        width: 18
+                        width: root.u(18)
                         height: parent.height
-                        radius: Theme.radius(1.5)
+                        radius: Theme.radius(root.u(1.5))
                         color: Qt.alpha(Theme.accent, 0.55)
                     }
                 }
@@ -100,7 +98,7 @@ AnimPreview {
         ParallelAnimation {
             NumberAnimation { target: pane; property: "opacity"; from: 0; to: 1; duration: root.slow(Anim.menu(200)); easing.type: Easing.OutCubic }
             NumberAnimation { target: pane; property: "scale"; from: 0.9; to: 1; duration: root.slow(Anim.menu(500)); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
-            NumberAnimation { target: root; property: "drop"; from: 10; to: 0; duration: root.slow(Anim.menu(500)); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+            NumberAnimation { target: root; property: "drop"; from: root.u(10); to: 0; duration: root.slow(Anim.menu(500)); easing.type: Easing.OutBack; easing.overshoot: 1.8 }
         }
         // long enough that the entrance has visibly finished before the tab
         // change starts - two motions in one box only read as two if nothing

@@ -134,10 +134,12 @@ Singleton {
     // keeps a switch of its own on top of it, since the scramble is a much
     // louder effect than the spring it rides.
     //
-    // That switch is really two: one master (Settings.textScramble) and one per
-    // surface the effect shows up on (Settings.scrambleSections), because the
-    // same effect is welcome on a pane the user opened and unwelcome on a
-    // notification that arrived while they were doing something else.
+    // That switch is one per surface the effect shows up on
+    // (Settings.scrambleSections), because the same effect is welcome on a pane
+    // the user opened and unwelcome on a notification that arrived while they
+    // were doing something else. Turning it off everywhere is turning off all
+    // of them, which is what the master switch that used to sit over these
+    // meant (see Settings.heal).
     //
     // Whether `section` may scramble at all. "" is every label on the
     // launcher's own stage, which is what "pages" names: a label there arrives
@@ -148,7 +150,7 @@ Singleton {
     // ScrambleText's `scramble`, and SettingsPane's scrambleSuppressed).
     function scrambleAllowed(section: string): bool {
         const name = section === "" ? "pages" : section;
-        if (!Settings.textScramble || !Settings.scrambleEnabled(name))
+        if (!Settings.scrambleEnabled(name))
             return false;
         return !(name === "pages" && root.style === "none");
     }
@@ -343,11 +345,11 @@ Singleton {
     // Unlike beginScramble() this does not bump scrambleRun: that is every
     // label's cue to start over, which is exactly wrong here, since the labels
     // that didn't move should stay resolved.
-    // The master switch alone, not scrambleAllowed(): every caller has already
+    // No section check either, and deliberately: every caller has already
     // decided its own section may run (that is what asking for the clock
     // means), and this one clock is shared by all of them.
     function wakeScramble(): void {
-        if (!Settings.textScramble || root.scrambleActive)
+        if (root.scrambleActive)
             return;
         root.scrambleStarted = Date.now();
         root.scrambleElapsed = 0;

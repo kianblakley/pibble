@@ -18,9 +18,8 @@ QtObject {
     // and a page-of-tiles dot indicator below them
     readonly property var pageIndicators: ({ query: true, dots: true })
     readonly property var flyouts: ({ volume: true, notifs: true })
-    // per-surface switches for the text scramble, one per row of the
-    // Animations tab (see Anim.scrambleAllowed); the master switch above them
-    // is Settings.textScramble
+    // per-surface switches for the text scramble, and the whole of that
+    // setting (see Anim.scrambleAllowed)
     readonly property var scrambleSections: ({ pages: true, flyouts: true, settings: true, power: true })
     readonly property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
     readonly property var keybinds: ({

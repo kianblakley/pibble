@@ -33,11 +33,7 @@ Column {
         hint: "ext-background-effect requires compositor support"
     }
     SettingRow { key: "dimOpacity"; label: "Background opacity" }
-    SettingRow {
-        key: "roundedCorners"
-        label: "Rounded corners"
-        hint: "off squares every corner in the launcher and both flyouts"
-    }
+    SettingRow { key: "roundedCorners"; label: "Rounded corners" }
     SettingRow { key: "fontFamily"; label: "Font" }
     SettingRow { key: "fontScale"; label: "Font size" }
     ThemeRow {}
