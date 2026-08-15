@@ -24,10 +24,9 @@ AnimPreview {
     id: root
 
     replayOn: Settings.powerAnimations
-    // The pull is one slow ride down rather than a sequence of beats, and at
-    // the shared figure it was over before the eye that went looking for it had
-    // arrived - the same reason VolumePreview sets its own.
-    slowdown: 4.2
+    // the dim and the sinking launcher behind it both fill the stage (and the
+    // latter overhangs it), so the corners are the stage's own to round
+    stageRadius: Theme.radius(root.u(6))
     // 0..1, resting armed - the pose the prompt holds while it waits for the
     // Return that confirms it
     property real progress: 1

@@ -274,7 +274,6 @@ PanelWindow {
             LauncherState.pane = "";
         LauncherState.pane = home;
         LauncherState.paneBeforeSettings = LauncherState.homePane();
-        LauncherState.settingsTab = "general";
         LauncherState.selected = 0;
         LauncherState.wallpaperSelected = 0;
         LauncherState.carouselStep = 0;
@@ -560,6 +559,14 @@ PanelWindow {
         // hide the window; the daemon keeps running
         ScriptAction {
             script: root.shown = false
+        }
+        // now off-screen: put the settings filmstrip back on its first tab.
+        // Same reason the launch score below is bumped here rather than at the
+        // click - the tabs carry a Behavior on x, so resetting this on the way
+        // *in* (with the rest of resetState) slid the whole filmstrip back from
+        // wherever it was left, in plain view, right through the entrance.
+        ScriptAction {
+            script: LauncherState.settingsTab = "general"
         }
         // now off-screen: safe to bump the launch score (see
         // pendingRecordEntry above)

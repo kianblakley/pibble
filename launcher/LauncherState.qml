@@ -198,9 +198,6 @@ Singleton {
     }
     function togglePage(id: string): void {
         const pages = Object.assign({}, Defaults.pages, Settings.pages);
-        // keep at least one page enabled overall (built-in or custom)
-        if (pages[id] !== false && root.activePanes.length <= 1)
-            return;
         pages[id] = pages[id] === false;
         Settings.pages = pages;
         Settings.save();
@@ -215,10 +212,6 @@ Singleton {
         // trashed, not toggled on
         if (!u || u.broken)
             return;
-        // keep at least one page enabled overall (built-in or custom),
-        // same invariant togglePage enforces for the built-in four
-        if (u.on && activePanes.length <= 1)
-            return;
         Settings.uploadedPages = uploaded.map(x => x.id === id ? Object.assign({}, x, { on: !x.on }) : x);
         Settings.save();
     }
@@ -226,19 +219,28 @@ Singleton {
     // enabled custom page, in orderedPages' relative order - a custom
     // page's position among the Pages settings rows is exactly where it
     // sits in Tab's cycle too.
+    //
+    // Legitimately empty: every page can be unticked, which leaves the
+    // launcher with nothing to cycle and the settings pane - which was
+    // never part of the cycle to begin with - as the only thing it can
+    // show. Everything reading this has to hold for a zero-length list;
+    // see homePane() below, cyclePane() and goBack().
     readonly property var activePanes: {
         const pages = Settings.pages ?? {};
         const uploaded = Settings.uploadedPages ?? [];
-        const list = orderedPages.filter(id => {
+        return orderedPages.filter(id => {
             if (id === "__add_folder__")
                 return false;
             const u = uploaded.find(x => x.id === id);
             return u ? u.on : pages[id] !== false;
         });
-        return list.length ? list : ["clock"];
     }
+    // Where an open (or a fallback out of an invalid setPane) lands. With
+    // every page off there is no home to go to, so the launcher opens
+    // straight onto settings - the one pane that is always reachable, and
+    // the only place the pages can be turned back on.
     function homePane(): string {
-        return activePanes[0];
+        return activePanes.length ? activePanes[0] : "settings";
     }
     // The names `pibble toggle` takes for the two built-in panes whose
     // internal ids read as abbreviations. The ids themselves stay short:
@@ -360,12 +362,26 @@ Singleton {
     }
     // settings remembers where it was opened from
     property string paneBeforeSettings: "clock"
+    // ...and this is what backing out of it actually lands on. Never settings
+    // itself: with every page off, settings *is* what an open records here
+    // (homePane() is settings then), and once a page has been ticked back on,
+    // backing out would put the pane it is already on back on - an Escape that
+    // does nothing, forever. Falls through to the home pane, the same rule
+    // setPane() uses for a pane that has since been disabled. Both callers
+    // check activePanes first, so this can't hand settings back.
+    function paneBehindSettings(): string {
+        return root.activePanes.includes(root.paneBeforeSettings) ? root.paneBeforeSettings : root.homePane();
+    }
     property string settingsTab: "general"
     // which page's grid the tile picker on the Grids tab is editing
     property string gridTarget: "apps"
     function toggleSettings() {
         if (pane === "settings") {
-            setPane(paneBeforeSettings);
+            // with every page off, settings is the whole launcher - there is
+            // nothing behind it to toggle back to (see homePane)
+            if (!activePanes.length)
+                return;
+            setPane(paneBehindSettings());
         } else {
             paneBeforeSettings = pane;
             setPane("settings");
@@ -379,6 +395,10 @@ Singleton {
             settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
             return;
         }
+        // nothing to cycle with every page off - the settings pane above is
+        // the only one left, and it isn't in the cycle
+        if (!activePanes.length)
+            return;
         let i = activePanes.indexOf(pane);
         if (i < 0)
             i = 0;
@@ -456,9 +476,12 @@ Singleton {
         powerArmed = true;
         powerRaw = powerThreshold;
     }
+    // The launcher deliberately stays up: its close animation and the shutdown
+    // race, and the compositor tears the surface down mid-fade - a half-played
+    // exit frozen on screen as the session goes. Leaving it where it is means
+    // the last thing drawn is the armed prompt the user confirmed.
     function powerOff() {
         Quickshell.execDetached(["systemctl", "poweroff"]);
-        exit();
     }
 
     property bool rebootDragging: false
@@ -491,9 +514,9 @@ Singleton {
         rebootArmed = true;
         rebootRaw = rebootThreshold;
     }
+    // stays up for the same reason powerOff() does - see there
     function rebootNow() {
         Quickshell.execDetached(["systemctl", "reboot"]);
-        exit();
     }
 
     // ---------- swipe-to-go-back ----------
@@ -540,9 +563,11 @@ Singleton {
             root.disarmReboot();
         else if (root.expandedClip)
             root.collapseClip();
-        else if (root.pane === "settings")
-            root.setPane(root.paneBeforeSettings);
+        else if (root.pane === "settings" && root.activePanes.length)
+            root.setPane(root.paneBehindSettings());
         else
+            // with every page off there is nothing behind settings to back out
+            // to, so it closes the launcher like any other pane would
             root.exit();
     }
 

@@ -11,6 +11,11 @@ Item {
     property string label
     property string hint: ""
     property int valueWidth: 190
+    // The controls' total span - ‹ + value + › + reset, gaps included - for
+    // anything else in the column that has to line its own right-aligned block
+    // up with this row's controls rather than with the column's edge (see
+    // ChipRow's targetWidth).
+    readonly property real controlsWidth: controls.width
     width: 780
     height: 34 + (hint ? hintLabel.height + 2 : 0)
     Item {
@@ -22,6 +27,7 @@ Item {
             content: root.label
         }
         Row {
+            id: controls
             anchors.right: parent.right
             spacing: 8
             height: parent.height

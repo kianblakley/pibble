@@ -142,7 +142,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Wayfinding elements"
+            content: "Helper elements"
         }
         ResetButton {
             key: "pageIndicators"
@@ -152,6 +152,14 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
+            // laid out to the width of the stepper directly below rather than
+            // to its own words' natural spacing, so the first tick box starts
+            // on the same left edge as that row's ‹ arrow - the two are the
+            // leftmost ink of two adjacent right-aligned blocks, and a chip row
+            // that overhangs it by a few pixels reads as a misalignment rather
+            // than as a different kind of control. The 34 is this row's own
+            // right margin, i.e. the reset button it stops short of.
+            targetWidth: iconThemeRow.controlsWidth - 34
             items: [
                 { id: "query", label: "search query" },
                 { id: "dots", label: "page indicator" }
@@ -161,7 +169,7 @@ Column {
         }
     }
 
-    SettingRow { key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
+    SettingRow { id: iconThemeRow; key: "iconTheme"; label: "App icon theme"; hint: "applied after daemon reload" }
 
     SettingRow { key: "wallpaperStyle"; label: "Wallpapers style" }
 

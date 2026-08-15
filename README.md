@@ -82,7 +82,7 @@ cd pibble
 | `start` | Start the daemon |
 | `stop` | Stop the daemon |
 | `restart` | Restart the daemon |
-| `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id, opens/switches straight to that page |
+| `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id (or `settings`), opens/switches straight to that page |
 | `replay` | Re-fire one recent notification; repeated presses step back through history |
 
 ## Configuring

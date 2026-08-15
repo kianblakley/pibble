@@ -15,10 +15,6 @@ AnimPreview {
 
     readonly property string mode: Settings.volAnim
     replayOn: root.mode
-    // one short move, over in a fraction of what the sequenced previews take -
-    // at the shared figure the whole thing is finished before the eye that went
-    // looking for it has arrived
-    slowdown: 3.6
     Rectangle {
         id: card
         // centred in the stage rather than down on its edge as the real OSD

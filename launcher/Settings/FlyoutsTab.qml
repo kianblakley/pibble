@@ -90,7 +90,7 @@ Column {
             toggle: SettingsSchema.toggleAlert
         }
     }
-    SettingRow { key: "batteryAlertLevel"; label: "Low battery alert"; hint: "battery % the low battery alert fires at"; valueWidth: Metrics.shortValueWidth }
+    SettingRow { key: "batteryAlertLevel"; label: "Low battery alert threshold"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "notifStyle"; label: "Notification style"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "notifTimeout"; label: "Notification timeout"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "replayCount"; label: "Replay count"; hint: "how many recent notifications `pibble replay` can step back through"; valueWidth: Metrics.shortValueWidth }

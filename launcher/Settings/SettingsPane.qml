@@ -454,10 +454,10 @@ Item {
             slideIndex: 2
             activeIndex: root.tabIndex
             // that tab has slack in it (its previews are sized to whatever is
-            // left over) and General is the tallest column here, so handing it
-            // General's height makes the two match instead of leaving the
-            // viewport padded out under the shorter of them
-            targetHeight: generalTab.height
+            // left over), so it is handed another tab's height to come out at
+            // rather than setting its own - Pages', which is the column its
+            // previews were sized against
+            targetHeight: pagesTab.height
         }
         NavigationTab {
             id: navigationTab

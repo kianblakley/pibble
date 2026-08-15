@@ -258,7 +258,14 @@ Text {
         }
         return section;
     }
-    readonly property bool scrambleAllowed: Anim.scrambleAllowed(root.resolvedSection)
+    // For a label that *demonstrates* the effect rather than wears it: the
+    // Animations tab's scramble chips are the preview of what they switch on,
+    // and chips that stop resolving the moment the last box is unticked show
+    // nothing at exactly the point the user is asking what the effect looks
+    // like. Nothing on a real surface sets this (see ChipRow's
+    // scramblePreview, its only caller).
+    property bool ignoresSections: false
+    readonly property bool scrambleAllowed: root.ignoresSections || Anim.scrambleAllowed(root.resolvedSection)
 
     // Where on the shared clock this label's own run began, or -1 for one that
     // hasn't come on screen yet (and so hasn't started).
@@ -287,10 +294,16 @@ Text {
     // only disarms: it starts when it arrives, exactly as it does on a pane
     // entrance - which is also what keeps a background clipboard update from
     // running the clock behind a closed launcher.
-    function replay(): void {
+    //
+    // `force` runs it even where the section switches say this label may not,
+    // for a label demonstrating the effect rather than wearing it: the
+    // Animations tab's chips scramble on hover whether or not that box is
+    // ticked, since the hover is the user asking what ticking it would do (see
+    // ChipRow's scramblePreview).
+    function replay(force: bool): void {
         root.startedAt = -1;
         root.noiseWidth = 0;
-        if (!root.scramble || !root.scrambleAllowed || !root.onScreen)
+        if (!root.scramble || (!force && !root.scrambleAllowed) || !root.onScreen)
             return;
         Anim.wakeScramble();
         // Under a stagger this starts in the *future*, which scrambled() reads
