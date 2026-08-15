@@ -686,8 +686,10 @@ Item {
         anchors.top: parent.top
         anchors.topMargin: root.queryH + root.barHeight + root.captionGap
         anchors.horizontalCenter: parent.horizontalCenter
-        // restWidth, not implicitWidth - see the grid caption's copy of this
-        width: Math.min(restWidth, root.width)
+        // restWidth, not implicitWidth, and paceWidth as the same cap - see
+        // the grid caption's copy of this
+        paceWidth: root.width
+        width: Math.min(restWidth, paceWidth)
         content: {
             if (LauncherState.carouselEmpty)
                 return "";

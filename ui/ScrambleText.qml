@@ -53,11 +53,40 @@ Text {
     // label whose visible extent is only the head of its string - see
     // Anim.scrambled(). 0 (the default) paces across all of it.
     //
-    // Deliberately the only lever a label has over the effect, and it moves
-    // *which* characters the sweep is spread over, never how long the label
-    // gets: the duration is one shared figure (Anim.scrambleSpan) that nothing
-    // may lengthen for itself, so everything arriving together lands together.
+    // This and paceWidth below are the only levers a label has over the
+    // effect, and both move *which* characters the sweep is spread over, never
+    // how long the label gets: the duration is one shared figure
+    // (Anim.scrambleSpan) that nothing may lengthen for itself, so everything
+    // arriving together lands together.
+    //
+    // For a label that can count its own visible extent - a wrapped body, say,
+    // where what fits is a question of layout rather than of one line's width.
+    // A single-line label that simply elides wants paceWidth instead.
     property int paceLength: 0
+
+    // The widest this label is allowed to get, for a single-line one that
+    // elides: a tile caption capped so it can't outgrow its tile. Callers set
+    // `width: Math.min(restWidth, paceWidth)` and pass the same cap here, so
+    // the two can't drift apart.
+    //
+    // Everything past the ellipsis is off screen, and a resolve paced across
+    // the whole string hands the part that *can* be seen back finished within
+    // its own fraction of the span - an app named far past its cap looks like
+    // it never scrambled at all, which is the same failure the notification
+    // body's paceLength is for. Pacing across the elided head instead spends
+    // the whole span on the characters actually on screen. 0 (the default) is
+    // a label that isn't capped.
+    property real paceWidth: 0
+    // The elided head's length, i.e. what an explicit paceLength would have to
+    // be spelled out as. The ellipsis is not a character of `content`, so it
+    // comes back off; a string too long to fit even one character elides to
+    // the ellipsis alone, and one character is still what's on screen.
+    readonly property int elidedLength: root.paceWidth > 0 && sizer.advanceWidth > root.paceWidth
+        ? Math.max(1, sizer.elidedText.length - 1)
+        : 0
+    // An explicit paceLength wins: a caller spelling one out has measured
+    // something this can't see (a wrapped body's third line, say).
+    readonly property int pacedLength: root.paceLength > 0 ? root.paceLength : root.elidedLength
 
     // Whether a change of `content` replays the effect, for a string swapped
     // under a label that never went anywhere: a grid slot taking a different
@@ -269,13 +298,18 @@ Text {
     }
 
     text: root.scramble && Anim.scrambleActive && root.startedAt >= 0
-        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun, root.paceLength)
+        ? Anim.scrambled(root.content, Anim.scrambleElapsed - root.startedAt - root.scrambleDelay, root.scrambleSeed ^ Anim.scrambleRun, root.pacedLength)
         : root.content
 
     TextMetrics {
         id: sizer
         font: root.font
         text: root.content
+        // for elidedLength above. Eliding here only decides what elidedText
+        // holds - advanceWidth stays the whole string's - so restWidth, and
+        // with it the width the caller derives from it, is untouched by this.
+        elide: root.paceWidth > 0 ? Text.ElideRight : Text.ElideNone
+        elideWidth: root.paceWidth
     }
     // What the noise currently laid out to, feeding the ratchet above. Only
     // ever measures during a run: outside one `text` is `content`, which

@@ -249,9 +249,10 @@ Item {
                         anchors.top: thumb.bottom
                         anchors.topMargin: 8
                         anchors.horizontalCenter: parent.horizontalCenter
-                        // restWidth, not implicitWidth - see the app tile's
-                        // caption for why
-                        width: Math.min(restWidth, 220)
+                        // restWidth, not implicitWidth, and paceWidth as the
+                        // same cap - see the app tile's caption for both
+                        paceWidth: 220
+                        width: Math.min(restWidth, paceWidth)
                         height: 16
                         content: cell.shownWall ? LauncherState.wallpaperName(cell.shownWall) : ""
                         // a slot taking a different wallpaper leaves the tile

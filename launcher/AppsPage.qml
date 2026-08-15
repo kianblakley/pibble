@@ -228,8 +228,13 @@ Item {
                             // restWidth, not implicitWidth: the caption keeps
                             // the width of the app's real name while it's
                             // still noise, so it doesn't breathe wider and
-                            // narrower under a centered tile mid-scramble
-                            width: Math.min(restWidth, 76)
+                            // narrower under a centered tile mid-scramble.
+                            // paceWidth is the same cap, so a name long enough
+                            // to elide resolves across the part on screen
+                            // rather than sweeping past it in a fraction of
+                            // the span
+                            paceWidth: 76
+                            width: Math.min(restWidth, paceWidth)
                             height: 16
                             content: cell.shownEntry ? cell.shownEntry.name : ""
                             // see the initials label above
