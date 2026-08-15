@@ -109,12 +109,15 @@ Item {
         y: powerRing.y + powerRing.height + 12
         content: "power off?"
         color: Theme.fg
+        // the prompts answer to the power switch, not the settings pane's -
+        // see Anim.power() and Settings.scrambleSections
+        scrambleSection: "power"
         // start the fade as the ring nears closed: the pull easing
         // crawls through its last few percent, so waiting for exactly
         // 1.0 reads as a long pause after the circle looks complete
         opacity: LauncherState.powerProgress >= 0.85 ? 1 : 0
         Behavior on opacity {
-            NumberAnimation { duration: Anim.menu(160); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Anim.power(160); easing.type: Easing.OutCubic }
         }
         // pinned to the resting string's box, so this centered label doesn't
         // shuffle about on every reroll - see the apps pane's copy of this
@@ -214,9 +217,10 @@ Item {
         anchors.bottomMargin: LauncherState.rebootPull * LauncherState.rebootRingScale + 12
         content: "reboot?"
         color: Theme.fg
+        scrambleSection: "power" // see powerText's copy of this
         opacity: LauncherState.rebootProgress >= 0.85 ? 1 : 0
         Behavior on opacity {
-            NumberAnimation { duration: Anim.menu(160); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Anim.power(160); easing.type: Easing.OutCubic }
         }
         // pinned as powerText is above - doubly so here, where the box is
         // bottom-anchored and a taller fallback glyph would push the string up

@@ -28,6 +28,11 @@ Item {
     // alike - see ui/ScrambleText.qml, and the tabs' own copy of this for the
     // filmstrip half of it.
     readonly property bool scrambleSuppressed: !Settings.hiddenMenuAnimations
+    // ...and which of the Animations tab's per-surface scramble switches every
+    // label under here answers to. Declared once for the whole subtree rather
+    // than threaded through every control in it - same ancestor walk
+    // scrambleSuppressed above uses (see ui/ScrambleText.qml).
+    readonly property string scrambleSection: "settings"
 
     // built-ins first, then one slot per custom page that opts
     // into a settings tab (see LauncherState.customSettingsTabs) - in

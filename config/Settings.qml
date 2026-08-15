@@ -37,6 +37,9 @@ JsonAdapter {
     function gesturesEnabled(): bool {
         return settings.gestures !== false;
     }
+    function scrambleEnabled(name: string): bool {
+        return (settings.scrambleSections ?? {})[name] !== false;
+    }
 
     property int appsCols: Defaults.appsCols
     property int appsRows: Defaults.appsRows
@@ -70,10 +73,22 @@ JsonAdapter {
     // (see Anim's scramble clock); rides animStyle - "none" leaves nothing to
     // ride - but switchable on its own, being much the louder of the two
     property bool textScramble: true
+    // which surfaces textScramble above actually covers: pages, flyouts,
+    // settings, power (see Anim.scrambleAllowed). Not one key per row of the
+    // Animations tab - the two flyouts share one, since a notification and a
+    // volume step are the same thing to a user deciding whether text arriving
+    // out of the corner of their eye should churn. Unknown keys default to on,
+    // so a surface added in a later release scrambles for configs written
+    // before it existed.
+    property var scrambleSections: Defaults.scrambleSections
     // independent of animStyle: gates the settings pane's entrance spring and
-    // the power-off/reboot pull-back animation, neither of which is a "grid"
-    // (see Anim.menu())
+    // every control in it, which is not a "grid" (see Anim.menu(), including
+    // why the key still says "hidden menu" now that the power prompts have a
+    // switch of their own)
     property bool hiddenMenuAnimations: true
+    // the power-off/reboot prompts: the pull's ride down and back, and the
+    // prompts it arms (see Anim.power())
+    property bool powerAnimations: true
 
     // shared across the launcher and both flyouts
     property real fontScale: 1.0

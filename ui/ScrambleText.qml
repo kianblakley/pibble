@@ -29,9 +29,17 @@ Text {
     // Per-label off switch, for a label sitting under a motion setting of its
     // own. The flyouts are the case: each has its own "none" animation style,
     // and a notification the user has asked to arrive instantly shouldn't
-    // spend half a second resolving. Anim.scrambleOn is the global switch and
-    // still wins over this one.
+    // spend half a second resolving. The master switch and this label's
+    // section switch (see scrambleSection below) both still win over it.
     property bool scramble: true
+    // Which of the Animations tab's surfaces this label's scramble belongs to,
+    // i.e. which per-surface switch it answers to (see Anim.scrambleAllowed).
+    // "" - the default - takes it from the nearest ancestor that names one, and
+    // failing that from the run itself, which is what every label on the
+    // launcher's stage wants: its scramble belongs to whatever brought its pane
+    // in. The settings pane names one for its whole subtree; the flyouts and
+    // the power prompts name theirs on the label.
+    property string scrambleSection: ""
     // Extra hold once this label is on screen, for a cascade *within* one
     // group that all comes into view at once (the clock's segments). Leave it
     // at 0 for anything that arrives on its own schedule - the arrival is the
@@ -231,6 +239,27 @@ Text {
     }
     readonly property bool onScreen: root.shownItem.visible && root.stackedOpacity > 0.05 && root.unmasked && !root.ancestorSuppressed
 
+    // Same ancestor walk as ancestorSuppressed above, and read the same way:
+    // every ancestor is visited so this stays subscribed to all of them, and an
+    // item that doesn't declare the property reads as undefined, which is
+    // neither a section nor a dependency. The nearest declaration wins, and the
+    // walk starts at this label, so a label naming its own section simply *is*
+    // the nearest one.
+    //
+    // Walked from the label rather than from shownItem, unlike the two above:
+    // those ask "can this be seen", which is a question about whatever paints
+    // on this label's behalf, where this asks which surface the label belongs
+    // to - and that is its own place in the tree either way.
+    readonly property string resolvedSection: {
+        let section = "";
+        for (let item = root; item; item = item.parent) {
+            if (section === "" && typeof item.scrambleSection === "string")
+                section = item.scrambleSection;
+        }
+        return section;
+    }
+    readonly property bool scrambleAllowed: Anim.scrambleAllowed(root.resolvedSection)
+
     // Where on the shared clock this label's own run began, or -1 for one that
     // hasn't come on screen yet (and so hasn't started).
     property int startedAt: -1
@@ -245,7 +274,7 @@ Text {
             root.startedAt = -1;
     }
     function armScramble(): void {
-        if (root.startedAt >= 0 || !root.scramble || !Anim.scrambleOn || !root.onScreen)
+        if (root.startedAt >= 0 || !root.scramble || !root.scrambleAllowed || !root.onScreen)
             return;
         // A label can arrive with no run behind it: a tile re-entering a pane
         // that is just sitting there is nobody's pane entrance. Waking the
@@ -261,7 +290,7 @@ Text {
     function replay(): void {
         root.startedAt = -1;
         root.noiseWidth = 0;
-        if (!root.scramble || !Anim.scrambleOn || !root.onScreen)
+        if (!root.scramble || !root.scrambleAllowed || !root.onScreen)
             return;
         Anim.wakeScramble();
         // Under a stagger this starts in the *future*, which scrambled() reads

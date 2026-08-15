@@ -7,11 +7,12 @@ import "root:/config"
 // grid, a bar in the wallpaper carousel and a custom page's own tiles all move
 // alike.
 //
-// Three independent "off" switches, deliberately not folded into one: the tile
+// Four independent "off" switches, deliberately not folded into one: the tile
 // style (Settings.animStyle === "none") zeroes grid and pane entrances, the
 // launch style (Settings.launchAnimation === "none") zeroes the open/close
-// reveal, and Settings.hiddenMenuAnimations zeroes the settings pane and the
-// power/reboot prompts. Picking one never silently flattens another.
+// reveal, Settings.hiddenMenuAnimations zeroes the settings pane, and
+// Settings.powerAnimations zeroes the power-off/reboot prompts. Picking one
+// never silently flattens another.
 Singleton {
     id: root
 
@@ -42,10 +43,41 @@ Singleton {
     function launch(ms: int): int {
         return Settings.launchAnimation === "none" ? 0 : ms;
     }
-    // Settings pane and power/reboot prompt duration: zeroed by
-    // Settings.hiddenMenuAnimations alone - neither is a grid.
+    // Settings pane duration - the pane's own entrance and every control in
+    // it. Zeroed by Settings.hiddenMenuAnimations alone; not a grid.
+    //
+    // The key is still the one it was introduced under, when this and power()
+    // below were one switch over both hidden menus. A JsonAdapter only sees
+    // the keys it declares (an undeclared one reads back undefined and is
+    // dropped on the next save), so renaming it would silently put every
+    // config that had it *off* back to on - which is exactly the setting
+    // someone who turned it off would notice.
     function menu(ms: int): int {
         return Settings.hiddenMenuAnimations ? ms : 0;
+    }
+    // Power-off/reboot prompt duration: the pull's ride down and back, and the
+    // prompts it arms. Zeroed by Settings.powerAnimations alone.
+    function power(ms: int): int {
+        return Settings.powerAnimations ? ms : 0;
+    }
+
+    // Where a "grow" launch style's reveal circle starts, as a fraction of
+    // whatever surface it covers. Here rather than on LauncherState (which owns
+    // the reveal itself) because the Animations tab's launch preview grows the
+    // same circle over a 176px stand-in for the screen, and a service is the
+    // only thing both the launcher and a settings control can reach.
+    function launchOrigin(): var {
+        switch (Settings.launchAnimation) {
+        case "grow-top-left":
+            return [0, 0];
+        case "grow-top-right":
+            return [1, 0];
+        case "grow-bottom-left":
+            return [0, 1];
+        case "grow-bottom-right":
+            return [1, 1];
+        }
+        return [0.5, 0.5]; // grow-center, and fade (origin unused)
     }
 
     function stagger(slot: int, cols: int, slideStep: int): int {
@@ -101,7 +133,25 @@ Singleton {
     // own - "none" means the pane arrives with no entrance to decorate - but
     // keeps a switch of its own on top of it, since the scramble is a much
     // louder effect than the spring it rides.
-    readonly property bool scrambleOn: Settings.textScramble && root.style !== "none"
+    //
+    // That switch is really two: one master (Settings.textScramble) and one per
+    // surface the effect shows up on (Settings.scrambleSections), because the
+    // same effect is welcome on a pane the user opened and unwelcome on a
+    // notification that arrived while they were doing something else.
+    //
+    // Whether `section` may scramble at all. "" is every label on the
+    // launcher's own stage, which is what "pages" names: a label there arrives
+    // when a pane does, so its scramble is that pane entrance's, and it rides
+    // the tile style on top of its own switch ("none" leaves the pane no
+    // entrance to decorate). The flyouts and the two hidden menus ride their
+    // own animation setting instead, which they check at the label (see
+    // ScrambleText's `scramble`, and SettingsPane's scrambleSuppressed).
+    function scrambleAllowed(section: string): bool {
+        const name = section === "" ? "pages" : section;
+        if (!Settings.textScramble || !Settings.scrambleEnabled(name))
+            return false;
+        return !(name === "pages" && root.style === "none");
+    }
 
     // Bumped once per *pane* run, and mixed into each label's own seed, so a
     // label draws different noise on every open instead of replaying one
@@ -261,7 +311,7 @@ Singleton {
     }
 
     function beginScramble(): void {
-        if (!root.scrambleOn)
+        if (!root.scrambleAllowed(""))
             return;
         // The timeline only goes back to zero when the clock was stopped. A
         // run beginning over one that is still going - a pane change behind a
@@ -293,8 +343,11 @@ Singleton {
     // Unlike beginScramble() this does not bump scrambleRun: that is every
     // label's cue to start over, which is exactly wrong here, since the labels
     // that didn't move should stay resolved.
+    // The master switch alone, not scrambleAllowed(): every caller has already
+    // decided its own section may run (that is what asking for the clock
+    // means), and this one clock is shared by all of them.
     function wakeScramble(): void {
-        if (!root.scrambleOn || root.scrambleActive)
+        if (!Settings.textScramble || root.scrambleActive)
             return;
         root.scrambleStarted = Date.now();
         root.scrambleElapsed = 0;

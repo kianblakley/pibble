@@ -1,4 +1,5 @@
 import QtQuick
+import "root:/config"
 import "root:/services"
 import "root:/ui"
 
@@ -6,8 +7,11 @@ import "root:/ui"
 // SettingsPane.tabOrder and `root.activeIndex` which slide is showing; the two
 // together are the whole of the horizontal tab transition.
 // Animations: every motion switch in one place - the launcher's own entrance,
-// the tile grids, the text scramble that rides them, the hidden menus, and both
-// flyouts' entrances.
+// the tile grids, both flyouts, both hidden menus, and the text scramble that
+// rides all of them - each over a small live preview of what it does, since
+// "bloom" and "cascade" are not names anybody can picture. The previews sit
+// under their rows and carry the explaining that a line of hint text used to
+// (see ui/AnimPreview.qml).
 Column {
     id: root
 
@@ -19,6 +23,11 @@ Column {
     // (see ui/ScrambleText.qml) and sits the run out until this tab is the one
     // showing, which is what makes a tab switch its labels' arrival.
     readonly property bool scrambleSuppressed: root.slideIndex !== root.activeIndex
+    // The previews' half of the same problem, and the same answer: they are
+    // live animations, and a tab that can't be seen must not be running seven
+    // of them. Read by every AnimPreview below, which also takes this becoming
+    // true as its cue to play - so arriving on the tab is what demonstrates it.
+    readonly property bool previewsActive: root.slideIndex === root.activeIndex
 
     x: 20 + (root.slideIndex - root.activeIndex) * 840
     Behavior on x {
@@ -27,15 +36,75 @@ Column {
 
     spacing: 14
 
-    SettingRow { key: "launchAnimation"; label: "Launch animation" }
+    // playDelay staggers the arrival replay down the column, in the same
+    // 35ms-a-slot beat Anim.staggerOffset gives a "bloom" grid
 
-    SettingRow { key: "animStyle"; label: "Grid animation" }
+    AnimSettingRow {
+        key: "launchAnimation"
+        label: "Launch animation"
+        LaunchPreview { playDelay: 0 }
+    }
 
-    SettingRow { key: "textScramble"; label: "Text scramble" }
+    AnimSettingRow {
+        key: "animStyle"
+        label: "Pages"
+        PagesPreview { playDelay: 35 }
+    }
 
-    SettingRow { key: "hiddenMenuAnimations"; label: "Hidden menu animations"; hint: "settings pane and power-off/reboot prompts" }
+    AnimSettingRow {
+        key: "volAnim"
+        label: "Volume"
+        VolumePreview { playDelay: 70 }
+    }
 
-    SettingRow { key: "volAnim"; label: "Volume animation" }
+    AnimSettingRow {
+        key: "notifAnim"
+        label: "Notifications"
+        NotifPreview { playDelay: 105 }
+    }
 
-    SettingRow { key: "notifAnim"; label: "Notification animation" }
+    AnimSettingRow {
+        key: "hiddenMenuAnimations"
+        label: "Settings"
+        MenuPreview { playDelay: 140 }
+    }
+
+    AnimSettingRow {
+        key: "powerAnimations"
+        label: "Power prompts"
+        PowerPreview { playDelay: 175 }
+    }
+
+    // The scramble is the one row that isn't a single switch: a master on/off
+    // plus one chip per surface, since the effect is welcome on a pane the user
+    // opened and unwelcome on a notification that arrived while they were doing
+    // something else. Fewer chips than there are rows above - the launch reveal
+    // has no text of its own, and the two flyouts share one (see
+    // SettingsSchema.scrambleSectionChips).
+    AnimSettingRow {
+        key: "textScramble"
+        label: "Text scramble"
+        ScramblePreview { playDelay: 210 }
+    }
+
+    Item {
+        width: 780
+        height: 28
+
+        ChipRow {
+            anchors.right: parent.right
+            anchors.rightMargin: 34
+            anchors.verticalCenter: parent.verticalCenter
+            // dimmed, not disabled, while the master switch is off: the chips
+            // still say what the effect would cover, and a user turning it back
+            // on gets the set they left rather than a reset one
+            opacity: Settings.textScramble ? 1 : 0.45
+            Behavior on opacity {
+                NumberAnimation { duration: Anim.menu(150); easing.type: Easing.OutCubic }
+            }
+            items: SettingsSchema.scrambleSectionChips
+            isOn: Settings.scrambleEnabled
+            toggle: SettingsSchema.toggleScrambleSection
+        }
+    }
 }

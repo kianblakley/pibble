@@ -40,20 +40,9 @@ Singleton {
     property real screenWidth: 0
     property real screenHeight: 0
     property real reveal: 0
-    readonly property var originFraction: {
-        switch (Settings.launchAnimation) {
-        case "grow-top-left":
-            return [0, 0];
-        case "grow-top-right":
-            return [1, 0];
-        case "grow-bottom-left":
-            return [0, 1];
-        case "grow-bottom-right":
-            return [1, 1];
-        default:
-            return [0.5, 0.5]; // grow-center, and fade (origin unused)
-        }
-    }
+    // shared with the Animations tab's launch preview, which grows the same
+    // circle out of the same corner over a stand-in for the screen
+    readonly property var originFraction: Anim.launchOrigin()
     readonly property real originX: root.originFraction[0] * root.screenWidth
     readonly property real originY: root.originFraction[1] * root.screenHeight
     // Radius needed to cover the farthest screen corner from the origin. At
@@ -444,7 +433,7 @@ Singleton {
     readonly property real powerRingScale: powerRestDepth / powerPullAtThreshold
     Behavior on powerRaw {
         enabled: !root.powerDragging
-        NumberAnimation { duration: Anim.menu(320); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Anim.power(320); easing.type: Easing.OutCubic }
     }
     Timer {
         // a forgotten armed prompt must not lie in wait to turn the next
@@ -483,7 +472,7 @@ Singleton {
     readonly property real rebootRingScale: rebootRestDepth / rebootPullAtThreshold
     Behavior on rebootRaw {
         enabled: !root.rebootDragging
-        NumberAnimation { duration: Anim.menu(320); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Anim.power(320); easing.type: Easing.OutCubic }
     }
     Timer {
         // same forgotten-prompt safety net as power, mirrored

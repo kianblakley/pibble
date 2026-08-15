@@ -790,6 +790,10 @@ Scope {
                                 width: restWidth
                                 height: restHeight
                                 scramble: !window.noAnim
+                                // every label on this card answers to the flyouts' switch,
+                                // not to whatever the launcher behind it is doing - see
+                                // Settings.scrambleSections
+                                scrambleSection: "flyouts"
                                 // this card arrives on its own schedule and
                                 // owns no part of the launcher's - see
                                 // followsPane in ui/ScrambleText.qml
@@ -812,6 +816,7 @@ Scope {
                             height: restHeight
                             content: window.view.summary
                             scramble: !window.noAnim
+                            scrambleSection: "flyouts"
                             followsPane: false // see the app label above
                             textFormat: Text.PlainText
                             wrapMode: Text.Wrap
@@ -844,6 +849,7 @@ Scope {
                                 width: parent.width
                                 content: card.bodyAsSubtitle ? window.view.body : ""
                                 scramble: !window.noAnim
+                                scrambleSection: "flyouts"
                                 followsPane: false // see the app label above
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
@@ -911,6 +917,7 @@ Scope {
                                     width: parent.width
                                     content: bodyBlock.visible ? window.view.body : ""
                                     scramble: !window.noAnim
+                                    scrambleSection: "flyouts"
                                     followsPane: false // see the app label above
                                     // Only the three lines the clip shows are
                                     // ever on screen, and a resolve spread

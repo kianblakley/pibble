@@ -64,6 +64,28 @@ Singleton {
     readonly property var launchAnimationChoices: ["grow-top-left", "grow-top-right", "grow-bottom-left", "grow-bottom-right", "grow-center", "fade", "none"]
     readonly property var tileAnimationChoices: ["bloom", "pop", "cascade", "fade", "slide", "none"]
 
+    // The chips under the Animations tab's text-scramble row: one per surface
+    // the effect shows up on, in the order that tab lists those surfaces. Ids
+    // are Settings.scrambleSections' keys (see Anim.scrambleAllowed). Fewer
+    // than there are rows on that tab: the launch reveal has no text of its own
+    // (every label it uncovers belongs to a pane, i.e. to "pages"), and the two
+    // flyouts share one chip.
+    readonly property var scrambleSectionChips: [
+        { id: "pages", label: "pages" },
+        { id: "flyouts", label: "flyouts" },
+        { id: "settings", label: "settings" },
+        { id: "power", label: "power" }
+    ]
+
+    // The user-facing spelling of a motion style. Only "none" differs, and only
+    // here: the stored id stays "none" everywhere (Settings.heal, and every
+    // `=== "none"` check across the shell, read it), so this renames what is
+    // shown without renaming the value - which would put every saved config's
+    // "none" back to the default.
+    function styleName(value: string): string {
+        return value === "none" ? "off" : value;
+    }
+
     function cycle(current: string, choices: var, dir: int): string {
         let i = choices.indexOf(current);
         if (i < 0)
@@ -78,7 +100,7 @@ Singleton {
         case "clipsMax":
             return "" + Settings.clipsMax;
         case "animStyle":
-            return Settings.animStyle;
+            return root.styleName(Settings.animStyle);
         case "textScramble":
             return Settings.textScramble ? "on" : "off";
         case "fontScale":
@@ -86,7 +108,7 @@ Singleton {
         case "dimOpacity":
             return Math.round(Settings.dimOpacity * 100) + "%";
         case "launchAnimation":
-            return Settings.launchAnimation;
+            return root.styleName(Settings.launchAnimation);
         case "bgBlur":
             return Settings.bgBlur === "compositor" ? "ext-background-effect" : Settings.bgBlur;
         case "gestures":
@@ -95,6 +117,8 @@ Singleton {
             return Settings.singleClickActivate ? "on" : "off";
         case "hiddenMenuAnimations":
             return Settings.hiddenMenuAnimations ? "on" : "off";
+        case "powerAnimations":
+            return Settings.powerAnimations ? "on" : "off";
         case "preload":
             return Settings.preload ? "on" : "off";
         case "fontFamily":
@@ -104,7 +128,7 @@ Singleton {
         case "volWidth":
             return Settings.volWidth + " px";
         case "volAnim":
-            return Settings.volAnim;
+            return root.styleName(Settings.volAnim);
         case "volStyle":
             return Settings.volStyle === "sine" ? "sine wave" : Settings.volStyle;
         case "volPercent":
@@ -118,7 +142,7 @@ Singleton {
         case "notifStyle":
             return Settings.notifStyle;
         case "notifAnim":
-            return Settings.notifAnim;
+            return root.styleName(Settings.notifAnim);
         case "wallpaperStyle":
             // the internal ids are historical (see Settings.wallpaperStyle);
             // these are what the user is actually shown
@@ -161,6 +185,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = !Settings.hiddenMenuAnimations;
+            break;
+        case "powerAnimations":
+            Settings.powerAnimations = !Settings.powerAnimations;
             break;
         case "preload":
             Settings.preload = !Settings.preload;
@@ -223,6 +250,13 @@ Singleton {
         Settings.save();
     }
 
+    function toggleScrambleSection(name: string): void {
+        const sections = Object.assign({}, Defaults.scrambleSections, Settings.scrambleSections);
+        sections[name] = sections[name] === false;
+        Settings.scrambleSections = sections;
+        Settings.save();
+    }
+
     function toggleAlert(name: string): void {
         const alerts = Object.assign({}, Defaults.pibbleAlerts, Settings.pibbleAlerts);
         alerts[name] = alerts[name] === false;
@@ -272,7 +306,11 @@ Singleton {
             Settings.animStyle = "bloom";
             break;
         case "textScramble":
+            // the master switch and its per-surface chips are one row, so they
+            // reset together - a reset that left five surfaces switched off
+            // would read as the master not having come back
             Settings.textScramble = true;
+            Settings.scrambleSections = Defaults.scrambleSections;
             break;
         case "fontScale":
             Settings.fontScale = 1.0;
@@ -288,6 +326,9 @@ Singleton {
             break;
         case "hiddenMenuAnimations":
             Settings.hiddenMenuAnimations = true;
+            break;
+        case "powerAnimations":
+            Settings.powerAnimations = true;
             break;
         case "preload":
             Settings.preload = true;

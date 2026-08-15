@@ -1,0 +1,120 @@
+import QtQuick
+import "root:/services"
+
+// The little stage every row on the Animations tab draws its preview into,
+// centred under the row it belongs to exactly as the tile picker's canvas sits
+// under its own (see GridSizePicker). Nothing frames it: the box the user sees
+// is whatever the preview itself draws, which for most of them is one 16:9
+// screen wearing the picker's own tile styling.
+//
+// A preview *rests* on the pose its animation settles at and replays on demand:
+// when the value it demonstrates changes (`replayOn`), when the pointer crosses
+// it, and when the tab comes on screen. Nothing loops - seven boxes moving
+// forever, one beside each setting, would be unreadable and would keep the
+// compositor redrawing a pane the user is trying to read.
+//
+// Previews hang explicit animations off `started` rather than toggling a
+// "shown" flag, because every one of them spells out its own `from`: a replay
+// lands on the start pose in the frame it is asked for, with no hidden frame to
+// sequence first, and the settled pose is simply where the last run left off.
+Item {
+    id: root
+
+    // Whatever this preview demonstrates - assign the setting it reads, and any
+    // change to it replays the run. Stepping the value is the moment a preview
+    // is most worth seeing, and it costs the caller one binding.
+    property var replayOn: null
+    // Stagger for the whole-tab replay below, so the column arrives as a
+    // cascade rather than as seven boxes twitching in lockstep.
+    property int playDelay: 0
+    signal started
+
+    // Whether this preview is a screen: a clipped stage inside one of the tile
+    // picker's tiles. True for everything that animates something onto a
+    // display; false for the two that *are* the thing (the tile grid, and the
+    // scramble's own word).
+    property bool screen: true
+    property color outline: Qt.alpha(Theme.muted, 0.3)
+
+    default property alias contents: stage.data
+    readonly property real stageWidth: stage.width
+    readonly property real stageHeight: stage.height
+
+    // How much slower a preview runs than the thing it stands for. The real
+    // animations are tuned to be *felt* while the user is on their way
+    // somewhere else; here they are the subject, and at full speed a 220ms
+    // notification pop is over before the eye that went looking for it has
+    // arrived. Applied to every duration a preview takes from the real code,
+    // never to the real code itself - and 0 stays 0, so an "off" style still
+    // lands instantly.
+    readonly property real slowdown: 2.2
+    function slow(ms: int): int {
+        return Math.round(ms * root.slowdown);
+    }
+
+    // Whether this preview may run at all: its own visibility (the settings
+    // pane is only mapped while that pane is showing), and the tab's - which
+    // the filmstrip expresses by sliding inactive tabs sideways behind a clip
+    // at full opacity, so nothing else here would know the box can't be seen.
+    // Same ancestor-declared switch the text scramble uses, read the same way:
+    // every ancestor is visited so this stays subscribed to all of them (see
+    // ScrambleText's ancestorSuppressed).
+    readonly property bool active: {
+        let on = root.visible;
+        for (let item = root.parent; item; item = item.parent) {
+            if (item.previewsActive === false)
+                on = false;
+        }
+        return on;
+    }
+    onActiveChanged: if (root.active)
+        root.play(root.playDelay)
+    onReplayOnChanged: root.play(0)
+
+    function play(delay: int): void {
+        if (!root.active)
+            return;
+        if (delay <= 0) {
+            root.started();
+            return;
+        }
+        delayTimer.interval = delay;
+        delayTimer.restart();
+    }
+    Timer {
+        id: delayTimer
+        onTriggered: root.started()
+    }
+
+    width: 100
+    height: 56
+    anchors.horizontalCenter: parent.horizontalCenter
+
+    Item {
+        id: stage
+        anchors.fill: parent
+        // inset by the outline's own width, so a fill that reaches the edge
+        // sits inside the tile rather than under it
+        anchors.margins: root.screen ? 1 : 0
+        clip: root.screen
+    }
+    // Drawn after the stage, so the tile's edge stays crisp over whatever ran
+    // up against it - and so the corner rounding reads, which a rectangular
+    // clip alone can't give the fill behind it. Same radius the picker's tiles
+    // use, where the mismatch is a pixel at each corner.
+    Rectangle {
+        visible: root.screen
+        anchors.fill: parent
+        radius: 5
+        color: "transparent"
+        border.width: 1
+        border.color: root.outline
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        onEntered: root.play(0)
+        onClicked: root.play(0)
+    }
+}
