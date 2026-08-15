@@ -33,6 +33,7 @@ Necessary:
 |---|---|
 | A Wayland compositor, e.g. [Niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland), [Sway](https://github.com/swaywm/sway) | Hosts the shell |
 | [Quickshell](https://github.com/quickshell-mirror/quickshell) | Runs the shell |
+| [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews (install via your distro's package manager) |
 
 Optional (required for full feature set):
 
@@ -41,7 +42,6 @@ Optional (required for full feature set):
 | [matugen](https://github.com/InioX/matugen) | Wallpaper-derived color theme |
 | [ImageMagick](https://github.com/ImageMagick/ImageMagick) | Static wallpaper/clipboard thumbnails |
 | [ffmpeg](https://ffmpeg.org/) | Live wallpaper thumbnails |
-| [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews (install via your distro's package manager) |
 | [awww](https://codeberg.org/LGFae/awww) | Recommended static wallpaper backend (can use any) |
 | [mpvpaper](https://github.com/GhostNaN/mpvpaper) | Recommended live wallpaper backend (can use any) |
 | [cliphist](https://github.com/sentriz/cliphist) | Clipboard history support |
