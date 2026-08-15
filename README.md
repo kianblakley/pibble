@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/Built%20with-Quickshell-875DC4?labelColor=1a1a1a&style=for-the-badge" alt="Built with Quickshell">
 </p>
 
-![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png)
+![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png?v=2)
 
 ## Features
 
