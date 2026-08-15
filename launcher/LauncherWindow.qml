@@ -737,15 +737,20 @@ PanelWindow {
         // cells record expandOrigin synchronously on the change above
         Qt.callLater(() => LauncherState.expandAnimStart());
         // Skip the on-demand decode when the clip's native size already
-        // fits the thumb cap (480x640): the thumb (built with magick's
-        // "only shrink if larger" >) IS the full-res image there, so
-        // decoding again would just swap the Image source to identical
-        // pixels - and any source change makes QML clear the current
-        // pixmap and reload async, flashing blank for no visual gain.
+        // fits the thumb cap (307200 pixels): the thumb (built with
+        // magick's "only shrink if larger" >) IS the full-res image
+        // there, so decoding again would just swap the Image source to
+        // identical pixels - and any source change makes QML clear the
+        // current pixmap and reload async, flashing blank for no visual
+        // gain. Pixel count and not a bounding box, because that is the
+        // shape of the cap the thumbnail pass applies (see Clipboard's
+        // thumbnails command); testing the two sides separately would
+        // call a shrunken thumb full-res and leave the expanded view on
+        // it forever.
         const d = (clip.dims || "").split("x");
         const iw = parseInt(d[0]) || 0;
         const ih = parseInt(d[1]) || 0;
-        if (clip.image && (iw > 480 || ih > 640)) {
+        if (clip.image && iw * ih > 307200) {
             LauncherState.expandedFullId = clip.id;
             clipFullImg.forId = clip.id;
             clipFullImg.command = ["bash", "-c", `

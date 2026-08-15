@@ -708,6 +708,17 @@ Singleton {
     // attached (rather than wrapped) so every other lookup elsewhere
     // (expandClip, clipCopy, ...) keeps working against plain clip
     // fields unchanged.
+    // How much of a clip a tile is ever given, filtered or not. A tile tops out
+    // at a square (see ClipboardPage's tileH), which at this width and size
+    // holds a few hundred characters, so this is comfortably past what can be
+    // seen - what it saves is laying out the scan's whole 20000-character field
+    // per tile, three times over (the two measurements and the label itself).
+    readonly property int clipTileChars: 600
+    // How much of that a filtered tile spends on the text *ahead* of the match,
+    // i.e. how far down the tile the highlight lands. Two lines or so: enough
+    // that the match reads as being in the middle of something, little enough
+    // that it can't be pushed off the bottom.
+    readonly property int clipSnippetLead: 70
     property var clipMatches: {
         const raw = root.query.trim();
         if (!raw)
@@ -726,17 +737,21 @@ Singleton {
             const m = Clipboard.searchMatch(text, terms);
             if (m === null)
                 continue;
-            // Radius taken from this clip's own preview rather than fixed:
-            // the tile is sized to that preview (see ClipboardPage's
-            // measureRest), so a snippet cut to about its length lands in
-            // the room the tile already has. A fixed radius wide enough to
-            // be useful is around twice a cliphist preview, which grew every
-            // matching tile to twice its resting height the moment a query
-            // narrowed onto it - the grid reflowed on each keystroke. The
-            // floor is for a clip whose preview is short enough that
-            // matching it would leave no context around the match at all.
-            const pad = Math.max(24, Math.round((c.preview.length - (m.anchor.end - m.anchor.start)) / 2));
-            const snip = Clipboard.snippet(text, m, pad);
+            // Cut to the same length the tile fills with when no query is on
+            // (clipTileChars), so a filtered tile is the same size as the one
+            // it replaces rather than a smaller one - the snippet is a
+            // different view of the clip, not less of it. It used to be cut to
+            // about the length of cliphist's own one-line preview, which was
+            // right while that preview was what a tile held, and left every
+            // matching tile a few lines tall once tiles started filling with
+            // the decoded text instead.
+            //
+            // Split unevenly around the match, not centred on it: the tile
+            // truncates from the bottom, so an even split would put the match
+            // halfway down a snippet whose second half is off screen. This
+            // keeps it a couple of lines in, with the rest of the room spent on
+            // what follows.
+            const snip = Clipboard.snippet(text, m, root.clipSnippetLead, root.clipTileChars - root.clipSnippetLead);
             scored.push({ c: Object.assign({}, c, { hiText: snip.text, hiSpans: snip.hi }), s: m.score });
         }
         scored.sort((x, y) => y.s - x.s);

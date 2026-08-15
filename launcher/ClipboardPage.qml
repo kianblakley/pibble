@@ -202,6 +202,28 @@ Item {
                                 }
                             }
 
+                            // What this tile paints when there's no query on.
+                            // cliphist's own list preview is a single line cut
+                            // at ~100 characters with an ellipsis of its own,
+                            // so a tile with room for a dozen lines used to
+                            // show that cut line and leave the rest of its box
+                            // empty - the tile has to fill before it truncates.
+                            // The decoded text (which the scan already carries
+                            // for the search) is what it fills with.
+                            //
+                            // Cut to clipTileChars, which is also what a query's
+                            // snippet is cut to, so the two views of a clip are
+                            // the same size. Trimmed because `full` is raw
+                            // where `preview` arrives trimmed, and a clip
+                            // opening on a blank line would otherwise spend the
+                            // tile's first line on nothing.
+                            readonly property string bodyText: {
+                                const c = cell.shownClip;
+                                if (!c || c.image)
+                                    return "";
+                                return (c.full || c.preview).slice(0, LauncherState.clipTileChars).trim();
+                            }
+
                             // text tiles grow with content up to a square;
                             // image tiles keep their real aspect ratio
                             // measure the wrapped text for an exact fit:
@@ -230,7 +252,7 @@ Item {
                                     const c = cell.shownClip;
                                     if (!c || c.image)
                                         return "";
-                                    return c.hiSpans ? c.hiText : c.preview;
+                                    return c.hiSpans ? c.hiText : cell.bodyText;
                                 }
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                             }
@@ -250,12 +272,35 @@ Item {
                                 width: 214
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
-                                text: {
-                                    const c = cell.shownClip;
-                                    return c && !c.image ? c.preview : "";
-                                }
+                                text: cell.bodyText
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                             }
+                            // The height this image's own aspect asks for, taken
+                            // on the clipping box's width (the picture is drawn
+                            // into a box inset by 4 on every side, so the
+                            // aspect goes on 240-8, not on the tile's full
+                            // width) and carried back out to the tile by adding
+                            // that inset back on. Taken on 240 the box came out
+                            // fractionally too flat for the image, and
+                            // PreserveAspectFit answered by pillarboxing it: a
+                            // landscape screenshot sat a few pixels short of
+                            // both sides.
+                            readonly property int imgNatH: {
+                                const c = shownClip;
+                                if (!c || !c.image)
+                                    return 0;
+                                const d = (c.dims || "").split("x");
+                                const iw = parseInt(d[0]) || 16;
+                                const ih = parseInt(d[1]) || 9;
+                                return Math.round(232 * ih / iw) + 8;
+                            }
+                            // Whether the clamps below had to hand this image a
+                            // box of the wrong shape - a panorama wants less
+                            // height than 70, a phone screenshot far more than
+                            // 320. That's the one case the picture can't fill
+                            // its box and keep its aspect, and it's what the
+                            // Image's fillMode turns on.
+                            readonly property bool imgClamped: imgNatH > 0 && (imgNatH < 70 || imgNatH > 320)
                             readonly property real lineHpx: measureText.lineCount > 0
                                 ? measureText.paintedHeight / measureText.lineCount
                                 : Theme.fontSize(16)
@@ -263,26 +308,8 @@ Item {
                                 const c = shownClip;
                                 if (!c)
                                     return 0;
-                                if (c.image) {
-                                    const d = (c.dims || "").split("x");
-                                    const iw = parseInt(d[0]) || 16;
-                                    const ih = parseInt(d[1]) || 9;
-                                    // the picture is drawn into the clipping box
-                                    // below, which is inset by 4 on every side -
-                                    // so the aspect has to be taken on 240-8, not
-                                    // on the tile's full width. Taken on 240 the
-                                    // box came out fractionally too flat for the
-                                    // image, and PreserveAspectFit answered by
-                                    // pillarboxing it: a landscape screenshot sat
-                                    // a few pixels short of both sides. The clamps
-                                    // are the only thing that can still hand the
-                                    // image a box of the wrong shape - a panorama
-                                    // wants less height than 70, a phone
-                                    // screenshot far more than 320 - and the
-                                    // picture is cropped to fill rather than
-                                    // letterboxed there (see fillMode below).
-                                    return Math.max(70, Math.min(320, Math.round(232 * ih / iw) + 8));
-                                }
+                                if (c.image)
+                                    return Math.max(70, Math.min(320, cell.imgNatH));
                                 // capped on whole lines rather than on raw pixels:
                                 // a snippet too long for the tile is cut by the
                                 // highlight's clip either way (TextEdit can't
@@ -293,6 +320,26 @@ Item {
                                 const rest = Math.max(1, measureRest.lineCount);
                                 const fits = Math.max(1, Math.floor((240 - 26) / lineHpx));
                                 return Math.max(44, Math.ceil(Math.min(lines, rest, fits) * lineHpx) + 26);
+                            }
+                            // whole lines of the painted string this tile has
+                            // room for, i.e. where the label truncates
+                            readonly property int shownLines: Math.max(1, Math.floor((tileH - 26) / Math.max(1, lineHpx)))
+                            // Roughly how many characters of that string are on
+                            // screen, for the scramble to be paced across - see
+                            // paceLength in ui/ScrambleText.qml. Now that a tile
+                            // fills with the decoded text rather than cliphist's
+                            // one-line preview, most of what it holds can be
+                            // past the truncation, and a resolve spread over the
+                            // whole string hands the visible part back finished
+                            // within its own fraction of the span. Estimated off
+                            // the line counts, which is what the label's own
+                            // truncation goes by. 0 for a string that fits
+                            // whole, which paces across all of it.
+                            readonly property int visibleChars: {
+                                const lines = Math.max(1, measureText.lineCount);
+                                if (lines <= shownLines)
+                                    return 0;
+                                return Math.max(1, Math.round(measureText.text.length * shownLines / lines));
                             }
                             width: 240
                             height: tileH > 0 ? tileH + 24 : 0
@@ -374,16 +421,26 @@ Item {
                                     Image {
                                         anchors.fill: parent
                                         asynchronous: true
-                                        // Crop, not fit: tileH above already
-                                        // gives this box the image's own aspect,
-                                        // so the two agree everywhere except at
-                                        // the 70/320 clamps - and there fitting
-                                        // is what left a panorama floating in a
-                                        // band of empty tile. Cropping fills the
-                                        // tile the clamp insisted on instead,
-                                        // which is what the wallpaper tiles do
-                                        // with their own fixed 16:9 boxes.
-                                        fillMode: Image.PreserveAspectCrop
+                                        // Crop everywhere the box already has
+                                        // the image's own aspect (tileH above
+                                        // gives it that), so the picture meets
+                                        // all four edges with nothing thrown
+                                        // away, the way the wallpaper tiles fill
+                                        // their fixed 16:9 boxes.
+                                        //
+                                        // At the 70/320 clamps it can't have
+                                        // both, and there the aspect wins: the
+                                        // shapes that reach a clamp are extreme
+                                        // enough that cropping to the box keeps
+                                        // barely a tenth of the picture - a
+                                        // 5120x183 strip came down to a
+                                        // 232-wide window on 13% of its width,
+                                        // which reads as a different image
+                                        // rather than a tight crop of this one.
+                                        // Fitting leaves a band of empty tile
+                                        // above and below instead, which is at
+                                        // least the clip the user copied.
+                                        fillMode: cell.imgClamped ? Image.PreserveAspectFit : Image.PreserveAspectCrop
                                         sourceSize: Qt.size(480, 640)
                                         source: {
                                             const c = cell.shownClip;
@@ -401,15 +458,22 @@ Item {
                                     visible: cell.shownClip !== null && cell.shownClip.image !== true && !cell.shownClip.hiSpans
                                     anchors.fill: parent
                                     anchors.margins: 13
-                                    // Left unescaped under a highlight: there the markup is
-                                    // built by slicing this string at the match's own offsets,
-                                    // and escaping shifts them (highlightMarkup escapes each
-                                    // slice itself). This label isn't the one painting then.
+                                    // Always the raw string, and painted as plain text. Under a
+                                    // highlight it has to be raw, since the markup below is
+                                    // built by slicing it at the match's own offsets and
+                                    // escaping would shift them (highlightMarkup escapes each
+                                    // slice itself). Without one there is no markup to render
+                                    // at all, and escaping for a rich-text pass this label no
+                                    // longer needs only hands the scramble entities and <br>
+                                    // tags to churn through - which StyledText then reads as
+                                    // markup of its own halfway through a run. A body full of
+                                    // line breaks (which is what the tile fills with now) made
+                                    // that unmissable.
                                     content: {
                                         const c = cell.shownClip;
                                         if (!c)
                                             return "";
-                                        return c.hiSpans ? c.hiText : Format.escapeHtml(c.preview);
+                                        return c.hiSpans ? c.hiText : cell.bodyText;
                                     }
                                     // Under a highlight this label is hidden and the TextEdit
                                     // below is what's on screen, so that is what decides when
@@ -418,10 +482,11 @@ Item {
                                     // see the caption above
                                     replayOnChange: true
                                     replayStagger: Anim.stagger(cell.waveSlot, Settings.clipsCols, 60)
-                                    textFormat: Text.StyledText
+                                    paceLength: cell.visibleChars
+                                    textFormat: Text.PlainText
                                     wrapMode: Text.Wrap
                                     elide: Text.ElideRight
-                                    maximumLineCount: Math.max(1, Math.floor((cell.tileH - 26) / Math.max(1, cell.lineHpx)))
+                                    maximumLineCount: cell.shownLines
                                     color: Theme.fg
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                                 }
