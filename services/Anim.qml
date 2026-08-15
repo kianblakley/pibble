@@ -142,18 +142,27 @@ Singleton {
     // meant (see Settings.heal).
     //
     // Whether `section` may scramble at all. "" is every label on the
-    // launcher's own stage, which is what "pages" names: a label there arrives
-    // when a pane does, so its scramble is that pane entrance's, and it rides
-    // the tile style on top of its own switch ("none" leaves the pane no
-    // entrance to decorate). The flyouts and the two hidden menus ride their
-    // own animation setting instead, which they check at the label (see
+    // launcher's own stage: a label there arrives when a pane does, so its
+    // scramble is that pane entrance's - it answers to that page's own switch,
+    // and rides the tile style on top of it ("none" leaves the pane no entrance
+    // to decorate). The flyouts and the two hidden menus ride their own
+    // animation setting instead, which they check at the label (see
     // ScrambleText's `scramble`, and SettingsPane's scrambleSuppressed).
     function scrambleAllowed(section: string): bool {
-        const name = section === "" ? "pages" : section;
+        // "" is the launcher's own stage, and the stage is whichever page is on
+        // it - so the label answers to that page's chip. Which page that is has
+        // to be pushed down here: this is a service, and the pane it means
+        // lives in the launcher (see stagePane).
+        const stage = section === "";
+        const name = stage ? root.stagePane : section;
         if (!Settings.scrambleEnabled(name))
             return false;
-        return !(name === "pages" && root.style === "none");
+        return !(stage && root.style === "none");
     }
+    // Which page the launcher is showing, for the "" case above. Written by
+    // LauncherState on every pane change, the same way Clipboard.paneVisible
+    // is - never read from there, which would point this the wrong way.
+    property string stagePane: "clock"
 
     // Bumped once per *pane* run, and mixed into each label's own seed, so a
     // label draws different noise on every open instead of replaying one

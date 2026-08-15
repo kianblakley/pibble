@@ -74,15 +74,16 @@ JsonAdapter {
     // to read it back off an old config - heal() folds a stored `false` into
     // those surfaces and puts this back to true, once. Nothing else reads it.
     property bool textScramble: true
-    // which surfaces the text scramble covers: pages, flyouts, settings, power
-    // (see Anim.scrambleAllowed). Whether a pane's text resolves out of random
+    // Which surfaces the text scramble covers - every page of the launcher's
+    // stage, each flyout, the settings pane, the power prompts (see
+    // Anim.scrambleAllowed). Whether a pane's text resolves out of random
     // glyphs as that pane opens; rides animStyle - "none" leaves nothing to
-    // ride - but switchable on its own, being much the louder of the two. Not
-    // one key per row of the Animations tab - the two flyouts share one, since
-    // a notification and a volume step are the same thing to a user deciding
-    // whether text arriving out of the corner of their eye should churn.
-    // Unknown keys default to on, so a surface added in a later release
-    // scrambles for configs written before it existed.
+    // ride - but switchable on its own, being much the louder of the two.
+    // One key per surface the user can point at, since the effect is welcome on
+    // a pane they opened and unwelcome on a notification that arrived while
+    // they were doing something else. Unknown keys default to on, so a custom
+    // page (which has no key) scrambles, as does a surface added in a later
+    // release for configs written before it existed.
     property var scrambleSections: Defaults.scrambleSections
     // independent of animStyle: gates the settings pane's entrance spring and
     // every control in it, which is not a "grid" (see Anim.menu(), including
@@ -354,6 +355,32 @@ JsonAdapter {
         // stored "off" turns them all off, which is the same shell the user
         // left; putting the key itself back to true is what makes this a no-op
         // on the next load (and on a fresh adapter, which starts there).
+        // "pages" split into one key per page and "flyouts" into one per
+        // flyout, so the chips could name what they actually cover. Each old
+        // key's value carries onto the ones that replaced it, and is dropped -
+        // which is also what stops this running twice.
+        const sections = settings.scrambleSections ?? {};
+        const hadPages = Object.prototype.hasOwnProperty.call(sections, "pages");
+        const hadFlyouts = Object.prototype.hasOwnProperty.call(sections, "flyouts");
+        if (hadPages || hadFlyouts) {
+            const split = Object.assign({}, Defaults.scrambleSections, sections);
+            if (hadPages) {
+                const on = sections.pages !== false;
+                split.clock = on;
+                split.apps = on;
+                split.walls = on;
+                split.clips = on;
+                delete split.pages;
+            }
+            if (hadFlyouts) {
+                const on = sections.flyouts !== false;
+                split.volume = on;
+                split.notifs = on;
+                delete split.flyouts;
+            }
+            settings.scrambleSections = split;
+            settings.save();
+        }
         if (settings.textScramble === false) {
             const sections = Object.assign({}, Defaults.scrambleSections, settings.scrambleSections);
             for (const surface of Object.keys(sections))

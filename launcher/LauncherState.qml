@@ -347,6 +347,9 @@ Singleton {
     // actually looking at the clips pane.
     onPaneChanged: {
         Clipboard.paneVisible = root.pane === "clips";
+        // a stage label's scramble belongs to whichever page it is standing on,
+        // and a service can't reach in here to ask - see Anim.stagePane
+        Anim.stagePane = root.pane;
         if (root.pane !== "clock")
             Anim.beginStagger();
         // Starting the clock is all this does - when each label actually

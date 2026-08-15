@@ -19,8 +19,11 @@ QtObject {
     readonly property var pageIndicators: ({ query: true, dots: true })
     readonly property var flyouts: ({ volume: true, notifs: true })
     // per-surface switches for the text scramble, and the whole of that
-    // setting (see Anim.scrambleAllowed)
-    readonly property var scrambleSections: ({ pages: true, flyouts: true, settings: true, power: true })
+    // setting (see Anim.scrambleAllowed). One key per surface the user can
+    // point at: every built-in page of the launcher's stage, each flyout, the
+    // settings pane and the power prompts. A custom page has no key here and
+    // needs none - an unknown one reads as on (see Settings.scrambleEnabled).
+    readonly property var scrambleSections: ({ clock: true, apps: true, walls: true, clips: true, volume: true, notifs: true, settings: true, power: true })
     readonly property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
     readonly property var keybinds: ({
         cycle: "Tab",

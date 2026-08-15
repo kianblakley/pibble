@@ -65,17 +65,29 @@ Singleton {
     readonly property var tileAnimationChoices: ["bloom", "pop", "cascade", "fade", "slide", "none"]
 
     // The chips under the Animations tab's text-scramble row: one per surface
-    // the effect shows up on, in the order that tab lists those surfaces. Ids
-    // are Settings.scrambleSections' keys (see Anim.scrambleAllowed). Fewer
-    // than there are rows on that tab: the launch reveal has no text of its own
-    // (every label it uncovers belongs to a pane, i.e. to "pages"), and the two
-    // flyouts share one chip.
+    // the effect shows up on. Ids are Settings.scrambleSections' keys (see
+    // Anim.scrambleAllowed). The launcher's own pages come first, in the order
+    // the shell cycles them, then the two menus and the two flyouts - which is
+    // also the order the tab wraps them in, four to a line, so the pages sit on
+    // one and everything that isn't a page on the next. The launch reveal has
+    // no chip: it has no text of its own, every label it uncovers belonging to
+    // whichever page it uncovers.
+    //
+    // Within the second line the two menus come before the two flyouts, which
+    // is not the order the ids fall in: the tab's chip grid sizes each column
+    // to its widest word, and this pairing is the one that leaves the least
+    // slack under the pages above it.
     readonly property var scrambleSectionChips: [
-        { id: "pages", label: "pages" },
-        { id: "flyouts", label: "flyouts" },
+        { id: "clock", label: "clock" },
+        { id: "apps", label: "apps" },
+        { id: "walls", label: "wallpapers" },
+        { id: "clips", label: "clipboard" },
         { id: "settings", label: "settings" },
-        { id: "power", label: "power" }
+        { id: "power", label: "power" },
+        { id: "notifs", label: "notifications" },
+        { id: "volume", label: "volume" }
     ]
+    readonly property int scrambleChipColumns: 4
 
     // The user-facing spelling of a motion style. Only "none" differs, and only
     // here: the stored id stays "none" everywhere (Settings.heal, and every

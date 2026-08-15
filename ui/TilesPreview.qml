@@ -8,7 +8,7 @@ import "root:/services"
 // springIn (see it) with the same from-state, duration, easing and stagger
 // offset, slowed so a "bloom" cascade reads as a cascade.
 //
-// Four across and three down rather than a square: "slide" moves a whole row at
+// Four across and two down rather than a square: "slide" moves a whole row at
 // a time and "cascade" runs along one, and neither reads as itself on a grid
 // with as many rows as it has columns.
 //
@@ -28,7 +28,7 @@ AnimPreview {
     screen: false
 
     readonly property int cols: 4
-    readonly property int rows: 3
+    readonly property int rows: 2
     // GridSizePicker's own figures - see its tileSize/tileGap
     readonly property int tileSize: 26
     readonly property int gap: 6

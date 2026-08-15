@@ -200,7 +200,7 @@ Scope {
                 // while it mattered - so no replayOnChange: the effect plays as
                 // the OSD arrives and the number is plain from then on.
                 scramble: window.mode !== "none"
-                scrambleSection: "flyouts"
+                scrambleSection: "volume"
                 // this OSD comes and goes on its own schedule, with no part in
                 // the launcher's - see followsPane in ui/ScrambleText.qml
                 followsPane: false

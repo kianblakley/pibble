@@ -6,7 +6,8 @@ import "root:/services"
 // picture of a surface, because the effect *is* text and there is nothing else
 // to draw it as. The box is the card the volume and notification previews stand
 // up, in the same fill, so the sample reads as belonging to the same set as the
-// pictures above it.
+// pictures above it - drawn at the sample's size rather than at theirs (see
+// baseWidth below).
 //
 // Nothing here reimplements the effect: this is an ordinary ScrambleText
 // replayed on cue, so it resolves at exactly the span, hold and alphabet every
@@ -26,16 +27,35 @@ AnimPreview {
 
     onStarted: sampleText.replay()
 
-    // The ground the sample sits on: sized from the label's *resting* box, not
-    // its live one. Bound to the live width it breathed in and out a dozen
-    // times a second for the length of a run - the noise routinely pulls in a
-    // fallback glyph wider than the one it stands in for, and a centred box
-    // takes half of every such change out of its left edge.
+    // The card is the whole of this preview, rather than a card floating in a
+    // 16:9 stage the way the pictures above it are drawn. Every other preview
+    // is a picture of a screen, and a screen is the same shape however big it
+    // is drawn; this one's subject is a line of shell text at the shell's own
+    // size, so a stage around it was empty space by construction - and the eye
+    // reads that space as the gap between the chips and the sample, which put
+    // the sample nowhere near as close to its row as every other preview is to
+    // its own.
+    //
+    // Which is also why it takes no `unit`: there is nothing here to draw
+    // larger, and it is a fixed block in the tab's height budget for the same
+    // reason the tile grid is (see AnimationsTab.previewUnit). The padding is
+    // off the sample's own line instead, so the card stays the same pill under
+    // any type scale.
+    readonly property real padY: Math.round(sampleText.restHeight * 0.4)
+    readonly property real padX: Math.round(sampleText.restHeight * 1.2)
+    // Sized from the label's *resting* box, not its live one. Bound to the live
+    // width it breathed in and out a dozen times a second for the length of a
+    // run - the noise routinely pulls in a fallback glyph wider than the one it
+    // stands in for, and a centred box takes half of every such change out of
+    // its left edge.
+    baseWidth: sampleText.restWidth + root.padX * 2
+    baseHeight: sampleText.restHeight + root.padY * 2
+    // nothing to clip: the box is the card, not a screen the card sits on
+    screen: false
+
     Rectangle {
-        anchors.centerIn: sampleText
-        width: sampleText.restWidth + root.u(24)
-        height: sampleText.restHeight + root.u(6)
-        radius: Theme.radius(root.u(6))
+        anchors.fill: parent
+        radius: Theme.radius(root.padY)
         // the volume and notification previews' card, exactly
         color: Qt.alpha(Theme.muted, 0.22)
     }

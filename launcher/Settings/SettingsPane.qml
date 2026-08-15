@@ -27,7 +27,18 @@ Item {
     // alongside. Read by every ScrambleText in the pane, header and tabs
     // alike - see ui/ScrambleText.qml, and the tabs' own copy of this for the
     // filmstrip half of it.
-    readonly property bool scrambleSuppressed: !Settings.hiddenMenuAnimations
+    // Latched when the pane opens rather than bound to the setting: what this
+    // asks is "did this pane arrive with an entrance for the text to ride",
+    // which is a question about the open, not about the switch. Bound live,
+    // switching the setting back on flipped every label in here from suppressed
+    // to not, and a label reads that edge as its own arrival (see
+    // ScrambleText's onScreen) - so flicking this one switch re-ran the whole
+    // pane's scramble under the user's hand, mid-read.
+    property bool scrambleSuppressed: false
+    function latchScramble(): void {
+        root.scrambleSuppressed = !Settings.hiddenMenuAnimations;
+    }
+    Component.onCompleted: root.latchScramble()
     // ...and which of the Animations tab's per-surface scramble switches every
     // label under here answers to. Declared once for the whole subtree rather
     // than threaded through every control in it - same ancestor walk
@@ -67,8 +78,10 @@ Item {
     Connections {
         target: LauncherState
         function onPaneChanged() {
-            if (LauncherState.pane === "settings")
+            if (LauncherState.pane === "settings") {
+                root.latchScramble();
                 enterAnim.restart();
+            }
         }
     }
     ParallelAnimation {
