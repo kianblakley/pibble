@@ -45,9 +45,9 @@ Singleton {
         if (!root.paneVisible)
             return;
         if (!root.available)
-            Notifier.missingDependency("cliphist not found", "Install cliphist to enable clipboard history.");
+            Notifier.missingDependency(Strings.tr("cliphist not found"), Strings.tr("Install cliphist to enable clipboard history."));
         else if (!root.watcherRunning)
-            Notifier.error("Clipboard watcher not running", "Nothing is piping clipboard changes into cliphist - clipboard history won't update. Run these (e.g. from your compositor's autostart):\n" + Notifier.clipWatcherFixCommand);
+            Notifier.error(Strings.tr("Clipboard watcher not running"), Strings.tr("Nothing is piping clipboard changes into cliphist - clipboard history won't update. Run these (e.g. from your compositor's autostart):") + "\n" + Notifier.clipWatcherFixCommand);
     }
 
     Process {
@@ -161,7 +161,11 @@ Singleton {
                 if (imgs.length) {
                     thumbnails.command = ["bash", "-c", `
                         export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                        dir="$1" alerts="$2"; shift 2
+                        # $3/$4 carry the alert's already-translated summary
+                        # and body: the shell's language is a QML question, and
+                        # passing the finished strings in as argv beats trying
+                        # to interpolate them into a script body
+                        dir="$1" alerts="$2" depsum="$3" depbody="$4"; shift 4
                         mkdir -p "$dir"
                         warned=0
                         # Downscale at generation time so the on-disk thumb is
@@ -194,12 +198,14 @@ Singleton {
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
-                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots."
+                                    notify-send -a pibble -i system-software-install "$depsum" "$depbody"
                                 fi
                                 cp "$tmp" "$dir/$id.png"
                             fi
                             rm -f "$tmp"
-                        done`, "_", root.thumbDir, Settings.alertEnabled("missingDeps") ? "1" : "0"].concat(imgs);
+                        done`, "_", root.thumbDir, Settings.alertEnabled("missingDeps") ? "1" : "0",
+                        Strings.tr("magick not found"),
+                        Strings.tr("ImageMagick is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots.")].concat(imgs);
                     thumbnails.running = true;
                 }
             }

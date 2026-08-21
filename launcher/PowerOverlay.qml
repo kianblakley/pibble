@@ -107,7 +107,7 @@ Item {
     ScrambleText {
         anchors.horizontalCenter: parent.horizontalCenter
         y: powerRing.y + powerRing.height + 12
-        content: "power off?"
+        content: Strings.tr("power off?")
         color: Theme.fg
         // the prompts answer to the power switch, not the settings pane's -
         // see Anim.power() and Settings.scrambleSections
@@ -123,7 +123,7 @@ Item {
         // shuffle about on every reroll - see the apps pane's copy of this
         width: restWidth
         height: restHeight
-        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: 2 }
+        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: Strings.tracking(2) }
     }
 
     // reboot ring: mirror of powerRing, riding up from the bottom
@@ -215,7 +215,7 @@ Item {
         // below powerRing, mirrored around the bottom edge (scaled
         // powerPull-style - see the comment on powerRing's y above)
         anchors.bottomMargin: LauncherState.rebootPull * LauncherState.rebootRingScale + 12
-        content: "reboot?"
+        content: Strings.tr("reboot?")
         color: Theme.fg
         scrambleSection: "power" // see powerText's copy of this
         opacity: LauncherState.rebootProgress >= 0.85 ? 1 : 0
@@ -226,7 +226,7 @@ Item {
         // bottom-anchored and a taller fallback glyph would push the string up
         width: restWidth
         height: restHeight
-        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: 2 }
+        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(18); letterSpacing: Strings.tracking(2) }
     }
 
     // Swipe-to-go-back pill: rides in from the right edge as

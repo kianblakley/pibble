@@ -36,6 +36,12 @@ Column {
     SettingRow { key: "roundedCorners"; label: "Rounded corners" }
     SettingRow { key: "fontFamily"; label: "Font" }
     SettingRow { key: "fontScale"; label: "Font size" }
+    // Which of the shipped translations every string pibble writes is rendered
+    // through. Sits with the other two rows that decide how the shell reads
+    // rather than what it does - the font it is set in, and the size of it -
+    // since that is the question it answers. The readout is each language's
+    // own name for itself (see Defaults.languages).
+    SettingRow { key: "language"; label: "Language" }
     ThemeRow {}
     ColorPickerRow {}
 
@@ -49,9 +55,12 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Copy debug info"
+            // the button opposite, plus the margin it keeps off the edge
+            maxWidth: parent.width - 34 - debugBtn.width - 8
+            content: Strings.tr("Copy debug info")
         }
         Rectangle {
+            id: debugBtn
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
@@ -74,10 +83,11 @@ Column {
                     font { family: Icons.family; pixelSize: Theme.fontSize(16) }
                 }
                 ScrambleText {
-                    content: "Copy"
+                    content: Strings.tr("Copy")
                     // the Row's implicitWidth sizes the button around it, so
                     // the button would breathe with the noise otherwise
-                    width: restWidth
+                    measuresFit: true
+                    width: fitWidth
                     height: restHeight
                     color: Theme.accent
                     anchors.verticalCenter: parent.verticalCenter
@@ -138,6 +148,8 @@ Column {
                 id: versionReveal
                 interval: 420
                 onTriggered: {
+                    // deliberately untranslated: it is a joke in one voice,
+                    // and it is not a string the shell needs to say
                     versionText.content = "I vibe coded this using a microphone.";
                     versionText.opacity = 1;
                     revealTimeout.start();

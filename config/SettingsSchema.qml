@@ -88,13 +88,31 @@ Singleton {
     ]
     readonly property int scrambleChipColumns: 4
 
+    // Every value below the ‹ › arrows sits in a box that shares its width with
+    // the Navigation tab's chord boxes (see ui/Metrics.qml), which grow to fit
+    // the longest of them - so the whole set a language could ever show has to
+    // be enumerable up front. This is that set: everything display() can
+    // return for a key that uses Metrics.shortValueWidth, already translated.
+    // Metrics measures these and nothing else, which is why a value that isn't
+    // listed here is a value that can overhang its arrows.
+    readonly property var shortValueChoices: [Strings.tr("on"), Strings.tr("off"), Strings.tr("pill"), Strings.tr("sine wave"), Strings.tr("bubble"), "560 px", "10 s", "50%"]
+
     // The user-facing spelling of a motion style. Only "none" differs, and only
     // here: the stored id stays "none" everywhere (Settings.heal, and every
     // `=== "none"` check across the shell, read it), so this renames what is
     // shown without renaming the value - which would put every saved config's
-    // "none" back to the default.
+    // "none" back to the default. Translated on the way out with everything
+    // else display() returns - what a language may not do is rename the stored
+    // id, only how it is spelled on screen.
     function styleName(value: string): string {
-        return value === "none" ? "off" : value;
+        return Strings.tr(value === "none" ? "off" : value);
+    }
+
+    // The two words half the rows in the pane read out. Said once because a
+    // language's spelling of them has to be the same in all of them, and
+    // because they are two of the values Metrics sizes those rows against.
+    function onOff(value: bool): string {
+        return Strings.tr(value ? "on" : "off");
     }
 
     function cycle(current: string, choices: var, dir: int): string {
@@ -113,7 +131,7 @@ Singleton {
         case "animStyle":
             return root.styleName(Settings.animStyle);
         case "roundedCorners":
-            return Settings.roundedCorners ? "on" : "off";
+            return root.onOff(Settings.roundedCorners);
         case "fontScale":
             return Math.round(Settings.fontScale * 100) + "%";
         case "dimOpacity":
@@ -121,29 +139,34 @@ Singleton {
         case "launchAnimation":
             return root.styleName(Settings.launchAnimation);
         case "bgBlur":
-            return Settings.bgBlur === "compositor" ? "ext-background-effect" : Settings.bgBlur;
+            // the protocol's own name, which is not pibble's to translate
+            return Settings.bgBlur === "compositor" ? "ext-background-effect" : Strings.tr(Settings.bgBlur);
         case "gestures":
-            return Settings.gestures ? "on" : "off";
+            return root.onOff(Settings.gestures);
         case "singleClickActivate":
-            return Settings.singleClickActivate ? "on" : "off";
+            return root.onOff(Settings.singleClickActivate);
         case "hiddenMenuAnimations":
-            return Settings.hiddenMenuAnimations ? "on" : "off";
+            return root.onOff(Settings.hiddenMenuAnimations);
         case "powerAnimations":
-            return Settings.powerAnimations ? "on" : "off";
+            return root.onOff(Settings.powerAnimations);
         case "preload":
-            return Settings.preload ? "on" : "off";
+            return root.onOff(Settings.preload);
+        case "language":
+            return Strings.nameOf(Strings.code);
+        // a font's and an icon theme's names are the system's, not pibble's -
+        // only the "no choice made" placeholder standing in for them is
         case "fontFamily":
-            return Settings.fontFamily || "system default";
+            return Settings.fontFamily || Strings.tr("system default");
         case "iconTheme":
-            return Settings.iconTheme || "system default";
+            return Settings.iconTheme || Strings.tr("system default");
         case "volWidth":
             return Settings.volWidth + " px";
         case "volAnim":
             return root.styleName(Settings.volAnim);
         case "volStyle":
-            return Settings.volStyle === "sine" ? "sine wave" : Settings.volStyle;
+            return Strings.tr(Settings.volStyle === "sine" ? "sine wave" : Settings.volStyle);
         case "volPercent":
-            return Settings.volShowPercent ? "on" : "off";
+            return root.onOff(Settings.volShowPercent);
         case "volTimeout":
             return (Settings.volTimeout / 1000).toFixed(0) + " s";
         case "notifTimeout":
@@ -153,15 +176,15 @@ Singleton {
         case "batteryAlertLevel":
             return Settings.batteryAlertLevel + "%";
         case "notifStyle":
-            return Settings.notifStyle;
+            return Strings.tr(Settings.notifStyle);
         case "notifAnim":
             return root.styleName(Settings.notifAnim);
         case "wallpaperStyle":
             // the internal ids are historical (see Settings.wallpaperStyle);
             // these are what the user is actually shown
-            return Settings.wallpaperStyle === "carousel-flat" ? "carousel" : Settings.wallpaperStyle === "carousel" ? "parallax carousel" : Settings.wallpaperStyle;
+            return Strings.tr(Settings.wallpaperStyle === "carousel-flat" ? "carousel" : Settings.wallpaperStyle === "carousel" ? "parallax carousel" : Settings.wallpaperStyle);
         case "wallpaperLive":
-            return Settings.wallpaperLive ? "on" : "off";
+            return root.onOff(Settings.wallpaperLive);
         }
         return "";
     }
@@ -204,6 +227,11 @@ Singleton {
             break;
         case "preload":
             Settings.preload = !Settings.preload;
+            break;
+        case "language":
+            // cycled off the resolved code, not off the stored value: stepping
+            // away from an id nothing ships has to land somewhere real
+            Settings.language = root.cycle(Strings.code, Strings.ids, dir);
             break;
         case "fontFamily":
             // "" (system default) is a real choice, so it heads the list
@@ -355,6 +383,9 @@ Singleton {
             break;
         case "singleClickActivate":
             Settings.singleClickActivate = false;
+            break;
+        case "language":
+            Settings.language = Defaults.language;
             break;
         case "fontFamily":
             Settings.fontFamily = "";

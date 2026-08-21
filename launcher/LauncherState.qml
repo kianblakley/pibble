@@ -817,12 +817,14 @@ Singleton {
         if (!c)
             return [];
         const rows = [];
-        rows.push(["type", c.image ? c.kind + " image" : "text"]);
-        rows.push(["size", expandedBytes >= 0 ? Format.humanBytes(expandedBytes) : (c.image ? c.size : "…")]);
+        // c.kind is the image's own format ("png", "jpeg") as cliphist
+        // reported it, so it goes into the sentence rather than through it
+        rows.push([Strings.tr("type"), c.image ? Strings.trf("%1 image", c.kind) : Strings.tr("text")]);
+        rows.push([Strings.tr("size"), expandedBytes >= 0 ? Format.humanBytes(expandedBytes) : (c.image ? c.size : "…")]);
         if (c.image)
-            rows.push(["resolution", c.dims]);
+            rows.push([Strings.tr("resolution"), c.dims]);
         else if (expandedText)
-            rows.push(["lines", "" + expandedText.split("\n").length + (expandedBytes > 1500 ? " (truncated)" : "")]);
+            rows.push([Strings.tr("lines"), "" + expandedText.split("\n").length + (expandedBytes > 1500 ? " " + Strings.tr("(truncated)") : "")]);
         return rows;
     }
 

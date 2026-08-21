@@ -297,7 +297,7 @@ Item {
         visible: LauncherState.pane === "apps" && opacity > 0
         anchors.centerIn: parent
         opacity: 0
-        content: Apps.all.length === 0 ? "no apps found" : "no matches"
+        content: Strings.tr(Apps.all.length === 0 ? "no apps found" : "no matches")
         // pinned to the resting string's box, so a centered label (as every
         // one out here is) doesn't shuffle sideways on every reroll, or up and
         // down with the line height of whichever font carries a symbol

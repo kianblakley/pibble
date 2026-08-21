@@ -157,7 +157,7 @@ Singleton {
                     root.list = [];
                     if (root.lastMissingDir !== root.dir) {
                         root.lastMissingDir = root.dir;
-                        Notifier.error("Wallpaper folder not found", root.dir + "\n\nChange it in Settings > Pages > Wallpapers path.");
+                        Notifier.error(Strings.tr("Wallpaper folder not found"), root.dir + "\n\n" + Strings.tr("Change it in Settings > Pages > Wallpapers path."));
                     }
                     return;
                 }
@@ -214,7 +214,16 @@ Singleton {
                     generationRetry.restart();
                 root.generationMissing = missing;
                 Quickshell.execDetached(["bash", "-c", `
+                    # The last four arguments carry the two missing-dependency
+                    # alerts already translated: the shell's language is a QML
+                    # question, and passing the finished strings in as argv
+                    # beats trying to interpolate them into a script body
                     walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6"; shift 6
+                    # shifted first rather than read as the 7th-10th
+                    # positionals directly: this script is a QML template
+                    # literal, where a braced positional past $9 would be read
+                    # as a JS substitution rather than a shell one
+                    ffsum="$1" ffbody="$2" imsum="$3" imbody="$4"; shift 4
                     mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred"
                     # Layouts this cache has had before: wallpapers/ + xray/
                     # (from when the backdrop had a cache of its own, before
@@ -265,7 +274,7 @@ Singleton {
                                 if ! command -v ffmpeg >/dev/null 2>&1; then
                                     if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
                                         warnedFfmpeg=1
-                                        notify-send -a pibble -i system-software-install "ffmpeg not found" "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                        notify-send -a pibble -i system-software-install "$ffsum" "$ffbody"
                                     fi
                                 else
                                     # a video's only entry, and it goes in
@@ -309,7 +318,7 @@ Singleton {
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
                                     warnedMagick=1
-                                    notify-send -a pibble -i system-software-install "magick not found" "ImageMagick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews."
+                                    notify-send -a pibble -i system-software-install "$imsum" "$imbody"
                                 fi
                             else
                                 # "$f[0]": first frame only, so an animated
@@ -382,7 +391,11 @@ Singleton {
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
                     done`, "_", root.dir, SystemInfo.cacheRoot, wantBlur ? "1" : "0", Settings.alertEnabled("missingDeps") ? "1" : "0",
-                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)].concat(order));
+                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma),
+                    Strings.tr("ffmpeg not found"),
+                    Strings.tr("ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."),
+                    Strings.tr("magick not found"),
+                    Strings.tr("ImageMagick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews.")].concat(order));
             }
         }
     }

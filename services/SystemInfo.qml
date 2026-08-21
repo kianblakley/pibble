@@ -115,7 +115,7 @@ Singleton {
                 Quickshell.clipboardText = text;
                 // the blob runs to hundreds of lines; the toast only carries
                 // enough of it to be recognisable
-                Notifier.action("edit-copy", "Copied to clipboard", text.slice(0, 4000), "");
+                Notifier.action("edit-copy", Strings.tr("Copied to clipboard"), text.slice(0, 4000), "");
             }
         }
     }

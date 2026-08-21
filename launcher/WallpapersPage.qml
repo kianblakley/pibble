@@ -50,7 +50,7 @@ Item {
         y: LauncherState.powerPull - LauncherState.rebootPull
     }
         opacity: 0
-        content: Wallpapers.list.length === 0 ? "no wallpapers found" : "no matches"
+        content: Strings.tr(Wallpapers.list.length === 0 ? "no wallpapers found" : "no matches")
         // pinned to the resting string's box, so this centered label doesn't
         // shuffle about on every reroll - see the apps pane's copy of this
         width: restWidth

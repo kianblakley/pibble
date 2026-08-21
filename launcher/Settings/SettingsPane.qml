@@ -234,9 +234,12 @@ Item {
         }
 
         ScrambleText {
-            content: "SETTINGS"
+            content: Strings.tr("SETTINGS")
             color: Theme.muted
-            font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13); letterSpacing: 3 }
+            // tracking() rather than a bare 3: a script whose letters join or
+            // stack is pulled apart by letter-spacing rather than styled by it
+            // (see Strings.cursive)
+            font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13); letterSpacing: Strings.tracking(3) }
         }
 
         Item {
@@ -311,7 +314,13 @@ Item {
 
                             ScrambleText {
                                 id: tabLinkText
-                                content: tabLink.modelData.label
+                                // a custom page's tab is named by the page,
+                                // not by pibble, so only the built-ins are
+                                // looked up - tr() would pass an unknown
+                                // string through untouched either way, but
+                                // saying so keeps a page free to call itself
+                                // "General"
+                                content: tabLink.modelData.custom ? tabLink.modelData.label : Strings.tr(tabLink.modelData.label)
                                 // the links all arrive on one line with the
                                 // pane behind them, so nothing else would
                                 // stagger them across it (see ClockPage)

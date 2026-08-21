@@ -629,7 +629,7 @@ Item {
         // shuffle about on every reroll - see the apps pane's copy of this
         width: restWidth
         height: restHeight
-        content: "clipboard history is empty"
+        content: Strings.tr("clipboard history is empty")
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
     }
@@ -664,7 +664,7 @@ Item {
         }
         width: restWidth
         height: restHeight
-        content: "no matches"
+        content: Strings.tr("no matches")
         color: Theme.muted
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(14) }
 

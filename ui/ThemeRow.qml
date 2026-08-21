@@ -20,7 +20,7 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: undefined
         y: 6
-        content: "Color theme"
+        content: Strings.tr("Color theme")
     }
     Row {
         anchors.right: parent.right
@@ -36,7 +36,8 @@ Item {
         visible: root.hint !== ""
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        content: root.hint
+        maxWidth: root.width
+        content: Strings.tr(root.hint)
     }
     Row {
         anchors.right: parent.right
@@ -79,14 +80,23 @@ Item {
                         }
                     }
                     ScrambleText {
-                        anchors.horizontalCenter: parent.horizontalCenter
                         // the card is a fixed 80x80 and this Column is centred
                         // in it, so the label's own box has to hold still or
-                        // the swatches above it drift as the noise rerolls
-                        width: restWidth
+                        // the swatches above it drift as the noise rerolls -
+                        // and it is capped to the card it names, since a
+                        // preset's name in another language is under no
+                        // obligation to be as short as the English one and a
+                        // label wider than its card would paint over the card
+                        // beside it
+                        readonly property real cap: card.width - 8
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        measuresFit: true
+                        width: Math.min(fitWidth, cap)
                         height: restHeight
+                        elide: Text.ElideRight
+                        paceWidth: cap
                         horizontalAlignment: Text.AlignHCenter
-                        content: card.modelData.name
+                        content: Strings.tr(card.modelData.name)
                         color: card.active ? Theme.fg : Theme.muted
                         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                     }

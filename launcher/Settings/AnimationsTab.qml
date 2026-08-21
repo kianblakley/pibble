@@ -88,8 +88,9 @@ Column {
             height: chipGrid.lineHeight
 
             SettingLabel {
+                id: scrambleLabel
                 anchors.left: parent.left
-                content: "Text scramble"
+                content: Strings.tr("Text scramble")
             }
             ResetButton {
                 key: "textScramble"
@@ -106,7 +107,15 @@ Column {
                 anchors.left: parent.left
                 anchors.top: parent.bottom
                 anchors.topMargin: 2
-                content: "hover an element to replay its animation"
+                // This hint is the one in the pane that does not have its line
+                // to itself: it hangs off the label line, which puts it
+                // alongside the *second* line of chips rather than under the
+                // whole block. So its bound is where the chips start, not the
+                // column's edge - given the latter it simply grows into them,
+                // and a longer translation ends up printed over a tick box.
+                // The 8 is the gap SettingRow keeps between its own controls.
+                maxWidth: scrambleRow.width - 34 - chipGrid.width - 8
+                content: Strings.tr("hover an element to replay its animation")
             }
         }
         ChipRow {
@@ -119,9 +128,15 @@ Column {
             anchors.topMargin: 3
             columns: SettingsSchema.scrambleChipColumns
             // tighter than the 40 a two-chip row can afford: four of these
-            // to a line, and "notifications" is not a short word
-            columnSpacing: 22
+            // to a line, and "notifications" is not a short word. chipSpacing
+            // rather than columnSpacing so this stays the *natural* gap and
+            // the squeeze below is still free to close it further.
+            chipSpacing: 22
             rowSpacing: 2
+            // the eight chips are the widest block in the pane and they have a
+            // label beside them, so this is the row a longer set of words
+            // squeezes first - see ChipRow.maxWidth
+            maxWidth: parent.width - 34 - scrambleLabel.width - 16
             scramblePreview: true
             items: SettingsSchema.scrambleSectionChips
             isOn: Settings.scrambleEnabled

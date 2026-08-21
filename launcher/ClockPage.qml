@@ -147,7 +147,7 @@ Item {
                             // - dropping out of the layout only once it's faded
                             // low enough not to be noticed
                             readonly property string iconText: segment.modelData === "battery" ? (Battery.charging ? Icons.bolt : "")
-                                : segment.modelData === "weather" ? Weather.glyphFor(Weather.text) : ""
+                                : segment.modelData === "weather" ? Weather.glyph : ""
                             property string frozenText: iconText
                             onIconTextChanged: if (iconText.length > 0) frozenText = iconText
                             anchors.verticalCenter: parent.verticalCenter
@@ -164,8 +164,15 @@ Item {
                             // same freeze trick as segmentIcon above: hold the
                             // last real value while the segment fades out so
                             // the text doesn't blank before it's gone
+                            // The time is digits and a colon in every
+                            // language pibble ships, so it stays on one
+                            // format; the date is words, and both which words
+                            // and what order they come in belong to the
+                            // language - so its format string is itself
+                            // translated (see Translations' "dddd, MMMM d")
+                            // and rendered against that language's locale.
                             readonly property string valueText: segment.modelData === "time" ? Qt.formatDateTime(clock.date, "HH:mm")
-                                : segment.modelData === "date" ? Qt.formatDateTime(clock.date, "dddd, MMMM d")
+                                : segment.modelData === "date" ? clock.date.toLocaleDateString(Strings.dateLocale, Strings.tr("dddd, MMMM d"))
                                 : segment.modelData === "battery" ? Battery.text : Weather.text
                             property string frozenValue: valueText
                             onValueTextChanged: if (valueText.length > 0) frozenValue = valueText
@@ -194,7 +201,7 @@ Item {
                                 family: Theme.fontFamily
                                 pixelSize: segment.modelData === "time" && line.bigTime ? Theme.fontSize(120) : Theme.fontSize(segment.modelData === "date" ? 17 : 14)
                                 weight: segment.modelData === "time" && line.bigTime ? Font.DemiBold : Font.Normal
-                                letterSpacing: segment.modelData === "date" ? 3 : 1
+                                letterSpacing: Strings.tracking(segment.modelData === "date" ? 3 : 1)
                                 capitalization: segment.modelData === "date" ? Font.AllUppercase : Font.MixedCase
                             }
                         }

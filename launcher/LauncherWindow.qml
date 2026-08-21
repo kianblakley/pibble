@@ -645,7 +645,7 @@ PanelWindow {
             if (superseded)
                 superseded = false;
             else if (exitCode !== 0)
-                Notifier.error("Wallpaper command failed", Settings.wallCommand + "\n\nChange it in Settings > Pages > Wallpapers command.");
+                Notifier.error(Strings.tr("Wallpaper command failed"), Settings.wallCommand + "\n\n" + Strings.tr("Change it in Settings > Pages > Wallpapers command."));
             else if (wall)
                 root.commitWallpaper(wall);
             if (root.queuedWall) {
@@ -714,7 +714,7 @@ PanelWindow {
         // itself, not just its name
         if (Settings.alertEnabled("actions"))
             Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "preferences-desktop-wallpaper",
-                "-h", "string:image-path:" + wall.thumb, "Wallpaper changed", wall.path.split("/").pop()]);
+                "-h", "string:image-path:" + wall.thumb, Strings.tr("Wallpaper changed"), wall.path.split("/").pop()]);
     }
     function applyWallpaper(wall) {
         if (!wall)
@@ -786,7 +786,7 @@ PanelWindow {
         clipCopy.command = ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
             if ! command -v wl-copy >/dev/null 2>&1; then
-                [ "$5" = "1" ] && notify-send -a pibble -i system-software-install "wl-copy not found" "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."
+                [ "$5" = "1" ] && notify-send -a pibble -i system-software-install "$7" "$8"
                 exit 0
             fi
             tmp=$(mktemp)
@@ -804,9 +804,9 @@ PanelWindow {
             # entry is already cached by the thumbnail scan)
             if [ "$6" = "1" ]; then
                 if [ "$2" = "img" ] && [ -s "$3/$1.png" ]; then
-                    notify-send -a pibble -i edit-copy -h "string:image-path:$3/$1.png" "Copied to clipboard" "$body"
+                    notify-send -a pibble -i edit-copy -h "string:image-path:$3/$1.png" "$9" "$body"
                 else
-                    notify-send -a pibble -i edit-copy "Copied to clipboard" "$body"
+                    notify-send -a pibble -i edit-copy "$9" "$body"
                 fi
             fi
             sleep 0.3
@@ -816,7 +816,13 @@ PanelWindow {
                 cp "$3/$1.png" "$3/$nid.png" 2>/dev/null
             fi
             exit 0`, "_", clip.id, clip.image ? "img" : "txt", Clipboard.thumbDir,
-            clip.preview.slice(0, 60), Settings.alertEnabled("missingDeps") ? "1" : "0", Settings.alertEnabled("actions") ? "1" : "0"];
+            clip.preview.slice(0, 60), Settings.alertEnabled("missingDeps") ? "1" : "0", Settings.alertEnabled("actions") ? "1" : "0",
+            // $7-$9: the two alerts this script can raise, already translated -
+            // the shell's language is a QML question, so the finished strings
+            // come in as argv rather than being interpolated into the body
+            Strings.tr("wl-copy not found"),
+            Strings.tr("wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page."),
+            Strings.tr("Copied to clipboard")];
         clipCopy.running = true;
     }
     property string infoClipId: ""

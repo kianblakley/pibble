@@ -164,6 +164,10 @@ Commands:
             (or closes if it's already the one showing)
             available: $(list_pages)
   replay    re-fire one recent notification; repeated presses step back
+  env       print the environment a daemon is started with, as shell
+            exports - for running \`qs\` against this repo by hand and
+            getting the same fonts and icons the daemon would (see
+            ./layout-probe, which evals it)
   help      show this message (also what a bare \`pibble\` does)
 USAGE
 }
@@ -213,6 +217,18 @@ toggle)
         ipc toggle "$2" && exit 0
     done
     exit 1
+    ;;
+env)
+    # The exports below are what makes a hand-run `qs -p .` render the same
+    # text the daemon does: Theme.fontFamily falls back to QS_FONT_FAMILY, and
+    # without it Qt picks its own default font, which is a different width per
+    # character - enough to make a layout check disagree with the real pane.
+    export_icon_theme
+    export_font_family
+    for var in QS_ICON_THEME QS_FONT_FAMILY; do
+        [ -n "${!var-}" ] && printf 'export %s=%q\n' "$var" "${!var}"
+    done
+    exit 0
     ;;
 replay)
     reap_duplicates
