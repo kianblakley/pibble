@@ -32,7 +32,7 @@ import "root:/startup"
 //   services/  the shell's data sources - theme, wallpapers, clipboard, apps…
 //   ui/        reusable settings controls, and the custom-page contract
 //   launcher/  the launcher window, its state, and one file per pane
-//   flyouts/   the volume and notification OSDs
+//   flyouts/   transient overlay surfaces - the OSDs and the color picker
 //   startup/   invisible surfaces that only exist to measure the output
 //
 // Those layers only ever point one way - launcher/flyouts → ui → services →
@@ -55,8 +55,11 @@ ShellRoot {
     }
     VolumeOsd {}
     NotificationFlyout {}
+    ColorPickerOverlay {}
 
     XrayScaleProbe {}
+
+
 
     // The shell runs as a persistent daemon; the launcher window is toggled
     // over IPC - `qs -p <repo> ipc call launcher toggle`, which is what the

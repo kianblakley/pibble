@@ -32,6 +32,15 @@ Scope {
             bodySupported: true
             imageSupported: true
             onNotification: n => {
+                // the eyedropper's frozen frame can be taken with the
+                // compositor's own screenshot action, and niri announces
+                // every capture - so while a pick is running its screenshot
+                // toast is swallowed, or every eyedropper use would
+                // celebrate itself
+                if (ScreenColor.picking && (String(n.appName ?? "") === "niri" || /^Screenshot/.test(String(n.summary ?? "")))) {
+                    n.dismiss();
+                    return;
+                }
                 n.tracked = true;
                 // notifications pibble replay fires itself must not become
                 // replayable history, or replaying repeatedly would keep

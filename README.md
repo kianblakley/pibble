@@ -45,6 +45,8 @@ Optional (required for full feature set):
 | [awww](https://codeberg.org/LGFae/awww) | Recommended static wallpaper backend (can use any) |
 | [mpvpaper](https://github.com/GhostNaN/mpvpaper) | Recommended live wallpaper backend (can use any) |
 | [cliphist](https://github.com/sentriz/cliphist) | Clipboard history support |
+| [grim](https://sr.ht/~emersion/grim) | Screen color picker capture on wlroots compositors (niri needs nothing, but grim is much faster) |
+| [hyprpicker](https://github.com/hyprwm/hyprpicker) | Screen color picker fallback where `grim` is absent |
 
 ### 2. Clone
 
@@ -125,6 +127,7 @@ Each window has a layer-shell namespace which can be used to apply background ef
 | `pibble-launcher` | Main launcher |
 | `pibble-notifications` | Notification flyout |
 | `pibble-volume` | Volume flyout |
+| `pibble-colorpicker` | Screen color picker |
 
 ### Custom pages
 
