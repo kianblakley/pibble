@@ -35,7 +35,12 @@ Item {
             hue = slotColorVal.hsvHue;
     }
     onSlotColorValChanged: syncHueFromColor()
-    Component.onCompleted: syncHueFromColor()
+    Component.onCompleted: {
+        syncHueFromColor();
+        // deferred rather than probed at singleton construction: it costs a
+        // subprocess, and nothing needs the answer until this row exists
+        ScreenColor.probe();
+    }
 
     function setSlotHex(hex: string) {
         switch (slot) {
@@ -46,6 +51,30 @@ Item {
     }
     function setSlotHsv(h: real, s: real, v: real) {
         setSlotHex(Qt.hsva(h, s, v, 1).toString());
+    }
+
+    // Raised for the eyedropper rather than acted on here: the picker needs the
+    // screen, and the launcher is covering all of it, so hiding and restoring
+    // the window is the launcher's business (see GeneralTab). Only the result
+    // comes back to this row, which is the one thing that knows which slot the
+    // color is for.
+    signal pickRequested
+    // Guards against adopting a pick this row didn't ask for - ScreenColor is a
+    // singleton and its `picked` is broadcast, not addressed to a caller.
+    property bool awaitingPick: false
+
+    Connections {
+        target: ScreenColor
+        function onPicked(hex: string): void {
+            if (!root.awaitingPick)
+                return;
+            root.awaitingPick = false;
+            root.setSlotHex(hex);
+            Settings.save();
+        }
+        function onFailed(): void {
+            root.awaitingPick = false;
+        }
     }
 
     // label sits beside the picker rather than stacked above it - same
@@ -258,6 +287,41 @@ Item {
                         onEditingFinished: {
                             Settings.save();
                             text = Qt.binding(() => root.slotHex.replace("#", "").toUpperCase());
+                        }
+                    }
+                }
+
+                // Sits at the far edge of the hex readout rather than in the Row
+                // above it: the input beside it is a fixed 220 wide, so laying
+                // this out in flow would push it off the field's rounded end.
+                // Hidden outright where no backend can pick (see ScreenColor) -
+                // a button that only ever reports failure is worse than none.
+                Rectangle {
+                    id: eyedropper
+                    visible: ScreenColor.available
+                    width: 24
+                    height: 24
+                    radius: Theme.radius(12)
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "transparent"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: Icons.eyedropper
+                        color: eyedropperHover.containsMouse || ScreenColor.picking ? Theme.fg : Theme.muted
+                        font { family: Icons.family; pixelSize: Theme.fontSize(13) }
+                    }
+                    MouseArea {
+                        id: eyedropperHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (ScreenColor.picking)
+                                return;
+                            root.awaitingPick = true;
+                            root.pickRequested();
                         }
                     }
                 }

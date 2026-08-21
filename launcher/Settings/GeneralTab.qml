@@ -1,4 +1,5 @@
 import QtQuick
+import "root:/launcher"
 import "root:/services"
 import "root:/ui"
 
@@ -43,7 +44,19 @@ Column {
     // own name for itself (see Defaults.languages).
     SettingRow { key: "language"; label: "Language" }
     ThemeRow {}
-    ColorPickerRow {}
+    // The eyedropper needs every pixel the launcher is currently covering, so
+    // the pick is a hand-off: dismiss first, pick, then come back to this tab
+    // exactly as it was (reopenAfterDialog, not a full reset).
+    ColorPickerRow {
+        onPickRequested: {
+            // prepare() first: the picker owns the screen for the whole exit
+            // animation, so its capture starts the instant the launcher is
+            // gone rather than a settling-beat after
+            ScreenColor.prepare();
+            LauncherState.dialogPending = "color";
+            LauncherState.exit();
+        }
+    }
 
     // bundles version/build info, this run's recent log, and
     // the latest crash report (if any) for pasting into a

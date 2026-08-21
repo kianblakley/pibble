@@ -44,6 +44,7 @@ Singleton {
     readonly property string settings: "\ue8b8"
     readonly property string refresh: "\ue5d5"
     readonly property string copy: "\ue14d"
+    readonly property string eyedropper: "\ue3b8"
     readonly property string bell: "\ue7f4"
     readonly property string alertTriangle: "\ue002"
     readonly property string cornerDownLeft: "\ue31b"

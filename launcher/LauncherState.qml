@@ -92,10 +92,12 @@ Singleton {
         root.exitRequested();
     }
 
-    // Set right before exit() when the close is a hand-off to the Pages tab's
-    // upload picker rather than a real dismiss. LauncherWindow calls
-    // openPendingDialog() once the exit animation has fully played, instead of
-    // racing it, and the tab that owns the dialog opens it.
+    // Set right before exit() when the close is a hand-off to something that
+    // needs the screen - the Pages tab's upload picker ("folder"), or the
+    // palette editor's eyedropper ("color") - rather than a real dismiss.
+    // LauncherWindow calls openPendingDialog() once the exit animation has
+    // fully played, instead of racing it, and whatever owns the hand-off takes
+    // it from there.
     property string dialogPending: ""
     signal uploadDialogRequested
     // The picker borrowed the screen; replay the entrance animation without a
@@ -107,10 +109,26 @@ Singleton {
     }
 
     function openPendingDialog(): void {
-        if (root.dialogPending !== "folder")
-            return;
+        const pending = root.dialogPending;
         root.dialogPending = "";
-        root.uploadDialogRequested();
+        if (pending === "folder")
+            root.uploadDialogRequested();
+        else if (pending === "color")
+            ScreenColor.pick();
+    }
+
+    // The eyedropper borrows the screen the same way the upload picker does, so
+    // it comes back the same way. Driven off the service rather than off the
+    // row that asked, since the pick ends on a cancel or a dead backend just as
+    // often as on a color, and the launcher has to return either way.
+    Connections {
+        target: ScreenColor
+        function onPicked(hex: string): void {
+            root.reopenAfterDialog();
+        }
+        function onFailed(): void {
+            root.reopenAfterDialog();
+        }
     }
 
     // Live text from the launcher's hidden search field, mirrored here so every
