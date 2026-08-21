@@ -90,11 +90,31 @@ cd pibble
 | `restart` | Restart the daemon |
 | `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id, opens/switches straight to that page |
 | `replay` | Re-fire one recent notification; repeated presses step back through history |
+| `env` | Print the environment a daemon starts with (resolved font, icon theme), as shell exports |
 
 ## Configuring
 
 ### Settings
 pibble has an extensive in-app settings page (`Ctrl+S`, or press the bottom right corner) covering appearance, animations, resource usage, layouts, navigation and flyouts.
+
+### Language
+
+`SETTINGS > General > Language` sets the language every string pibble writes is rendered in — the settings page, the launcher's own labels and prompts, and the notifications pibble raises on its own behalf. Dates on the clock page are formatted for the chosen language, and the weather line is fetched in it.
+
+| | |
+|---|---|
+| English | `English` |
+| Chinese (Simplified) | `中文` |
+| Spanish | `Español` |
+| Russian | `Русский` |
+| French | `Français` |
+| Japanese | `日本語` |
+| Hindi | `हिन्दी` |
+| Arabic | `العربية` |
+
+Text that isn't pibble's stays as it arrives: an app's name in the drawer, a wallpaper's filename, a clipboard entry, another app's notification, and the names of your installed fonts and icon themes. Arabic renders right-to-left as text, but the shell's layout itself is not mirrored.
+
+Translations live in [`services/Translations.qml`](services/Translations.qml), one table per language keyed by the English source string; a key with no translation falls back to English, so adding a language is a matter of adding a table there and an entry to `Defaults.languages`.
 
 ### Namespaces
 

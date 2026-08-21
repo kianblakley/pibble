@@ -89,7 +89,7 @@ Item {
         // they know where to look
         onStatusChanged: {
             if (status === Loader.Error)
-                Notifier.error("Custom page failed to load", root.modelData.label);
+                Notifier.error(Strings.tr("Custom page failed to load"), root.modelData.label);
         }
     }
 }

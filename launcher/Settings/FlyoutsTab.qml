@@ -35,8 +35,9 @@ Column {
         height: 34
 
         SettingLabel {
+            id: flyoutsLabel
             anchors.left: parent.left
-            content: "Flyouts"
+            content: Strings.tr("Flyouts")
         }
         ResetButton {
             key: "flyouts"
@@ -46,6 +47,9 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
+            // everything between this row's label and the reset button it
+            // stops short of - see ChipRow.maxWidth
+            maxWidth: parent.width - 34 - flyoutsLabel.width - 16
             items: [
                 { id: "volume", label: "volume" },
                 { id: "notifs", label: "notifications" }
@@ -69,8 +73,9 @@ Column {
         height: 34
 
         SettingLabel {
+            id: alertsLabel
             anchors.left: parent.left
-            content: "Pibble alerts"
+            content: Strings.tr("Pibble alerts")
         }
         ResetButton {
             key: "pibbleAlerts"
@@ -80,6 +85,9 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
+            // four chips on one line is the tightest row in the pane, so this
+            // is the one most likely to have to squeeze - see ChipRow.maxWidth
+            maxWidth: parent.width - 34 - alertsLabel.width - 16
             items: [
                 { id: "errors", label: "errors" },
                 { id: "missingDeps", label: "dependencies" },

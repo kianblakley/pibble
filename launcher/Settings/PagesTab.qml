@@ -48,8 +48,9 @@ Column {
         height: 34
 
         SettingLabel {
+            id: clockLabel
             anchors.left: parent.left
-            content: "Clock"
+            content: Strings.tr("Clock")
         }
         ResetButton {
             key: "clock"
@@ -59,6 +60,9 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: 34
             anchors.verticalCenter: parent.verticalCenter
+            // everything between this row's label and the reset button it
+            // stops short of - see ChipRow.maxWidth
+            maxWidth: parent.width - 34 - clockLabel.width - 16
             items: [
                 { id: "date", label: "date" },
                 { id: "battery", label: "battery" },
@@ -77,7 +81,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Grid size"
+            content: Strings.tr("Grid size")
         }
         ResetButton {
             key: SettingsSchema.gridTargets[LauncherState.gridTarget].resetKey
@@ -105,7 +109,7 @@ Column {
                         id: gridTargetText
                         anchors.verticalCenter: parent.verticalCenter
                         height: restHeight
-                        content: SettingsSchema.gridTargets[gridTargetChip.modelData].label
+                        content: Strings.tr(SettingsSchema.gridTargets[gridTargetChip.modelData].label)
                         color: gridTargetChip.active ? Theme.fg : Theme.muted
                         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                     }
@@ -142,7 +146,7 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Helper elements"
+            content: Strings.tr("Helper elements")
         }
         ResetButton {
             key: "pageIndicators"
@@ -182,7 +186,8 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Wallpapers path"
+            maxWidth: parent.width - 34 - 444 - 8
+            content: Strings.tr("Wallpapers path")
         }
         ResetButton {
             key: "wallpaperDir"
@@ -204,7 +209,7 @@ Column {
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: pathInput.text.length === 0
-                content: "type the path to your wallpapers"
+                content: Strings.tr("type the path to your wallpapers")
                 color: Theme.muted
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
             }
@@ -253,7 +258,8 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Wallpapers command"
+            maxWidth: parent.width - 34 - 444 - 8
+            content: Strings.tr("Wallpapers command")
         }
         ResetButton {
             key: "wallCommand"
@@ -275,7 +281,7 @@ Column {
                 anchors.margins: 8
                 verticalAlignment: Text.AlignVCenter
                 visible: cmdInput.text.length === 0
-                content: "type the command to be executed when a wallpaper is selected"
+                content: Strings.tr("type the command to be executed when a wallpaper is selected")
                 color: Theme.muted
                 elide: Text.ElideRight
                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
@@ -316,7 +322,8 @@ Column {
             id: commandHint
             anchors.top: commandRow.bottom
             anchors.topMargin: 2
-            content: "$WALL = selected image, $BLUR = blurred variant (auto-generated)"
+            maxWidth: parent.width
+            content: Strings.tr("$WALL = selected image, $BLUR = blurred variant (auto-generated)")
         }
     }
 

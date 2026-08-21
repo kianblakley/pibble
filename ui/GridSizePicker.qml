@@ -180,7 +180,7 @@ Item {
         // pointer is currently over, and it changes on every cell the pointer
         // crosses - a resolve per step would mean it is never legible while
         // the user is actually choosing.
-        content: root.wallsBars ? (root.shownVisible + " visible") : (root.shownCols + " × " + root.shownRows)
+        content: root.wallsBars ? Strings.trf("%1 visible", root.shownVisible) : (root.shownCols + " × " + root.shownRows)
         color: Theme.fg
         font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
     }

@@ -41,7 +41,7 @@ Singleton {
                 root.alerted = true;
                 if (Settings.alertEnabled("battery"))
                     Quickshell.execDetached(["notify-send", "-a", "pibble", "-u", "critical",
-                        "-i", "battery-low", "Low battery", Math.round(pct) + "% remaining - plug in soon."]);
+                        "-i", "battery-low", Strings.tr("Low battery"), Strings.trf("%1% remaining - plug in soon.", Math.round(pct))]);
             }
         } else if (pct > Settings.batteryAlertLevel + root.rearmHeadroom) {
             root.alerted = false;

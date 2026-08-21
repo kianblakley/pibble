@@ -133,6 +133,38 @@ Text {
     readonly property real restWidth: Math.max(sizer.advanceWidth, root.noiseWidth)
     property real noiseWidth: 0
 
+    // The width to *give* this label so its resting string is never cut off,
+    // for a caller that elides (`width: Math.min(fitWidth, cap)`). restWidth
+    // above is what TextMetrics makes of the string measured on its own, and
+    // for a script that shapes it is not what a laid-out Text needs: Arabic
+    // comes out a pixel short and Devanagari up to six, where a matra is drawn
+    // before the consonant it belongs to and the run carries bearings the
+    // standalone measurement doesn't account for. A box sized to that lands
+    // just under what Qt wants and the elide fires, so every label in the pane
+    // loses its last character in those two languages - while Latin, whose
+    // measurements agree, shows nothing wrong at all.
+    //
+    // The only thing that can answer this exactly is a Text laying the string
+    // out, which is why one is built here rather than a third TextMetrics. It
+    // cannot be this label: `text` is what the effect writes, and its
+    // contentWidth once eliding is the *elided* string's - the measurement
+    // stops being available the moment there is something to measure.
+    //
+    // Opt-in, because it is an item per label and most of the several hundred
+    // ScrambleTexts in the shell are uncapped, have no elide to trip, and want
+    // restWidth as before.
+    property bool measuresFit: false
+    readonly property real fitWidth: Math.ceil(Math.max(root.restWidth, fitSizer.item ? fitSizer.item.contentWidth : 0)) + 1
+    Loader {
+        id: fitSizer
+        active: root.measuresFit
+        sourceComponent: Text {
+            visible: false
+            font: root.font
+            text: root.content
+        }
+    }
+
     // The height this label has when it isn't scrambling, for callers whose
     // layout is driven by it (the clock's rows, anything centered). The noise
     // routinely pulls in glyphs the shell font doesn't have, and a fallback

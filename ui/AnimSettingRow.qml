@@ -33,7 +33,9 @@ Column {
 
         SettingLabel {
             anchors.left: parent.left
-            content: root.label
+            // see SettingRow's copy of this
+            maxWidth: root.width - controls.width - 8
+            content: Strings.tr(root.label)
         }
         Row {
             id: controls

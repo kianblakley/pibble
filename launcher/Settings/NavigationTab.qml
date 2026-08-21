@@ -54,7 +54,10 @@ Column {
 
             SettingLabel {
                 anchors.left: parent.left
-                content: bindRow.modelData.label
+                // the chord box opposite, plus the reset button past it and
+                // the gap between them
+                maxWidth: bindRow.width - 34 - Metrics.keybindBoxWidth - 8
+                content: Strings.tr(bindRow.modelData.label)
             }
             ResetButton {
                 key: "bind:" + bindRow.modelData.action
@@ -87,7 +90,7 @@ Column {
                     // shown only while the box is waiting on a key, so it
                     // arrives when the user clicks into the box and resolves
                     // there, the same as any other label coming on screen
-                    content: "press a key…"
+                    content: Strings.tr("press a key…")
                     color: Theme.fg
                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                 }

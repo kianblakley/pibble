@@ -783,7 +783,7 @@ Scope {
                                 color: window.tintColor
                             }
                             ScrambleText {
-                                content: window.view.app || "notification"
+                                content: window.view.app || Strings.tr("notification")
                                 // Every label on the card is pinned to its
                                 // resting box, and the card's own width is
                                 // measured off resting metrics too (see natW):
@@ -804,7 +804,7 @@ Scope {
                                 followsPane: false
                                 textFormat: Text.PlainText
                                 color: Theme.notification.muted
-                                font { family: Theme.fontFamily; pixelSize: Theme.fontSize(10); letterSpacing: 2; capitalization: Font.AllUppercase }
+                                font { family: Theme.fontFamily; pixelSize: Theme.fontSize(10); letterSpacing: Strings.tracking(2); capitalization: Font.AllUppercase }
                             }
                         }
                         ScrambleText {
@@ -1027,7 +1027,14 @@ Scope {
                             // any other same-app follow-up notification)
                             Rectangle {
                                 id: watcherCopyBtn
-                                visible: card.expanded && window.view.own && window.view.summary === "Clipboard watcher not running"
+                                // matched through Strings, not against the
+                                // English literal: that summary is one of
+                                // pibble's own and arrives in whatever
+                                // language the shell is set to (see
+                                // Clipboard's alert), so the test has to be
+                                // asked in the same language the alert was
+                                // written in
+                                visible: card.expanded && window.view.own && window.view.summary === Strings.tr("Clipboard watcher not running")
                                 width: watcherCopyText.implicitWidth + 24
                                 height: 28
                                 radius: Theme.radius(8)
@@ -1039,7 +1046,7 @@ Scope {
                                 Text {
                                     id: watcherCopyText
                                     anchors.centerIn: parent
-                                    text: "Copy setup commands"
+                                    text: Strings.tr("Copy setup commands")
                                     color: Theme.notification.fg
                                     font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                                 }

@@ -132,10 +132,10 @@ Singleton {
                         const body = goodAdded.length === 1
                             ? goodAdded[0].label + " - enable it in Settings > Pages"
                             : goodAdded.length + " new custom pages - enable them in Settings > Pages";
-                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", "New custom page found", body]);
+                        Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "list-add", Strings.tr("New custom page found"), body]);
                     }
                     for (const u of brokenAdded)
-                        Notifier.error("Custom page “" + u.label + "” is missing main.qml", "Folders in pibble/custom-pages need a main.qml entry point - see Settings > Pages.");
+                        Notifier.error(Strings.trf("Custom page “%1” is missing main.qml", u.label), Strings.tr("Folders in pibble/custom-pages need a main.qml entry point - see Settings > Pages."));
                 }
             }
         }

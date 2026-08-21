@@ -2,8 +2,10 @@ pragma Singleton
 import QtQuick
 import Quickshell
 
-// Pure value formatting shared across panes and flyouts. No dependencies, so
-// anything may import it without pulling in a dependency chain.
+// Pure value formatting shared across panes and flyouts. Its one dependency is
+// Strings, a sibling - the relative-time labels below are words, and words are
+// the language's. The byte units are not: KiB and MiB are the units' own
+// spelling everywhere.
 Singleton {
     id: root
 
@@ -22,13 +24,13 @@ Singleton {
         const diff = Math.max(0, Date.now() - ms);
         const mins = Math.floor(diff / 60000);
         if (mins < 1)
-            return "just now";
+            return Strings.tr("just now");
         if (mins < 60)
-            return mins + "m ago";
+            return Strings.trf("%1m ago", mins);
         const hours = Math.floor(mins / 60);
         if (hours < 24)
-            return hours + "h ago";
-        return Math.floor(hours / 24) + "d ago";
+            return Strings.trf("%1h ago", hours);
+        return Strings.trf("%1d ago", Math.floor(hours / 24));
     }
 
     // solid #rrggbb blend of a toward b (t=0 -> a, t=1 -> b). Qt's rich-text

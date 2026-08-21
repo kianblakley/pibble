@@ -24,7 +24,10 @@ Item {
         height: 34
         SettingLabel {
             anchors.left: parent.left
-            content: root.label
+            // the row's width less the controls opposite, and an 8px gap - the
+            // same one the controls keep between themselves
+            maxWidth: root.width - controls.width - 8
+            content: Strings.tr(root.label)
         }
         Row {
             id: controls
@@ -53,6 +56,9 @@ Item {
         visible: root.hint !== ""
         anchors.top: mainLine.bottom
         anchors.topMargin: 2
-        content: root.hint
+        // the whole row: a hint starts at the left edge with nothing to its
+        // right, so the column's own width is all the bound it needs
+        maxWidth: root.width
+        content: Strings.tr(root.hint)
     }
 }

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Check the settings pane's layout in every language, without putting anything
+# on screen - see the header of layout-probe.qml for what it measures and what
+# it can't see.
+#
+#   ./layout-probe            every language pibble ships
+#   ./layout-probe fr es      just these
+#
+# One Quickshell process per language: the tabs have to be built after the
+# language is set (positioners lay out once and then only on polish, which
+# needs a window there isn't one of), so a fresh engine per language is the
+# only way to be sure nothing is holding a stale position.
+set -u
+
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+out=$(mktemp -t pibble-layout-probe.XXXXXX)
+trap 'rm -f "$out"' EXIT
+
+# The daemon starts with a resolved font and icon theme in the environment
+# (Theme.fontFamily falls back to QS_FONT_FAMILY); without them Qt picks its
+# own default font, whose characters are a different width, and the probe
+# cheerfully passes a pane that overflows in the real shell.
+eval "$("$here/pibble" env)"
+
+langs=("$@")
+if [ ${#langs[@]} -eq 0 ]; then
+    # the shipped ids, read off the catalogue rather than repeated here
+    mapfile -t langs < <(sed -n 's/^ *{ id: "\([a-z]*\)".*/\1/p' "$here/config/Defaults.qml")
+fi
+
+for lang in "${langs[@]}"; do
+    PIBBLE_PROBE_OUT="$out" PIBBLE_PROBE_LANG="$lang" \
+        timeout 30 qs -p "$here/layout-probe.qml" >/dev/null 2>&1
+done
+
+cat "$out"
+# a finding is any line that isn't a language header or a "clean"
+if grep -qE "^  (ELIDE|OVERLAP|TOOCLOSE|OVERFLOW)" "$out"; then
+    exit 1
+fi

@@ -56,7 +56,7 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: undefined
         y: 6
-        content: "Custom colors"
+        content: Strings.tr("Custom colors")
     }
     Row {
         id: resetRow
@@ -310,9 +310,19 @@ Item {
                                 // both lines are pinned to their resting box:
                                 // they sit in a Column inside a fixed-height
                                 // chip, so a line that grew with its noise
-                                // would shove the hex under it down and back
+                                // would shove the hex under it down and back.
+                                // This one is capped as well: the chip is a
+                                // fixed 170 wide and a translated slot name
+                                // has no reason to fit in what "Muted text"
+                                // did, so it elides rather than painting out
+                                // past the chip's own edge.
+                                readonly property real cap: slotChip.width - 14 - 18 - 8 - 14
+                                measuresFit: true
+                                width: Math.min(fitWidth, cap)
                                 height: restHeight
-                                content: slotChip.modelData.label
+                                elide: Text.ElideRight
+                                paceWidth: cap
+                                content: Strings.tr(slotChip.modelData.label)
                                 color: slotChip.active ? Theme.fg : Theme.muted
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(12) }
                             }

@@ -163,7 +163,7 @@ Singleton {
             onStreamFinished: {
                 if (text.trim() === "NOMATUGEN") {
                     if (Settings.theme === "matugen")
-                        Notifier.missingDependency("matugen not found", "Install matugen to use the Dynamic theme.");
+                        Notifier.missingDependency(Strings.tr("matugen not found"), Strings.tr("Install matugen to use the Dynamic theme."));
                     return;
                 }
                 // empty output is benign (the wallpaper daemon not up yet at
@@ -180,7 +180,7 @@ Singleton {
                     };
                 } catch (e) {
                     if (Settings.theme === "matugen")
-                        Notifier.error("Matugen theme failed", "matugen returned no palette for the current wallpaper");
+                        Notifier.error(Strings.tr("Matugen theme failed"), Strings.tr("matugen returned no palette for the current wallpaper"));
                 }
             }
         }

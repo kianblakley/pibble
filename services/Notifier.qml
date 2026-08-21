@@ -58,7 +58,7 @@ Singleton {
         if (root.warnedMediaModule)
             return;
         root.warnedMediaModule = true;
-        root.missingDependency("QtMultimedia not found", "QtMultimedia is used for live wallpaper previews - install it (e.g. qt6-qtmultimedia) to enable them. Everything else works without it.");
+        root.missingDependency(Strings.tr("QtMultimedia not found"), Strings.tr("QtMultimedia is used for live wallpaper previews - install it (e.g. qt6-qtmultimedia) to enable them. Everything else works without it."));
     }
 
     // Fires from a video wallpaper's MediaPlayer.onErrorOccurred (grid tile and
@@ -86,9 +86,9 @@ Singleton {
             return;
         root.warnedMediaBackend = true;
         if (backendFault)
-            root.missingDependency("Video wallpaper playback failed", "QtMultimedia has no working playback backend (" + detail + ") - install your distro's Qt6 multimedia backend package, e.g. qt6-multimedia-ffmpeg.");
+            root.missingDependency(Strings.tr("Video wallpaper playback failed"), Strings.trf("QtMultimedia has no working playback backend (%1) - install your distro's Qt6 multimedia backend package, e.g. qt6-multimedia-ffmpeg.", detail));
         else
-            root.error("Video wallpaper preview failed", detail);
+            root.error(Strings.tr("Video wallpaper preview failed"), detail);
     }
 
     // the two `wl-paste --watch` invocations cliphist needs to see both text
@@ -99,7 +99,7 @@ Singleton {
 
     function copyToClipboard(text: string): void {
         Quickshell.clipboardText = text;
-        root.action("edit-copy", "Copied to clipboard", text, "");
+        root.action("edit-copy", Strings.tr("Copied to clipboard"), text, "");
     }
 
     // ---------- incoming: classification ----------

@@ -74,16 +74,21 @@ Item {
             LauncherState.movePage(draggedId, idx);
     }
     readonly property var defLabels: ({ clock: "Clock", apps: "Apps", walls: "Wallpapers", clips: "Clipboard" })
+    // Reading Strings here is what subscribes the bindings that call this to
+    // the language, so the list relabels itself when it changes. An uploaded
+    // page's own name is left exactly as its folder spells it - that is the
+    // page's word, not pibble's; only the note about what is wrong with it is
+    // ours to translate.
     function pageLabel(id) {
         if (id === "__add_folder__")
-            return "Add a page…";
+            return Strings.tr("Add a page…");
         if (defLabels[id])
-            return defLabels[id];
+            return Strings.tr(defLabels[id]);
         const u = (Settings.uploadedPages ?? []).find(p => p.id === id);
         if (!u)
             return id;
         const label = u.label.charAt(0).toUpperCase() + u.label.slice(1);
-        return u.broken ? label + " - missing main.qml" : label;
+        return u.broken ? label + " - " + Strings.tr("missing main.qml") : label;
     }
     function pageOn(id) {
         if (defLabels[id])
@@ -128,7 +133,7 @@ Item {
 
         SettingLabel {
             anchors.left: parent.left
-            content: "Pages"
+            content: Strings.tr("Pages")
         }
         ResetButton {
             key: "pages"
@@ -155,7 +160,7 @@ Item {
 
     FolderDialog {
         id: folderDialog
-        title: "Select a page folder (needs a main.qml inside)"
+        title: Strings.tr("Select a page folder (needs a main.qml inside)")
         onAccepted: {
             // strip a trailing slash (if any) before
             // splitting, or base would come out as
@@ -208,7 +213,7 @@ Item {
             }
             CustomPages.rescan();
             if (Settings.alertEnabled("actions"))
-                Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", "Page moved to trash", trashedLabel]);
+                Quickshell.execDetached(["notify-send", "-a", "pibble", "-i", "user-trash", Strings.tr("Page moved to trash"), trashedLabel]);
         }
     }
     // picks up files dropped into/removed from the test
@@ -768,6 +773,7 @@ Item {
         id: pagesSub
         anchors.top: pagesListWrap.bottom
         anchors.topMargin: 2
-        content: "drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here"
+        maxWidth: parent.width
+        content: Strings.tr("drag to reorder · swipe right to delete · folders with a main.qml placed in pibble/custom-pages appear here")
     }
 }

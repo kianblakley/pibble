@@ -111,6 +111,12 @@ JsonAdapter {
     property real fontScale: 1.0
     property string fontFamily: ""
     property string iconTheme: ""
+    // Which of the shipped translations every user-visible string in the shell
+    // is rendered through (see services/Strings.qml). Only the strings pibble
+    // writes itself: an app's name in the drawer, a wallpaper's filename and
+    // another app's notification are that app's text, not pibble's, and are
+    // left exactly as they arrive. heal() puts an unknown id back to "en".
+    property string language: Defaults.language
 
     property string theme: "matugen"
     // user-editable palette for the "custom" theme; defaults match the retired
@@ -269,6 +275,14 @@ JsonAdapter {
         }
         if (settings.replayCount < 1 || settings.replayCount > 5) {
             settings.replayCount = Math.max(1, Math.min(5, settings.replayCount));
+            settings.save();
+        }
+        // an id with no table behind it would render the English source for
+        // every string, which reads as the setting having silently failed
+        // rather than as a missing translation - so a hand-edited or retired
+        // one goes back to the source language outright
+        if (!Defaults.languages.some(l => l.id === settings.language)) {
+            settings.language = Defaults.language;
             settings.save();
         }
         // One-time migrations, keyed strictly on values only old configs can
