@@ -37,6 +37,8 @@ Scope {
             // the pre-load default. Force a re-notify by reassigning a fresh
             // shallow copy of each.
             Settings.pageOrder = Settings.pageOrder.slice();
+            Settings.uploadedPages = (Settings.uploadedPages ?? []).slice();
+            Settings.customPageData = Object.assign({}, Settings.customPageData);
             Settings.pages = Object.assign({}, Settings.pages);
             Settings.keybinds = Object.assign({}, Settings.keybinds);
             Settings.flyouts = Object.assign({}, Settings.flyouts);

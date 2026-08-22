@@ -131,9 +131,6 @@ Each window has a layer-shell namespace which can be used to apply background ef
 
 ### Custom pages
 
-Custom page API coming.
-
-<!--
 To add your own page to pibble, create a folder within `custom-pages/` that contains a `main.qml` file. Pibble uses the name of your folder to determine the page name in settings as well as in `./pibble toggle [page]`
 
 ```
@@ -142,40 +139,60 @@ custom-pages/
     └── main.qml
 ```
 
-Pibble will render any valid qml, use of the following API is optional. It allows you to sync your page's appearance with pibble's as well as handle settings, animations and text input.     
+Pibble will render any valid qml; use of the following API is optional. It lets your page match pibble's appearance and animations, and handle settings and text input.
 
-To use the properties exposed by pibble declare a `pibble` property in your page's root item (pibble will populate this). To define your own settings content, declare a `settingsTab` property in the root item (pibble will read from this).
+Declare a `pibble` property on your page's root item and pibble fills it in as the page is created — before any of your own bindings first run, so it is never null from where your page sits and needs no guards. To define your own settings content, also declare a `settingsTab` Component (pibble reads from it and gives your page a tab in `SETTINGS`, named after your folder):
 
 ```qml
 Item {
-    id: root 
-    property var pibble: null
-    readonly property Component settingsTab: Component { }
+    id: root
+    property var pibble
+    readonly property Component settingsTab: Component { /* optional */ }
 }
 ```
 
 To access a `pibble` property use `pibble.property` as defined in the table below:
 
-
 | Property | Type | Use |
 |---|---|---|
 | `accentColor`, `textColor`, `mutedTextColor` | `color` | current values of `SETTINGS > General > Color theme` |
-| `tileColor`, `activeTileColor`, `borderColor` | `color` | ready-mixed colors based on `accentColor` that are used in tiles/buttons |
-| `font` | `string` | curent value of `SETTINGS > General > Font` |
-| `fontScale` | `real` | current value of `SETTINGS > General > Font size`. It's a multiplier, e.g. `1.2` — turn a size into a real pixel value with `Math.round(px * fontScale)` |
-| `iconFont` | `string` | the name of pibble's icon font, you are required to find your own unicode |
+| `tileColor`, `activeTileColor`, `borderColor` | `color` | ready-mixed shades of `accentColor`, the same numbers pibble's own tiles/buttons use |
+| `font` | `string` | current value of `SETTINGS > General > Font` |
+| `iconFont` | `string` | the family name of pibble's icon font — draw `icon()`'s glyphs in it |
+| `icon(name)` | function | a glyph from pibble's icon font by name: `chevron-left`, `chevron-right`, `arrow-left`, `arrow-right`, `arrow-up`, `arrow-down`, `check`, `plus`, `trash`, `settings`, `refresh`, `copy`, `bell`, `warning`. Unknown names return `""`. For anything beyond these, `iconFont` is already loaded — find your own codepoints |
+| `px(size)` | function | `size` scaled by `SETTINGS > General > Font size`, as a pixel value — use it for text and anything else that should grow with that setting |
+| `fontScale` | `real` | the raw multiplier behind `px()`, for math `px()` can't express |
 | `radius(px)` | function | returns `px` while `SETTINGS > General > Rounded corners` is on and `0` while it's off — bind your corners through it (`radius: pibble.radius(8)`) so your page squares itself alongside the rest of the shell |
 | `pageActive` | `bool` | `true` while your page is the one currently showing |
 | `launcherOpen` | `bool` | `true` while the launcher is open at all |
-| `textInput` | `string` | the current value of pibble's hidden text input |
+| `textInput` | `string` | the current value of pibble's hidden text input — watch it to filter your own content |
 | `releaseFocus()` | function | call this to give keyboard focus back to pibble if your page took it |
-| `tileIn(item, slot, cols)` | function | makes `item` play pibble's tile spawn animation set in `SETTINGS > Animations > Pages` — pass `slot`/`cols` if it's one tile among several, so they can stagger in one after another |
-| `setSetting(key, value)` / `getSetting(key, fallback)` | function | save/load your page's settings |
+| `scramble(text, slot, cols)` | function | `text` mid-resolve during the entrance scramble — bind through it and your label settles alongside pibble's own. Binding through it *is* the opt-in: custom pages have no chip under `SETTINGS > Animations > Text scramble`, so only the labels you bind take part (the run still skips when `Tile animations` is `none`). For a label sitting on a `PageTile`, use the tile's `scrambled()` instead |
+| `setSetting(key, value)` / `getSetting(key, fallback)` | function | save/load your page's settings — binding through `getSetting` is live |
+
+**Tile animations** — wrap anything tile-shaped in a `PageTile` and it plays the same entrance pibble's own grids do (per `SETTINGS > Animations > Tile animations`): hidden until its first spring, staggered within its group, replaying itself whenever your page comes back on screen.
+
+```qml
+import "root:/ui" as Pibble
+
+Pibble.PageTile {
+    id: tile
+    pibble: root.pibble            // wire the contract in, once per tile
+    slot: index                    // position in the group — staggers the wave
+    cols: 7                        // how many columns the group has
+    replayOn: [root.viewMonth]     // replay whenever any of these change
+    width: 56; height: 56
+    color: pibble.tileColor        // it's a Rectangle — style it, or leave it
+    radius: pibble.radius(8)       // transparent and use it as a plain wrapper
+
+    Text { text: tile.scrambled("7") }   // resolves as its tile lands
+}
+```
+
+`tile.play()` replays the entrance by hand, for a trigger `replayOn` can't express.
 
 Note: Splitting your page across multiple files requires you to declare `import "." as Local`, then use `Local.Foo {}` instead of plain `Foo {}` to access them.
 
-An example custom-page has been provided at `custom-pages/calendar.example/`. To see it in action remove `.example` from the folder name or upload it via `SETTINGS > Pages > Add a page...`.
-
--->
 
 
+One example page ships under `custom-pages/`: `note.example/`, a persistent scratch note exercising the contract — keyboard focus and `releaseFocus()`, saving on close via `launcherOpen`/`pageActive`, `getSetting`/`setSetting`, a standalone `scramble()`, and its own settings tab (`Settings.qml`, reached through the split-file `import "." as Local`). To see it in action remove `.example` from the folder name or upload it via `SETTINGS > Pages > Add a page...`.
