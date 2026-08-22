@@ -35,14 +35,13 @@ Column {
     }
     SettingRow { key: "dimOpacity"; label: "Background opacity" }
     SettingRow { key: "roundedCorners"; label: "Rounded corners" }
+    // Which of the shipped translations every string pibble writes is rendered
+    // through. Sits just above Font since both decide how labels in the
+    // shell are rendered. The readout is each language's own name for
+    // itself (see Defaults.languages).
+    SettingRow { key: "language"; label: "Language" }
     SettingRow { key: "fontFamily"; label: "Font" }
     SettingRow { key: "fontScale"; label: "Font size" }
-    // Which of the shipped translations every string pibble writes is rendered
-    // through. Sits with the other two rows that decide how the shell reads
-    // rather than what it does - the font it is set in, and the size of it -
-    // since that is the question it answers. The readout is each language's
-    // own name for itself (see Defaults.languages).
-    SettingRow { key: "language"; label: "Language" }
     ThemeRow {}
     // The eyedropper needs every pixel the launcher is currently covering, so
     // the pick is a hand-off: dismiss first, pick, then come back to this tab
