@@ -53,8 +53,11 @@ Item {
         }
         // a query refills the tiles, which springs any that were
         // empty back in - and moves the selection to the top match,
-        // i.e. to a different tile
-        function onWallpaperMatchesChanged() {
+        // i.e. to a different tile. Keyed off matchKeys, not the
+        // matches array itself: a background thumbnail landing
+        // reassigns the array without moving anything, and shouldn't
+        // pause the selected tile's video (see LauncherState)
+        function onWallpaperMatchKeysChanged() {
             root.unsettle();
         }
     }

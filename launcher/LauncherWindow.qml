@@ -866,12 +866,11 @@ PanelWindow {
                         const next = Clipboard.entries.slice();
                         next[idx] = upd;
                         Clipboard.entries = next;
-                        // reassigning Clipboard.entries gives clipMatches a new array
-                        // reference, and onClipMatchesChanged unconditionally
-                        // resets clipSelected to 0 on any such change (it's
-                        // meant for "you typed a new query", not "an id got
-                        // patched") - restore the selection to wherever this
-                        // clip landed once that reset has already run
+                        // patching the id changes clipMatchKeys, which resets
+                        // clipSelected to 0 (that reset is meant for "you
+                        // typed a new query", not "an id got patched") -
+                        // restore the selection to wherever this clip landed
+                        // once that reset has already run
                         Qt.callLater(() => {
                             const newIdx = LauncherState.clipMatches.findIndex(c2 => c2.id === nid);
                             if (newIdx >= 0)

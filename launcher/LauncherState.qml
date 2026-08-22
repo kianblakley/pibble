@@ -651,7 +651,15 @@ Singleton {
         return scored.map(x => x.w);
     }
     property int wallpaperSelected: 0
-    onWallpaperMatchesChanged: {
+    // wallpaperMatches is a fresh array (and fires its change signal) every
+    // time Wallpapers.list is reassigned - which the background thumbnail
+    // pass causes mid-browse, via the rescan that picks its output up: same
+    // wallpapers, same order, only thumb/blur/pan fields filled in. Anything
+    // that means "the set or order of wallpapers changed" (selection reset,
+    // grid unsettle, carousel snap) keys off this string instead: a string
+    // property only signals when its value actually differs.
+    readonly property string wallpaperMatchKeys: wallpaperMatches.map(w => w.path).join("\n")
+    onWallpaperMatchKeysChanged: {
         wallpaperSelected = 0;
         carouselStep = 0;
     }
@@ -816,7 +824,12 @@ Singleton {
         return scored.map(x => x.c);
     }
     property int clipSelected: 0
-    onClipMatchesChanged: clipSelected = 0
+    // Same shape as wallpaperMatchKeys above: the clip thumbnail pass
+    // rewrites Clipboard.entries with the same ids in the same order once
+    // its thumbs land, and only an actual set/order change should throw the
+    // selection back to the top match.
+    readonly property string clipMatchKeys: clipMatches.map(c => c.id).join("\n")
+    onClipMatchKeysChanged: clipSelected = 0
     readonly property int clipRows: Math.max(2, Math.min(4, Settings.clipsRows))
     readonly property int clipPageSize: Settings.clipsCols * clipRows
     readonly property int clipPage: clipPageSize > 0 ? Math.floor(clipSelected / clipPageSize) : 0

@@ -178,7 +178,10 @@ Item {
             Connections {
                 target: LauncherState
                 function onCarouselAnimChanged() { cell.rebalance(); }
-                function onWallpaperMatchesChanged() {
+                // matchKeys, not the matches array: a thumbnail-pass
+                // reassignment keeps carouselStep (see LauncherState),
+                // so snapping absStep back would desync the ring
+                function onWallpaperMatchKeysChanged() {
                     cell.absStep = cell.index - root.restSpan;
                 }
                 // replay the spring when the selector opens: the

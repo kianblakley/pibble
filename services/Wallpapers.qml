@@ -77,9 +77,10 @@ Singleton {
         scan.running = false;
         Qt.callLater(() => scan.running = true);
     }
-    // cache entries the last scan found missing, and the one re-scan armed
-    // to pick them up once the background generation has written them (see
-    // where it's armed, in scan's output handler)
+    // cache entries the last scan found missing, and the re-scan armed to
+    // pick them up as the background generation writes them - polled while
+    // a pass holds the cache lock, armed once more on any change after it
+    // exits (see where it's armed, in scan's output handler)
     property string generationMissing: ""
     Timer {
         id: generationRetry
@@ -98,6 +99,15 @@ Singleton {
         command: ["bash", "-c", `
             cd "$1" || { echo NODIR; exit 0; }
             cachedir="$2"
+            # First line: whether a generation pass currently holds the
+            # cache lock (the flock taken in the generation script below).
+            # The retry loop keys off this to keep polling while work is
+            # still in flight - progress-between-scans alone can't tell a
+            # slow entry (a 5K video in ffmpeg outlasts one retry interval)
+            # from a cache that can never fill (no ImageMagick).
+            gen=0
+            [ -e "$cachedir/.generating" ] && ! flock -n "$cachedir/.generating" true && gen=1
+            echo "GEN:$gen"
             shopt -s nullglob nocaseglob
             for f in *.png *.jpg *.jpeg *.webp *.gif *.mp4; do
                 case "$f" in *blurred.*) continue ;; esac
@@ -166,7 +176,12 @@ Singleton {
                     return;
                 }
                 root.lastMissingDir = "";
-                const walls = text.trim().split("\n").filter(l => l).map(l => {
+                const generating = text.startsWith("GEN:1");
+                // the GEN header reflects lock state, not folder content, so
+                // it stays out of the body that lastScanText compares below -
+                // a pass finishing must not read as "the folder changed"
+                const body = text.slice(text.indexOf("\n") + 1);
+                const walls = body.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
                     return { path: p[0], thumb: p[1], blur: p[2] || "", pan: p[3] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
@@ -179,8 +194,8 @@ Singleton {
                 // The scan's raw output is the canonical form of everything
                 // `walls` is derived from, so an unchanged one means an
                 // unchanged model: keep the existing array and its delegates.
-                if (text !== root.lastScanText) {
-                    root.lastScanText = text;
+                if (body !== root.lastScanText) {
+                    root.lastScanText = body;
                     root.list = walls;
                 }
                 // Generate missing thumbnails (a full 5K image standing in as
@@ -205,18 +220,24 @@ Singleton {
                 const paths = walls.map(w => w.path);
                 const cur = paths.indexOf(Settings.currentWallpaper);
                 const order = cur > 0 ? [paths[cur]].concat(paths.slice(0, cur), paths.slice(cur + 1)) : paths;
-                // Arm one follow-up scan whenever anything is still missing:
+                // Arm a follow-up scan whenever anything is still missing:
                 // the pass below is fire-and-forget, so nothing reports when
                 // its output lands, and until a scan sees the files the
                 // launcher keeps falling back (a sharp thumbnail-less video
-                // tile, a live-blurred backdrop). Comparing against the last
-                // set of missing entries is what keeps a cache that *can't*
-                // be filled - no ImageMagick - from scanning on a loop: it
-                // only re-arms while the set is still shrinking.
+                // tile, a live-blurred backdrop). While a pass still holds
+                // the cache lock (the scan's GEN header) keep polling
+                // unconditionally - one slow entry (a 5K video in ffmpeg)
+                // can outlast the retry interval with nothing landing, and
+                // "no progress since last scan" used to kill the loop right
+                // there, stranding whatever the pass wrote afterwards until
+                // the next open. With no pass running, the comparison
+                // against the last missing set is what keeps a cache that
+                // *can't* be filled - no ImageMagick - from scanning on a
+                // loop: unchanged-and-idle means nothing more is coming.
                 // a video whose thumb still points at its pan entry is one
                 // whose crop hasn't landed yet (see the scan's isvid branch)
                 const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (w.video && w.thumb === w.pan) || (wantBlur && w.blur === "")).map(w => w.path).join("|");
-                if (missing !== "" && missing !== root.generationMissing)
+                if (missing !== "" && (generating || missing !== root.generationMissing))
                     generationRetry.restart();
                 root.generationMissing = missing;
                 Quickshell.execDetached(["bash", "-c", `
