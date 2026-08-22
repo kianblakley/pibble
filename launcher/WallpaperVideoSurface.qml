@@ -24,6 +24,7 @@ Item {
     property real surfaceWidth: root.width
     property real surfaceHeight: root.height
     property bool warming: false
+    property bool active: true
 
     // A failed load is the one place a missing *module* is knowable - the
     // pool's own MediaPlayer errors can't report it, since with no module there
@@ -64,4 +65,5 @@ Item {
     Binding { target: pool.item; property: "surfaceWidth"; value: root.surfaceWidth }
     Binding { target: pool.item; property: "surfaceHeight"; value: root.surfaceHeight }
     Binding { target: pool.item; property: "warming"; value: root.warming }
+    Binding { target: pool.item; property: "active"; value: root.active }
 }

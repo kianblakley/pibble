@@ -25,7 +25,7 @@ Singleton {
 
     readonly property string dir: SystemInfo.expandHome(Settings.wallpaperDir)
 
-    // Each entry: path|thumb|blurred|pan. All three generated variants point
+    // Each entry: path|thumb|blurred|pan|proxy. All generated variants point
     // into cacheRoot, keyed by a hash of the source path (stable across
     // renames of unrelated files, safe across multiple wallpaperDirs);
     // <stem>blurred.<ext> next to the source is still honored as a
@@ -39,12 +39,24 @@ Singleton {
     //   thumbnails/wide    uncropped, source aspect, <=1920x1080
     //   thumbnails/clips   the clipboard's own thumbs (Clipboard owns these)
     //   blurred            output-sized and pre-blurred, see the xray block
+    //   proxies            preview-res video re-encodes, see below
     //
     // thumb is what a grid tile draws and pan is what the carousel slides a
     // fixed window across, so an image's thumb is its crop and its pan is its
     // wide still. A video's crop is cut from its wide still (Image can't
     // decode the source file), and until the generation pass writes it the
     // wide still stands in as the thumb too.
+    //
+    // proxy is what the preview players decode instead of the source
+    // (WallpaperVideoPool; the desktop's own wallpaper command always gets the
+    // original). A hardware decoder's frame pool lives in VRAM and scales with
+    // the coded size - ~300MiB resident for one 5K h264 file against ~35MiB at
+    // 1920 - and the pool holds every video open at once, so the previews are
+    // the one consumer that can't afford full-resolution sources. Capped at
+    // the same 1920 as the wide still, and for the same reason: that is
+    // already the resolution the carousel's box was judged to need, and still
+    // and video handing over at different resolutions would read as a
+    // sharpness step.
     //
     // One blurred image serves both uses: the launcher's own backdrop in
     // "xray" mode and the $BLUR the wallpaper command gets (see
@@ -136,11 +148,15 @@ Singleton {
                 # below like any other dead entry. Bump r<n> (here and in the
                 # generation pass) whenever the magick command changes.
                 bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
+                # the preview proxy, versioned the same way (x<n>): bump it
+                # (here and in the generation pass) when the ffmpeg recipe
+                # changes
+                vkey=$(printf '%s' "$PWD/$f|x1" | md5sum | cut -d' ' -f1)
                 # the wide still is a jpeg when magick writes it and a png when
                 # ffmpeg does - see the two calls in the generation pass
                 wide="$cachedir/thumbnails/wide/$pkey.jpg"
                 [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
-                thumb="" blur="" pan=""
+                thumb="" blur="" pan="" pxy=""
                 # only trust caches newer than the source image
                 [ "$wide" -nt "$f" ] && pan="$wide"
                 if [ "$isvid" = "1" ]; then
@@ -151,6 +167,7 @@ Singleton {
                     # takes over once it lands
                     thumb="$pan"
                     [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/crops/$key.$oext"
+                    [ "$cachedir/proxies/$vkey.mp4" -nt "$f" ] && pxy="$cachedir/proxies/$vkey.mp4"
                 else
                     # a fresh image/gif stands in as its own tile (the Image
                     # element decodes it directly, just slowly) until the crop
@@ -160,7 +177,7 @@ Singleton {
                 fi
                 [ "$cachedir/blurred/$bkey.png" -nt "$f" ] && blur="$cachedir/blurred/$bkey.png"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
-                printf '%s|%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur" "$pan"
+                printf '%s|%s|%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur" "$pan" "$pxy"
             done | sort`, "_", root.dir, SystemInfo.cacheRoot,
             root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma)]
         stdout: StdioCollector {
@@ -183,7 +200,7 @@ Singleton {
                 const body = text.slice(text.indexOf("\n") + 1);
                 const walls = body.trim().split("\n").filter(l => l).map(l => {
                     const p = l.split("|");
-                    return { path: p[0], thumb: p[1], blur: p[2] || "", pan: p[3] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
+                    return { path: p[0], thumb: p[1], blur: p[2] || "", pan: p[3] || "", proxy: p[4] || "", gif: /\.gif$/i.test(p[0]), video: /\.mp4$/i.test(p[0]) };
                 });
                 // Reassigning this array invalidates every tile's model entry,
                 // which tears each delegate down and rebuilds it - re-creating
@@ -214,6 +231,11 @@ Singleton {
                 // resolved.
                 const wantBlur = (Settings.bgBlur === "xray" || Settings.wallCommand.includes("$BLUR"))
                     && root.xraySize.width > 0 && root.xrayCacheSigma > 0;
+                // proxies are only for the live previews, so nothing asks for
+                // them while those are off. Existing ones are kept (their keys
+                // are source-only, so the sweep still knows them), and turning
+                // previews back on generates the rest on the next scan.
+                const wantProxy = Settings.wallpaperLive;
                 // current wallpaper first: on a cold cache its backdrop is the
                 // one thing the launcher needs before any other entry, and a
                 // big folder is minutes of work to get through
@@ -236,7 +258,7 @@ Singleton {
                 // loop: unchanged-and-idle means nothing more is coming.
                 // a video whose thumb still points at its pan entry is one
                 // whose crop hasn't landed yet (see the scan's isvid branch)
-                const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (w.video && w.thumb === w.pan) || (wantBlur && w.blur === "")).map(w => w.path).join("|");
+                const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (w.video && w.thumb === w.pan) || (wantBlur && w.blur === "") || (wantProxy && w.video && w.proxy === "")).map(w => w.path).join("|");
                 if (missing !== "" && (generating || missing !== root.generationMissing))
                     generationRetry.restart();
                 root.generationMissing = missing;
@@ -245,13 +267,13 @@ Singleton {
                     # alerts already translated: the shell's language is a QML
                     # question, and passing the finished strings in as argv
                     # beats trying to interpolate them into a script body
-                    walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6"; shift 6
+                    walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6" gp="$7"; shift 7
                     # shifted first rather than read as the 7th-10th
                     # positionals directly: this script is a QML template
                     # literal, where a braced positional past $9 would be read
                     # as a JS substitution rather than a shell one
                     ffsum="$1" ffbody="$2" imsum="$3" imbody="$4"; shift 4
-                    mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred"
+                    mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"
                     # Layouts this cache has had before: wallpapers/ + xray/
                     # (from when the backdrop had a cache of its own, before
                     # thumbnails/ and blurred/ moved up next to the
@@ -283,16 +305,21 @@ Singleton {
                         pkey=$(printf '%s' "$f|p2" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
                         bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
+                        # see the matching vkey note in the scan pass above
+                        vkey=$(printf '%s' "$f|x1" | md5sum | cut -d' ' -f1)
                         wide="$cachedir/thumbnails/wide/$pkey.jpg"
                         [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
-                        live="$live $key $bkey $pkey"
-                        needcrop=0 needblur=0 needwide=0
+                        live="$live $key $bkey $pkey $vkey"
+                        needcrop=0 needblur=0 needwide=0 needproxy=0
                         [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] || needcrop=1
                         [ "$wide" -nt "$f" ] || needwide=1
                         if [ "$gb" = "1" ]; then
                             [ "$cachedir/blurred/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
-                        if [ "$needcrop" = "1" ] || [ "$needblur" = "1" ] || [ "$needwide" = "1" ]; then
+                        if [ "$gp" = "1" ] && [ "$isvid" = "1" ]; then
+                            [ "$cachedir/proxies/$vkey.mp4" -nt "$f" ] || needproxy=1
+                        fi
+                        if [ "$needcrop" = "1" ] || [ "$needblur" = "1" ] || [ "$needwide" = "1" ] || [ "$needproxy" = "1" ]; then
                             if [ "$isvid" = "1" ]; then
                                 if ! command -v ffmpeg >/dev/null 2>&1; then
                                     if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
@@ -347,6 +374,35 @@ Singleton {
                                     # which read as the video brightening the
                                     # moment playback started.
                                     [ "$needwide" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos:in_color_matrix=bt709,unsharp=5:5:0.8:5:5:0.0" "$wide"
+                                    # The preview proxy: what the pooled players
+                                    # decode instead of the source (see the
+                                    # proxies note at the top). Same 1920 cap as
+                                    # the wide still, keeping the still->video
+                                    # handover at matched resolution. A source
+                                    # already inside the cap is remuxed rather
+                                    # than re-encoded - same decoder footprint,
+                                    # no generation loss - which also strips
+                                    # audio like the transcode does (the players
+                                    # are muted; carrying the track just makes
+                                    # the pool open audio decoders to ignore).
+                                    # Written to a temp name and moved: an
+                                    # interrupted encode would otherwise leave a
+                                    # newer-than-source file the scan trusts.
+                                    # The temp's key-minus-extension misses
+                                    # $live, so a crash's leftovers go with the
+                                    # next sweep.
+                                    if [ "$needproxy" = "1" ]; then
+                                        vw=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$f" 2>/dev/null | head -1)
+                                        vtmp="$cachedir/proxies/$vkey.tmp.mp4"
+                                        if [ -n "$vw" ] && [ "$vw" -le 1920 ] 2>/dev/null; then
+                                            ffmpeg -y -v error -i "$f" -an -c:v copy -movflags +faststart "$vtmp"
+                                        else
+                                            # min() so an unprobeable source is
+                                            # still never upscaled
+                                            ffmpeg -y -v error -i "$f" -an -vf "scale='min(1920,iw)':-2:flags=lanczos" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -movflags +faststart "$vtmp"
+                                        fi
+                                        if [ -s "$vtmp" ]; then mv "$vtmp" "$cachedir/proxies/$vkey.mp4"; else rm -f "$vtmp"; fi
+                                    fi
                                 fi
                                 # The tile crop, cut from the wide still just
                                 # written (magick can't read the video itself),
@@ -427,7 +483,11 @@ Singleton {
                     # clips/ is not swept here: the clipboard owns it, keys it
                     # by entry id rather than source path, and prunes it
                     # against clipsMax on its own scan
-                    for d in "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred"; do
+                    # proxies join the sweep unguarded: their keys are
+                    # source-only (unlike blurred's geometry-keyed ones), so
+                    # this pass always knows the live set even when it isn't
+                    # generating any
+                    for d in "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"; do
                         # with nothing asking for blurred variants the keys
                         # this pass knows are not the ones those files were
                         # baked under, so leave them alone rather than
@@ -441,7 +501,7 @@ Singleton {
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
                     done`, "_", root.dir, SystemInfo.cacheRoot, wantBlur ? "1" : "0", Settings.alertEnabled("missingDeps") ? "1" : "0",
-                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma),
+                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma), wantProxy ? "1" : "0",
                     Strings.tr("ffmpeg not found"),
                     Strings.tr("ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."),
                     Strings.tr("magick not found"),
