@@ -35,15 +35,16 @@ Singleton {
     // reads it - one file often serves two - so a variant's directory says
     // what it is:
     //
-    //   thumbnails/crops   480x270 center crop, images and gifs
+    //   thumbnails/crops   480x270 center crop, every type
     //   thumbnails/wide    uncropped, source aspect, <=1920x1080
     //   thumbnails/clips   the clipboard's own thumbs (Clipboard owns these)
     //   blurred            output-sized and pre-blurred, see the xray block
     //
     // thumb is what a grid tile draws and pan is what the carousel slides a
     // fixed window across, so an image's thumb is its crop and its pan is its
-    // wide still. A video has no crop at all - Image can't decode the source
-    // file - so its wide still is both, one file under one name.
+    // wide still. A video's crop is cut from its wide still (Image can't
+    // decode the source file), and until the generation pass writes it the
+    // wide still stands in as the thumb too.
     //
     // One blurred image serves both uses: the launcher's own backdrop in
     // "xray" mode and the $BLUR the wallpaper command gets (see
@@ -106,16 +107,17 @@ Singleton {
                 # writing a single decoded frame back out as .gif would
                 # quantize it to a 256-color palette, banding badly once
                 # blurred. The source itself is still played back untouched.
-                oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
+                # A video's crop is cut from its wide still, a png already.
+                oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                 # versioned like bkey below (r<n>): bump t<n> (here and in
                 # the generation pass) whenever the magick crop recipe
                 # changes, so stale entries fall out of the sweep instead of
                 # sticking around under the old recipe until their source file
                 # happens to change.
-                key=$(printf '%s' "$PWD/$f|t3" | md5sum | cut -d' ' -f1)
+                key=$(printf '%s' "$PWD/$f|t4" | md5sum | cut -d' ' -f1)
                 # the wide still, versioned the same way (p<n>) and for the
                 # same reason as the two keys around it
-                pkey=$(printf '%s' "$PWD/$f|p1" | md5sum | cut -d' ' -f1)
+                pkey=$(printf '%s' "$PWD/$f|p2" | md5sum | cut -d' ' -f1)
                 # the blurred variant is the one cache entry that depends on
                 # more than the source file, so the output geometry, the blur
                 # and the recipe version go in its key too: a resized output,
@@ -132,11 +134,13 @@ Singleton {
                 # only trust caches newer than the source image
                 [ "$wide" -nt "$f" ] && pan="$wide"
                 if [ "$isvid" = "1" ]; then
-                    # a video has no crop of its own: Image can't decode the
-                    # source file at all, so the wide still is what the grid
-                    # tile draws as well as what the carousel pans across.
-                    # Both stay empty until the generation pass takes it.
+                    # Image can't decode the source file at all, so the wide
+                    # still stands in for the grid tile - both stay empty
+                    # until the generation pass takes it - and the crop cut
+                    # from it (see the generation pass for why one exists)
+                    # takes over once it lands
                     thumb="$pan"
+                    [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/crops/$key.$oext"
                 else
                     # a fresh image/gif stands in as its own tile (the Image
                     # element decodes it directly, just slowly) until the crop
@@ -209,7 +213,9 @@ Singleton {
                 // set of missing entries is what keeps a cache that *can't*
                 // be filled - no ImageMagick - from scanning on a loop: it
                 // only re-arms while the set is still shrinking.
-                const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (wantBlur && w.blur === "")).map(w => w.path).join("|");
+                // a video whose thumb still points at its pan entry is one
+                // whose crop hasn't landed yet (see the scan's isvid branch)
+                const missing = walls.filter(w => w.thumb === "" || w.pan === "" || (w.video && w.thumb === w.pan) || (wantBlur && w.blur === "")).map(w => w.path).join("|");
                 if (missing !== "" && missing !== root.generationMissing)
                     generationRetry.restart();
                 root.generationMissing = missing;
@@ -249,22 +255,18 @@ Singleton {
                         stem="\${b%.*}" ext="\${b##*.}"
                         isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
-                        oext="$ext"; case "\${ext,,}" in gif) oext="png" ;; esac
+                        oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                         # see the matching key note in the scan pass above
-                        key=$(printf '%s' "$f|t3" | md5sum | cut -d' ' -f1)
+                        key=$(printf '%s' "$f|t4" | md5sum | cut -d' ' -f1)
                         # see the matching pkey note in the scan pass above
-                        pkey=$(printf '%s' "$f|p1" | md5sum | cut -d' ' -f1)
+                        pkey=$(printf '%s' "$f|p2" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
                         bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
                         wide="$cachedir/thumbnails/wide/$pkey.jpg"
                         [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
                         live="$live $key $bkey $pkey"
                         needcrop=0 needblur=0 needwide=0
-                        # a video has no crop entry - the wide still stands in
-                        # for one everywhere (see the scan pass)
-                        if [ "$isvid" = "0" ]; then
-                            [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] || needcrop=1
-                        fi
+                        [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] || needcrop=1
                         [ "$wide" -nt "$f" ] || needwide=1
                         if [ "$gb" = "1" ]; then
                             [ "$cachedir/blurred/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
@@ -277,10 +279,10 @@ Singleton {
                                         notify-send -a pibble -i system-software-install "$ffsum" "$ffbody"
                                     fi
                                 else
-                                    # a video's only entry, and it goes in
-                                    # wide/ rather than being cropped like the
+                                    # the wide still keeps the source aspect
+                                    # rather than being cropped like the
                                     # images below: this frame is what the
-                                    # picker paints while the live video isn't
+                                    # carousel pans while the live video isn't
                                     # playing, and PreserveAspectCrop derives
                                     # its scale from the source aspect, so a
                                     # 16:9 still standing in for a video that
@@ -313,7 +315,34 @@ Singleton {
                                     # VideoOutput never shows a truly static
                                     # frame the way this thumbnail does), so
                                     # this only narrows the gap, not closes it.
-                                    [ "$needwide" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos,unsharp=5:5:0.8:5:5:0.0" "$wide"
+                                    #
+                                    # in_color_matrix=bt709: swscale defaults
+                                    # an untagged video to BT.601, but the Qt
+                                    # video sink renders the same untagged
+                                    # frames as BT.709 - so the still came out
+                                    # measurably darker than the live preview
+                                    # it hands over to (worst on dark footage:
+                                    # -1.4% mean luma, halved by this flag),
+                                    # which read as the video brightening the
+                                    # moment playback started.
+                                    [ "$needwide" = "1" ] && ffmpeg -y -v error -i "$f" -vframes 1 -vf "scale='min(1920,iw)':-1:flags=lanczos:in_color_matrix=bt709,unsharp=5:5:0.8:5:5:0.0" "$wide"
+                                fi
+                                # The tile crop, cut from the wide still just
+                                # written (magick can't read the video itself),
+                                # with the recipe an image's crop gets below.
+                                # The wide still alone used to stand in as the
+                                # grid tile, decoded through sourceSize - and
+                                # Qt's decode-time downscale is visibly softer
+                                # than the GPU minification the live video
+                                # frame gets, so playback started with a
+                                # brightness/sharpness pop. A pre-scaled crop
+                                # decodes 1:1, exactly like an image tile's.
+                                # The center crop to 16:9 lands the same
+                                # framing PreserveAspectCrop cuts from the
+                                # video in the 16:9 tile box, so the handover
+                                # still moves nothing.
+                                if [ "$needcrop" = "1" ] && [ -e "$wide" ] && command -v magick >/dev/null 2>&1; then
+                                    magick "$wide" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/crops/$key.$oext"
                                 fi
                             elif ! command -v magick >/dev/null 2>&1; then
                                 if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then

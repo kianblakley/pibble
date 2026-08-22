@@ -98,17 +98,23 @@ Item {
             fillMode: VideoOutput.PreserveAspectCrop
             visible: surface.showing
 
-            // Rewound rather than resumed, since the still frame this takes
-            // over from is frame 0 - picking up mid-clip would make the
-            // handover jump in content. Seeking, pausing and starting a player
-            // that already has its file open are all free; only the open
-            // itself isn't.
+            // Rewound on the way *out*, not on show: the paused frame is the
+            // handover frame, and rewinding on show left a revisited player
+            // sitting on whatever mid-clip frame it was paused at for the
+            // beat the seek took to land - a visible content/brightness
+            // flash over the frame-0 still underneath. Parking it at 0 while
+            // nobody is looking gives the seek all the off-screen time it
+            // needs, so showing starts from a frame already matching the
+            // still. Seeking, pausing and starting a player that already has
+            // its file open are all free; only the open itself isn't.
             function sync(): void {
                 if (surface.showing && root.live) {
-                    player.position = 0;
                     player.play();
-                } else if (player.playbackState !== MediaPlayer.PausedState) {
-                    player.pause();
+                } else {
+                    if (player.playbackState !== MediaPlayer.PausedState)
+                        player.pause();
+                    if (player.position > 0)
+                        player.position = 0;
                 }
             }
             onShowingChanged: surface.sync()
