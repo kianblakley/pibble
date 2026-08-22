@@ -708,12 +708,21 @@ Scope {
                 // rich media strip: left-to-right wipe reveal. The inner clipper
                 // overshoots the strip height so its bottom rounding falls below
                 // the image (top corners round, bottom edge square).
+                //
+                // The strip overhangs the card's top and sides by 1px: drawn
+                // exactly coincident, the image mask's edge antialiasing and the
+                // card rectangle's own edge antialiasing stack - the mask's
+                // half-covered edge row lets the dark flyoutSurface underneath
+                // blend through, which reads as a black hairline along the top
+                // of a light image whenever what's behind the card is light too.
+                // Overhanging by a pixel makes the image's mask the only edge
+                // there is; the card's dark edge sits under fully-opaque image.
                 Item {
                     visible: card.rich
-                    x: 0
-                    y: 0
-                    width: Math.round(card.width * card.imgWipe)
-                    height: card.stripH
+                    x: -1
+                    y: -1
+                    width: Math.round((card.width + 2) * card.imgWipe)
+                    height: card.stripH + 1
                     clip: true
                     opacity: 1 - card.lq(0)
 
@@ -721,21 +730,21 @@ Scope {
                     // separate from the ClippingRectangle below so its fill
                     // never bleeds into the offscreen mask's corner antialiasing
                     Rectangle {
-                        width: card.width
-                        height: card.stripH + 16
+                        width: card.width + 2
+                        height: card.stripH + 1 + 16
                         radius: Theme.radius(16)
                         color: Qt.alpha(window.tintColor, 0.2)
                     }
 
                     ClippingRectangle {
-                        width: card.width
-                        height: card.stripH + 16
+                        width: card.width + 2
+                        height: card.stripH + 1 + 16
                         radius: Theme.radius(16)
                         color: "transparent"
 
                         Image {
-                            width: card.width
-                            height: card.stripH
+                            width: card.width + 2
+                            height: card.stripH + 1
                             asynchronous: true
                             fillMode: Image.PreserveAspectCrop
                             // decode at ~2x display width, not native size
