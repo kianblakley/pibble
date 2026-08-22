@@ -352,29 +352,70 @@ Item {
         y: grid.y + Math.floor(root.selSlot / Settings.wallsCols) * (159 + grid.rowSpacing)
         width: 240
         height: 135
-        // no fade either way: what the surface hands over from (and back to)
-        // is the tile's still frame, which is this video's frame 0, so the
-        // cut has nothing to show
+        // A 90ms fade in, like the carousel's shared player. The cut used to
+        // be hard on the theory that the still underneath *is* this video's
+        // frame 0 - but the two never render identically: the sink's own
+        // YUV conversion lands a hair brighter than the extracted still
+        // (~0.5% mean, shadow-weighted, measured), so the swap read as a
+        // small brightness step. Fade *in* only: this overlay sits at the
+        // selection's slot, so the moment the selection moves off a video it
+        // is already positioned over the new tile - a fade-out there would
+        // ghost the old video's frame over a wallpaper it doesn't belong to.
+        // The hard hide lands while the eye is following the selection away,
+        // where the carousel instead keeps its surface riding the outgoing
+        // cell (see its videoAbsStep).
         visible: root.videoShowing
+        opacity: root.videoShowing ? 1 : 0
+        Behavior on opacity {
+            NumberAnimation { duration: Anim.tile(90); easing.type: Easing.OutCubic }
+        }
 
         ClippingRectangle {
             anchors.fill: parent
             radius: Theme.radius(14)
             color: "transparent"
-            WallpaperVideoSurface {
+            Item {
                 anchors.fill: parent
-                current: root.videoShowing && root.selWall ? root.selWall.path : ""
-                live: root.videoShowing
-                // Only while the launcher is down, so the file opens land with
-                // nothing on screen to stutter rather than inside a
-                // navigation - measured, an open landing in a navigation
-                // freezes the GUI thread for ~700ms on first sight of a file.
-                // The style check keeps the carousel's own pool from opening
-                // the same files a second time over. Settings.preload off
-                // trades that freeze back for the ~150MiB per video this holds;
-                // Settings.wallpaperLive off means no video is ever shown here,
-                // so there is nothing to pay for either way.
-                warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                // The live frame is minified ~7-17x into this tile (a 4K-5K
+                // source into 240x135), and a bare VideoOutput gets one
+                // bilinear tap of that: undersampling that keeps single
+                // bright pixels alive instead of averaging them away, so the
+                // playing tile read visibly crisper and brighter than the
+                // lanczos-filtered still it hands over from - while staying
+                // mean-preserving, which is why no still-side recipe change
+                // ever closed the gap. Render through a mipmapped layer at
+                // exactly 4x the device-pixel box instead: 4x halves cleanly
+                // twice, landing sampling on an integer mip level (the
+                // device size is rounded first because an odd mip dimension
+                // shifts every level below it half a pixel, which measured
+                // *worse* than no layer at all). Against the tile still this
+                // cut the handover RMSE 0.035 -> 0.011 and matched its
+                // Laplacian sharpness within 5%. The window's ratio, not the
+                // screen's: the compositor hands non-fractional-scale
+                // clients a rounded wl_output scale (2 for 1.25), and a
+                // wrong ratio here lands between mip levels - the mush this
+                // size exists to avoid. The carousel needs none of this; its
+                // surface is ~3x taller, so its minification is mild.
+                readonly property real ratio: Window.window ? Window.window.devicePixelRatio : 1
+                layer.enabled: true
+                layer.smooth: true
+                layer.mipmap: true
+                layer.textureSize: Qt.size(Math.round(width * ratio) * 4, Math.round(height * ratio) * 4)
+                WallpaperVideoSurface {
+                    anchors.fill: parent
+                    current: root.videoShowing && root.selWall ? root.selWall.path : ""
+                    live: root.videoShowing
+                    // Only while the launcher is down, so the file opens land with
+                    // nothing on screen to stutter rather than inside a
+                    // navigation - measured, an open landing in a navigation
+                    // freezes the GUI thread for ~700ms on first sight of a file.
+                    // The style check keeps the carousel's own pool from opening
+                    // the same files a second time over. Settings.preload off
+                    // trades that freeze back for the ~150MiB per video this holds;
+                    // Settings.wallpaperLive off means no video is ever shown here,
+                    // so there is nothing to pay for either way.
+                    warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                }
             }
         }
         // the tile's own 1px stroke is underneath this overlay, so redraw it
