@@ -661,11 +661,15 @@ Item {
                 // ~700ms on first sight of a file. The style check
                 // keeps the grid's own pool from opening the same
                 // files a second time over. Settings.preload off
-                // trades that freeze back for the ~150MiB per video
-                // this holds; Settings.wallpaperLive off means no
-                // video is ever shown here, so there is nothing to
-                // pay for either way.
+                // never warms: it opens on demand and the pool
+                // drains itself after each close (see
+                // WallpaperVideoPool), trading that freeze back on
+                // each session's first sight of a video;
+                // Settings.wallpaperLive off means no video is ever
+                // shown here, so there is nothing to pay for either
+                // way.
                 warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle !== "grid" && !LauncherState.shown
+                active: Settings.wallpaperStyle !== "grid"
                 // exactly the box - and therefore exactly the crop
                 // - the centered cell's still Image uses at rank 0,
                 // parallax included: without it the video would sit

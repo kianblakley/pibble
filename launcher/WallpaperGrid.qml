@@ -414,10 +414,13 @@ Item {
                     // freezes the GUI thread for ~700ms on first sight of a file.
                     // The style check keeps the carousel's own pool from opening
                     // the same files a second time over. Settings.preload off
-                    // trades that freeze back for the ~150MiB per video this holds;
+                    // never warms: it opens on demand and the pool drains itself
+                    // after each close (see WallpaperVideoPool), trading that
+                    // freeze back on each session's first sight of a video;
                     // Settings.wallpaperLive off means no video is ever shown here,
                     // so there is nothing to pay for either way.
                     warming: Settings.wallpaperLive && Settings.preload && Settings.wallpaperStyle === "grid" && !LauncherState.shown
+                    active: Settings.wallpaperStyle === "grid"
                 }
             }
         }
