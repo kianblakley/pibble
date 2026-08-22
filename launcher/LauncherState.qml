@@ -253,6 +253,18 @@ Singleton {
             return u ? u.on : pages[id] !== false;
         });
     }
+    // The pane can stop existing under us: a custom page's folder deleted
+    // outside the app is dropped by CustomPages' scan (which runs on every
+    // launcher open), and if that page was the pane being opened onto, `pane`
+    // is left pointing at nothing - every pane's `visible` goes false and the
+    // launcher sits open showing only the blurred backdrop, swallowing input.
+    // togglePage() covers its own case inline; this covers every other way a
+    // pane can vanish. Cheap on the reorders/toggles that also fire it: the
+    // includes() guard passes and nothing happens.
+    onActivePanesChanged: {
+        if (!activePanes.includes(pane) && pane !== "settings")
+            setPane(homePane());
+    }
     // Where an open (or a fallback out of an invalid setPane) lands. With
     // every page off there is no home to go to, so the launcher opens
     // straight onto settings - the one pane that is always reachable, and

@@ -104,6 +104,24 @@ Singleton {
                     on: enableNew && e.kind !== "X"
                 }));
                 const merged = stillPresent.concat(added);
+                // a page trashed through its own row clears its saved
+                // customPageData (see PageList's pagesTrash); a folder
+                // deleted outside the app is only ever noticed here, so
+                // drop its data here too - external edits and in-app
+                // trashes are supposed to be indistinguishable, and a
+                // stale entry would otherwise be inherited by whatever
+                // future page lands under the same folder name. Separate
+                // from the merged-diff below so entries orphaned before
+                // this cleanup existed still get swept.
+                const data = Settings.customPageData ?? {};
+                const stale = Object.keys(data).filter(id => !merged.some(u => u.id === id));
+                if (stale.length) {
+                    const all = Object.assign({}, data);
+                    for (const id of stale)
+                        delete all[id];
+                    Settings.customPageData = all;
+                    Settings.save();
+                }
                 if (JSON.stringify(merged) !== JSON.stringify(existing)) {
                     Settings.uploadedPages = merged;
                     // Page *order* belongs to LauncherState, which is what
