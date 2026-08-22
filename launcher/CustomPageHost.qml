@@ -71,17 +71,22 @@ Item {
         // like any other, so the broken check is repeated
         // here rather than trusted from there
         active: root.modelData.on && !root.modelData.broken
-        // every page's entry point is <dir>/main.qml (see
-        // CustomPages' scan and the CustomPages.dir comment for how
-        // it reaches its own sibling files - nothing else
-        // needed here, this Loader doesn't care how many
-        // files the page is split across)
-        source: active ? Qt.resolvedUrl(root.modelData.path + "/main.qml") : ""
-        onLoaded: {
-            if ("pibble" in item)
-                item.pibble = root.ctx;
-            root.loaded();
-        }
+        // setSource with initial properties rather than a `source:` binding
+        // plus an assignment in onLoaded: this way `pibble` is already set
+        // when the page's own bindings first evaluate, so a page never sees
+        // it null and needs no guards (the whole contract leans on that -
+        // see PageContext). The initial properties survive the Loader
+        // sitting inactive, and a page that doesn't declare `pibble` still
+        // loads, with a one-line "non-existent property" warning. Set once
+        // rather than re-derived: the path can't change under this delegate,
+        // since any edit to uploadedPages rebuilds the Repeater outright.
+        //
+        // Every page's entry point is <dir>/main.qml (see CustomPages' scan
+        // and the CustomPages.dir comment for how it reaches its own sibling
+        // files - this Loader doesn't care how many files the page is split
+        // across).
+        Component.onCompleted: loader.setSource(Qt.resolvedUrl(root.modelData.path + "/main.qml"), { pibble: root.ctx })
+        onLoaded: root.loaded()
         // a page that fails to parse/instantiate just never
         // shows (there's no compile step, so the real QML
         // error only lands in the terminal/journal like any

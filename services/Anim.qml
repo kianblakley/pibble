@@ -141,6 +141,9 @@ Singleton {
     // of them, which is what the master switch that used to sit over these
     // meant (see Settings.heal).
     //
+    // Custom pages carry no switch: their opt-in is the page API itself (see
+    // scrambleAllowed below, and PageContext.scramble).
+    //
     // Whether `section` may scramble at all. "" is every label on the
     // launcher's own stage: a label there arrives when a pane does, so its
     // scramble is that pane entrance's - it answers to that page's own switch,
@@ -155,6 +158,15 @@ Singleton {
         // lives in the launcher (see stagePane).
         const stage = section === "";
         const name = stage ? root.stagePane : section;
+        // A custom page has no chip: binding text through the contract's
+        // scramble()/scrambled() is the opt-in, and only labels the page
+        // bound that way take part - none of the launcher's own stage labels
+        // are on screen with a custom page - so a page that never asks shows
+        // nothing, and one that asks has already consented. The tile style
+        // still rules the stage ("none" leaves the entrance undecorated),
+        // same as the built-in pages below.
+        if (stage && name.startsWith("folder:"))
+            return root.style !== "none";
         if (!Settings.scrambleEnabled(name))
             return false;
         return !(stage && root.style === "none");

@@ -20,10 +20,10 @@ import "root:/config"
 // main.qml is surfaced as a disabled, undeletable-by-toggle row instead of
 // being silently ignored or half-loaded - see the "broken" handling below.
 //
-// counter.example/ - the shipped, tracked example - is a real directory page
-// under a *.example name, which is the convention for a template that shouldn't
-// show up as a real, toggleable row (see the scan below); copy it out from
-// under that suffix to actually try it.
+// The shipped, tracked example (note.example/) is a real directory page under
+// a *.example name, which is the convention for a template that shouldn't show
+// up as a real, toggleable row (see the scan below); copy it out from under
+// that suffix to actually try it.
 Singleton {
     id: root
 
