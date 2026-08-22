@@ -108,7 +108,24 @@ ipc() {
     qs -p "$repo" ipc -n call launcher "$fn" "$@" 2>/dev/null
 }
 running_pids() {
-    pgrep -f "^qs -p $repo\$"
+    # Not just pgrep: a daemon quickshell has relaunched after a crash
+    # carries a bare `/usr/bin/quickshell` cmdline (its re-exec drops the
+    # original argv), which a cmdline match can never see - and an unseen
+    # daemon survives stop/restart and fights the replacement over IPC and
+    # the notification server. The instance registry knows every live
+    # instance by config path whatever its argv looks like, so take the
+    # union of both views. ($NF for the path: fine while the repo lives at
+    # a space-free path.)
+    local pids
+    pids=$({
+        pgrep -f "^qs -p $repo\$"
+        qs list --all 2>/dev/null | awk -v cfg="$repo/shell.qml" '
+            /^Instance /      { pid = "" }
+            /^ *Process ID:/  { pid = $NF }
+            /^ *Config path:/ { if ($NF == cfg && pid) { print pid; pid = "" } }'
+    } | sort -un)
+    [ -n "$pids" ] || return 1
+    printf '%s\n' "$pids"
 }
 reap_duplicates() {
     mapfile -t pids < <(running_pids | sort -n)
