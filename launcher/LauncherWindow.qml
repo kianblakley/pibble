@@ -744,8 +744,8 @@ PanelWindow {
         // cells record expandOrigin synchronously on the change above
         Qt.callLater(() => LauncherState.expandAnimStart());
         // Skip the on-demand decode when the clip's native size already
-        // fits the thumb cap (307200 pixels): the thumb (built with
-        // magick's "only shrink if larger" >) IS the full-res image
+        // fits the thumb cap (307200 pixels): the thumb (built with the
+        // shrink-only bound in Clipboard's scan) IS the full-res image
         // there, so decoding again would just swap the Image source to
         // identical pixels - and any source change makes QML clear the
         // current pixmap and reload async, flashing blank for no visual

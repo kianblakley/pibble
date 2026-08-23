@@ -87,10 +87,10 @@ Scope {
         }
 
         // A capture or decode that never delivers must not freeze a
-        // transparent window forever - hand the pick to the compositor's own
-        // picker instead. The window opens before the capture even starts, so
-        // this bounds the launcher's exit animation plus the whole capture
-        // and decode on the slowest observed path, with margin.
+        // transparent window forever - give the screen back and end the pick
+        // instead. The window opens before the capture even starts, so this
+        // bounds the launcher's exit animation plus the whole capture and
+        // decode on the slowest observed path, with margin.
         Timer {
             running: ScreenColor.overlayActive
             interval: 6000

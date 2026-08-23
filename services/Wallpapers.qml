@@ -116,7 +116,7 @@ Singleton {
             # The retry loop keys off this to keep polling while work is
             # still in flight - progress-between-scans alone can't tell a
             # slow entry (a 5K video in ffmpeg outlasts one retry interval)
-            # from a cache that can never fill (no ImageMagick).
+            # from a cache that can never fill (no ffmpeg).
             gen=0
             [ -e "$cachedir/.generating" ] && ! flock -n "$cachedir/.generating" true && gen=1
             echo "GEN:$gen"
@@ -132,28 +132,28 @@ Singleton {
                 # A video's crop is cut from its wide still, a png already.
                 oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                 # versioned like bkey below (r<n>): bump t<n> (here and in
-                # the generation pass) whenever the magick crop recipe
-                # changes, so stale entries fall out of the sweep instead of
-                # sticking around under the old recipe until their source file
-                # happens to change.
-                key=$(printf '%s' "$PWD/$f|t4" | md5sum | cut -d' ' -f1)
+                # the generation pass) whenever the crop recipe changes, so
+                # stale entries fall out of the sweep instead of sticking
+                # around under the old recipe until their source file happens
+                # to change.
+                key=$(printf '%s' "$PWD/$f|t5" | md5sum | cut -d' ' -f1)
                 # the wide still, versioned the same way (p<n>) and for the
                 # same reason as the two keys around it
-                pkey=$(printf '%s' "$PWD/$f|p2" | md5sum | cut -d' ' -f1)
+                pkey=$(printf '%s' "$PWD/$f|p3" | md5sum | cut -d' ' -f1)
                 # the blurred variant is the one cache entry that depends on
                 # more than the source file, so the output geometry, the blur
                 # and the recipe version go in its key too: a resized output,
                 # a retuned kernel or a changed recipe then lands on a
                 # different name, and the old one falls out of the sweep
                 # below like any other dead entry. Bump r<n> (here and in the
-                # generation pass) whenever the magick command changes.
-                bkey=$(printf '%s' "$PWD/$f|$3|$4|r5" | md5sum | cut -d' ' -f1)
+                # generation pass) whenever the ffmpeg command changes.
+                bkey=$(printf '%s' "$PWD/$f|$3|$4|r6" | md5sum | cut -d' ' -f1)
                 # the preview proxy, versioned the same way (x<n>): bump it
                 # (here and in the generation pass) when the ffmpeg recipe
                 # changes
                 vkey=$(printf '%s' "$PWD/$f|x1" | md5sum | cut -d' ' -f1)
-                # the wide still is a jpeg when magick writes it and a png when
-                # ffmpeg does - see the two calls in the generation pass
+                # the wide still is a jpeg for an image and a png for a video -
+                # see the two calls in the generation pass
                 wide="$cachedir/thumbnails/wide/$pkey.jpg"
                 [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
                 thumb="" blur="" pan="" pxy=""
@@ -254,7 +254,7 @@ Singleton {
                 // there, stranding whatever the pass wrote afterwards until
                 // the next open. With no pass running, the comparison
                 // against the last missing set is what keeps a cache that
-                // *can't* be filled - no ImageMagick - from scanning on a
+                // *can't* be filled - no ffmpeg - from scanning on a
                 // loop: unchanged-and-idle means nothing more is coming.
                 // a video whose thumb still points at its pan entry is one
                 // whose crop hasn't landed yet (see the scan's isvid branch)
@@ -263,16 +263,16 @@ Singleton {
                     generationRetry.restart();
                 root.generationMissing = missing;
                 Quickshell.execDetached(["bash", "-c", `
-                    # The last four arguments carry the two missing-dependency
-                    # alerts already translated: the shell's language is a QML
-                    # question, and passing the finished strings in as argv
-                    # beats trying to interpolate them into a script body
+                    # The last four arguments carry the two alerts already
+                    # translated: the shell's language is a QML question, and
+                    # passing the finished strings in as argv beats trying to
+                    # interpolate them into a script body
                     walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6" gp="$7"; shift 7
                     # shifted first rather than read as the 7th-10th
                     # positionals directly: this script is a QML template
                     # literal, where a braced positional past $9 would be read
                     # as a JS substitution rather than a shell one
-                    ffsum="$1" ffbody="$2" imsum="$3" imbody="$4"; shift 4
+                    ffsum="$1" ffbody="$2" encsum="$3" encbody="$4"; shift 4
                     mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"
                     # Layouts this cache has had before: wallpapers/ + xray/
                     # (from when the backdrop had a cache of its own, before
@@ -287,11 +287,26 @@ Singleton {
                     find "$cachedir/thumbnails" -maxdepth 1 -type f -delete 2>/dev/null
                     # one generation pass at a time: scans are cheap and fire
                     # on every open, and two passes racing on the same cache
-                    # entry is duplicated magick work at best
+                    # entry is duplicated ffmpeg work at best
                     exec 9>"$cachedir/.generating"
                     flock -n 9 || exit 0
-                    warnedMagick=0
                     warnedFfmpeg=0
+                    warnedEncoder=0
+                    # Picked once rather than per wallpaper: the proxy's
+                    # re-encode needs an H.264 encoder, and libx264 is absent
+                    # from patent-free builds (Fedora's ffmpeg-free carries
+                    # libopenh264 instead). Without a fallback the encode there
+                    # failed silently and every preview went on decoding the
+                    # source - exactly what the proxy exists to avoid.
+                    # openh264 has no CRF mode, so it gets a bitrate target
+                    # instead; 8M at 1920 wide sits near the crf 18 the x264
+                    # path asks for and is still a fraction of a 5K source.
+                    encoders=$(ffmpeg -hide_banner -encoders 2>/dev/null)
+                    venc=""
+                    case "$encoders" in
+                    *" libx264 "*) venc="-c:v libx264 -preset veryfast -crf 18" ;;
+                    *" libopenh264 "*) venc="-c:v libopenh264 -b:v 8M" ;;
+                    esac
                     live=""
                     for f in "$@"; do
                         b=$(basename "$f")
@@ -300,11 +315,11 @@ Singleton {
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
                         # see the matching key note in the scan pass above
-                        key=$(printf '%s' "$f|t4" | md5sum | cut -d' ' -f1)
+                        key=$(printf '%s' "$f|t5" | md5sum | cut -d' ' -f1)
                         # see the matching pkey note in the scan pass above
-                        pkey=$(printf '%s' "$f|p2" | md5sum | cut -d' ' -f1)
+                        pkey=$(printf '%s' "$f|p3" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
-                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r5" | md5sum | cut -d' ' -f1)
+                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r6" | md5sum | cut -d' ' -f1)
                         # see the matching vkey note in the scan pass above
                         vkey=$(printf '%s' "$f|x1" | md5sum | cut -d' ' -f1)
                         wide="$cachedir/thumbnails/wide/$pkey.jpg"
@@ -320,13 +335,13 @@ Singleton {
                             [ "$cachedir/proxies/$vkey.mp4" -nt "$f" ] || needproxy=1
                         fi
                         if [ "$needcrop" = "1" ] || [ "$needblur" = "1" ] || [ "$needwide" = "1" ] || [ "$needproxy" = "1" ]; then
-                            if [ "$isvid" = "1" ]; then
-                                if ! command -v ffmpeg >/dev/null 2>&1; then
-                                    if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
-                                        warnedFfmpeg=1
-                                        notify-send -a pibble -i system-software-install "$ffsum" "$ffbody"
-                                    fi
-                                else
+                            if ! command -v ffmpeg >/dev/null 2>&1; then
+                                if [ "$warnedFfmpeg" = "0" ] && [ "$alerts" = "1" ]; then
+                                    warnedFfmpeg=1
+                                    notify-send -a pibble -i system-software-install "$ffsum" "$ffbody"
+                                fi
+                            else
+                                if [ "$isvid" = "1" ]; then
                                     # the wide still keeps the source aspect
                                     # rather than being cropped like the
                                     # images below: this frame is what the
@@ -396,68 +411,87 @@ Singleton {
                                         vtmp="$cachedir/proxies/$vkey.tmp.mp4"
                                         if [ -n "$vw" ] && [ "$vw" -le 1920 ] 2>/dev/null; then
                                             ffmpeg -y -v error -i "$f" -an -c:v copy -movflags +faststart "$vtmp"
-                                        else
+                                        elif [ -n "$venc" ]; then
                                             # min() so an unprobeable source is
                                             # still never upscaled
-                                            ffmpeg -y -v error -i "$f" -an -vf "scale='min(1920,iw)':-2:flags=lanczos" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -movflags +faststart "$vtmp"
+                                            ffmpeg -y -v error -i "$f" -an -vf "scale='min(1920,iw)':-2:flags=lanczos" $venc -pix_fmt yuv420p -movflags +faststart "$vtmp"
+                                        elif [ "$warnedEncoder" = "0" ] && [ "$alerts" = "1" ]; then
+                                            # no H.264 encoder at all: the
+                                            # preview still works, it just
+                                            # decodes the source, so this is
+                                            # worth saying once rather than
+                                            # failing
+                                            warnedEncoder=1
+                                            notify-send -a pibble -i system-software-install "$encsum" "$encbody"
                                         fi
                                         if [ -s "$vtmp" ]; then mv "$vtmp" "$cachedir/proxies/$vkey.mp4"; else rm -f "$vtmp"; fi
                                     fi
+                                    # The tile crop, cut from the wide still just
+                                    # written rather than from the video, with the
+                                    # recipe an image's crop gets below.
+                                    # The wide still alone used to stand in as the
+                                    # grid tile, decoded through sourceSize - and
+                                    # Qt's decode-time downscale is visibly softer
+                                    # than the GPU minification the live video
+                                    # frame gets, so playback started with a
+                                    # brightness/sharpness pop. A pre-scaled crop
+                                    # decodes 1:1, exactly like an image tile's.
+                                    # The center crop to 16:9 lands the same
+                                    # framing PreserveAspectCrop cuts from the
+                                    # video in the 16:9 tile box, so the handover
+                                    # still moves nothing.
+                                    #
+                                    # force_original_aspect_ratio=increase then
+                                    # crop is what ImageMagick spelled "-resize ^
+                                    # -gravity center -extent": scale to cover the
+                                    # box, then cut the centre out of it.
+                                    if [ "$needcrop" = "1" ] && [ -e "$wide" ]; then
+                                        ffmpeg -y -v error -i "$wide" -frames:v 1 -vf "scale=480:270:force_original_aspect_ratio=increase,crop=480:270" "$cachedir/thumbnails/crops/$key.$oext"
+                                    fi
+                                else
+                                    # -frames:v 1: first frame only, so an
+                                    # animated .gif source still yields a static
+                                    # crop/blur (only the selected/centered
+                                    # tile/window plays the source file itself)
+                                    #
+                                    # Both recipes composite onto black through a
+                                    # lavfi color source rather than scaling
+                                    # alone: ffmpeg carries alpha through to a png
+                                    # and drops it outright on the way to a jpeg,
+                                    # keeping the raw RGB underneath - which for a
+                                    # transparent wallpaper is whatever the
+                                    # encoder happened to leave there (white, on
+                                    # the files this was measured against). Black
+                                    # is what a transparent wallpaper actually
+                                    # composites over on the desktop, so both the
+                                    # tile and the still are flattened onto it.
+                                    # scale2ref sizes that color source from the
+                                    # scaled frame, so neither call has to know
+                                    # the output geometry up front.
+                                    [ "$needcrop" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale=480:270:force_original_aspect_ratio=increase,crop=480:270[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1" -frames:v 1 "$cachedir/thumbnails/crops/$key.$oext"
+                                    # The wide still: the same frame
+                                    # uncropped, bounded to the box a video's
+                                    # already gets (see the ffmpeg call above), so
+                                    # both types feed that strip the same picture
+                                    # at the same quality. The two min()s only
+                                    # ever shrink - a source already smaller
+                                    # comes through as it is rather than being
+                                    # upscaled into the cache.
+                                    #
+                                    # This exists purely to keep the decode off the
+                                    # original: a 5K PNG costs ~280ms to decode
+                                    # even asked for at 440px tall (unlike a JPEG,
+                                    # PNG has no scaled decode path - the whole
+                                    # thing is unpacked, then resized), and the
+                                    # carousel pays that again for every cell that
+                                    # wraps around the strip. At 1920 wide it is
+                                    # ~30ms. JPEG, not the true-color PNG the
+                                    # other variants are written as: nothing
+                                    # downstream re-blurs this one, so there is no
+                                    # banding to protect against, and the file
+                                    # lands a fraction of the size.
+                                    [ "$needwide" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1" -frames:v 1 -q:v 2 "$wide"
                                 fi
-                                # The tile crop, cut from the wide still just
-                                # written (magick can't read the video itself),
-                                # with the recipe an image's crop gets below.
-                                # The wide still alone used to stand in as the
-                                # grid tile, decoded through sourceSize - and
-                                # Qt's decode-time downscale is visibly softer
-                                # than the GPU minification the live video
-                                # frame gets, so playback started with a
-                                # brightness/sharpness pop. A pre-scaled crop
-                                # decodes 1:1, exactly like an image tile's.
-                                # The center crop to 16:9 lands the same
-                                # framing PreserveAspectCrop cuts from the
-                                # video in the 16:9 tile box, so the handover
-                                # still moves nothing.
-                                if [ "$needcrop" = "1" ] && [ -e "$wide" ] && command -v magick >/dev/null 2>&1; then
-                                    magick "$wide" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/crops/$key.$oext"
-                                fi
-                            elif ! command -v magick >/dev/null 2>&1; then
-                                if [ "$warnedMagick" = "0" ] && [ "$alerts" = "1" ]; then
-                                    warnedMagick=1
-                                    notify-send -a pibble -i system-software-install "$imsum" "$imbody"
-                                fi
-                            else
-                                # "$f[0]": first frame only, so an animated
-                                # .gif source still yields a static
-                                # crop/blur (only the selected/centered
-                                # tile/window plays the source file itself)
-                                [ "$needcrop" = "1" ] && magick "$f[0]" -resize 480x270^ -gravity center -extent 480x270 "$cachedir/thumbnails/crops/$key.$oext"
-                                # The wide still: the same frame
-                                # uncropped, bounded to the box a video's
-                                # already gets (see the ffmpeg call above), so
-                                # both types feed that strip the same picture
-                                # at the same quality. The trailing > only
-                                # ever shrinks - a source already smaller
-                                # comes through as it is rather than being
-                                # upscaled into the cache.
-                                #
-                                # This exists purely to keep the decode off the
-                                # original: a 5K PNG costs ~280ms to decode
-                                # even asked for at 440px tall (unlike a JPEG,
-                                # PNG has no scaled decode path - the whole
-                                # thing is unpacked, then resized), and the
-                                # carousel pays that again for every cell that
-                                # wraps around the strip. At 1920 wide it is
-                                # ~30ms. JPEG, not the true-color PNG the
-                                # other variants are written as: nothing
-                                # downstream re-blurs this one, so there is no
-                                # banding to protect against, and a q92 file is
-                                # a quarter the size. Alpha flattened onto
-                                # black explicitly - the format can't carry it
-                                # and magick would otherwise pick white, which
-                                # is not what a transparent wallpaper composites
-                                # over on the desktop.
-                                [ "$needwide" = "1" ] && magick "$f[0]" -resize '1920x1080>' -background black -alpha remove -alpha off -quality 92 "$wide"
                             fi
                         fi
                         # The blurred variant: the wallpaper as the compositor
@@ -465,7 +499,7 @@ Singleton {
                         # block on root for where the numbers come from),
                         # which is also what the wallpaper command gets as
                         # $BLUR. A video goes through the still frame ffmpeg
-                        # just wrote, since magick can't read one.
+                        # just wrote rather than the video itself.
                         #
                         # Cropped to the output's aspect so the launcher's
                         # PreserveAspectCrop has nothing left to crop and the
@@ -474,10 +508,18 @@ Singleton {
                         # screen's size, which measures ~3 output pixels below
                         # the compositor's blur of the same wallpaper -
                         # deliberately left as is.
-                        if [ "$needblur" = "1" ] && command -v magick >/dev/null 2>&1; then
+                        #
+                        # gblur's sigma is ImageMagick's "-blur 0xsigma" (a 0
+                        # radius there means "derive it from sigma", which is
+                        # what gblur does anyway), and colorchannelmixer takes
+                        # the same 3x3 the -color-matrix did, row per output
+                        # channel. Measured against the ImageMagick recipe this
+                        # replaced, the two land within 0.07% RMSE.
+                        if [ "$needblur" = "1" ] && command -v ffmpeg >/dev/null 2>&1; then
                             bsrc="$f"
                             [ "$isvid" = "1" ] && bsrc="$wide"
-                            [ -e "$bsrc" ] && magick "$bsrc[0]" -resize "$xgeom^" -gravity center -extent "$xgeom" -blur "0x$xsigma" -color-matrix "1.3937 -0.3576 -0.0361, -0.1063 1.1424 -0.0361, -0.1063 -0.3576 1.4639" "$cachedir/blurred/$bkey.png"
+                            xw="\${xgeom%x*}" xh="\${xgeom#*x}"
+                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,gblur=sigma=$xsigma,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1" -frames:v 1 "$cachedir/blurred/$bkey.png"
                         fi
                     done
                     # clips/ is not swept here: the clipboard owns it, keys it
@@ -504,8 +546,8 @@ Singleton {
                     root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma), wantProxy ? "1" : "0",
                     Strings.tr("ffmpeg not found"),
                     Strings.tr("ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."),
-                    Strings.tr("magick not found"),
-                    Strings.tr("ImageMagick is used to generate wallpaper thumbnails and blurred previews - install it for sharper, faster previews.")].concat(order));
+                    Strings.tr("No H.264 encoder found"),
+                    Strings.tr("ffmpeg has no H.264 encoder (libx264 or libopenh264), so video wallpaper previews decode the source file instead of a smaller proxy.")].concat(order));
             }
         }
     }
@@ -555,7 +597,7 @@ Singleton {
     // wide leaves nothing that a quarter-rate sampling can't carry: against
     // the same blur done at full output resolution, the quarter-size bake
     // scaled back up measures 55dB PSNR - visually identical, at a sixteenth
-    // of the magick run, the file size, the decode and the texture upload.
+    // of the ffmpeg run, the file size, the decode and the texture upload.
     readonly property int xrayScale: 4
     readonly property size xraySize: {
         const s = root.screen;
@@ -584,7 +626,7 @@ Singleton {
     // scale is unknown, which is what holds the bake back.
     readonly property real xrayCacheSigma: root.xrayOutputScale > 0 ? root.xraySigma / root.xrayOutputScale / root.xrayScale : 0
     // The baked backdrop for the current wallpaper, or "" if there isn't one
-    // yet (no ImageMagick, or a folder still being worked through), which
+    // yet (no ffmpeg, or a folder still being worked through), which
     // falls the launcher back to blurring live.
     readonly property string xrayBlur: {
         if (Settings.bgBlur !== "xray")

@@ -5,7 +5,7 @@ import Quickshell.Io
 import "root:/config"
 
 // "Click any pixel on screen to use its color" - the eyedropper in the
-// custom-palette editor, with hyprpicker's magnifier.
+// custom-palette editor, with a magnifier of our own.
 //
 // The magnifier is why this works the way it does. No compositor lets us
 // decorate *its* picker: the portal's PickColor hands the whole interaction
@@ -13,13 +13,11 @@ import "root:/config"
 // a magnifier means owning the interaction, and owning it means freezing the
 // screen first - the surface has to cover every output to receive pointer
 // motion at all, and once it does, what is underneath can no longer be seen or
-// reached. hyprpicker files exactly this under Caveats ("Freezes your displays
+// reached. hyprpicker filed exactly this under Caveats ("Freezes your displays
 // when picking the color"); it is inherent to Wayland, not a shortcut.
 //
-// The frozen frame comes from a plain subprocess writing an image - grim
-// where it exists, else niri's own screenshot action - and that is a
-// deliberate retreat. Two smarter backends were tried and rejected on
-// evidence:
+// The frozen frame comes from grim writing an image, and that is a deliberate
+// retreat. Two smarter backends were tried and rejected on evidence:
 //
 //  - org.gnome.Shell.Screenshot.Screenshot as implemented by niri renders the
 //    wrong thing: a viewport shifted one screen to the right in the scroll
@@ -34,14 +32,27 @@ import "root:/config"
 //    and 0.3.1 alike, so it is Qt's bug, not quickshell's. Do not bring
 //    screencopy back without proving a fixed Qt first.
 //
-// grim keeps the capture cheap (uncompressed ppm both ways, a few hundred
-// ms); without it, niri's action costs a 5K PNG round trip, paid while the
-// launcher's exit animation is already playing. Sessions with neither fall
-// back to the compositor's own picker - org.gnome.Shell.Screenshot.PickColor
-// (native on GNOME and niri) or hyprpicker - with no magnifier of ours. KDE
-// and COSMIC get no eyedropper at all; the button is hidden rather than shown
-// broken. The overlay also falls back to that picker at runtime if no frame
-// arrives, so a missing capture degrades instead of hanging.
+// So grim is the whole of what the eyedropper needs, and without it there is
+// no eyedropper: the button is hidden rather than shown broken. Everything
+// after the capture is Quickshell's own - the frame is an Image, and the pixel
+// under the cursor is read straight out of it by the lens Canvas in
+// ColorPickerOverlay. Nothing external reads a pixel.
+//
+// Two fallbacks used to sit behind grim and both were dropped, each for the
+// same reason: it cost a dependency to cover a case that barely existed.
+//
+//  - niri's own screenshot action, for a niri session without grim. Free of
+//    any package, but it costs a 5K PNG round trip paid while the launcher's
+//    exit animation is still playing, against grim's uncompressed ppm.
+//  - org.gnome.Shell.Screenshot.PickColor over gdbus, which handed the whole
+//    interaction to the compositor and gave back a color with no magnifier of
+//    ours. That interface is GNOME's by name only, and GNOME never reaches
+//    this file at all: it implements no wlr-layer-shell, so none of pibble's
+//    windows map there. niri answers it too, which made it a niri-only rescue
+//    for a capture that had already failed - and glib2's gdbus was the price.
+//    hyprpicker sat behind that in turn, and went first: it wants
+//    wlr-screencopy exactly as grim does, so it never reached a session grim
+//    could not.
 //
 // Everything below is written without backslashes on purpose: these commands
 // are QML template literals, where an invalid escape (sed's \( or \1) is a
@@ -57,27 +68,20 @@ Singleton {
     signal picked(string hex)
     signal failed
 
-    // False until probe() has actually found a backend, rather than
-    // optimistically true: where nothing can pick, a button that appears and
-    // then vanishes reads worse than one that was never there.
+    // False until probe() has actually found grim, rather than optimistically
+    // true: where nothing can pick, a button that appears and then vanishes
+    // reads worse than one that was never there.
     property bool available: false
     property bool probed: false
-    // Whether a frame can be captured, and so whether the magnifier overlay
-    // runs. When false but `canPick` is true the compositor's own picker runs
-    // instead - no magnifier, but it picks.
+    // Whether grim can capture a frame, and so whether the magnifier overlay
+    // runs. It is the whole of what makes a pick possible: with no frame there
+    // is no pixel to read, and nothing else is asked to pick on our behalf.
     property bool canMagnify: false
-    property bool canPick: false
 
     // While true the overlay owns the screen. `shotPath` is the frozen frame
-    // it samples, deleted the moment the pick ends - on niri the compositor
-    // writes it into the user's screenshot folder, and one file per pick
-    // would pile up fast.
+    // it samples, deleted the moment the pick ends.
     property bool overlayActive: false
     property string shotPath: ""
-    // Which capture the probe found, so the pick doesn't re-discover it with
-    // a bash round trip every time: "grim" runs the binary directly, "niri"
-    // goes through the newest-file dance below.
-    property string captureBackend: ""
     // tmpfs, not the cache dir: the frame is 33MB of throwaway written and
     // read back within a second - the runtime dir keeps that off the disk
     // entirely and shaves the write+read out of the wait.
@@ -110,7 +114,7 @@ Singleton {
         if (root.canMagnify)
             settle.restart();
         else
-            pickProcess.running = true;
+            root.failed();
     }
 
     // The launcher's fade has already reached opacity 0 when pick() runs, so
@@ -122,18 +126,16 @@ Singleton {
         id: settle
         interval: 15
         onTriggered: {
-            if (root.captureBackend === "grim") {
-                if (!grimProcess.running)
-                    grimProcess.running = true;
-            } else if (!captureProcess.running) {
-                captureProcess.running = true;
-            }
+            if (!grimProcess.running)
+                grimProcess.running = true;
         }
     }
 
-    // The fast path: grim straight from screencopy to uncompressed ppm on
-    // tmpfs, no shell in between. A failure falls through to the niri dance,
-    // and from there to the compositor's own picker.
+    // grim straight from screencopy to uncompressed ppm on tmpfs, no shell in
+    // between, and the only way a frame is ever captured. A failure ends the
+    // pick: there is no second road to the screen that costs nothing, and
+    // asking another process to pick for us was worth less than the
+    // dependency it cost.
     Process {
         id: grimProcess
         command: ["grim", "-t", "ppm", root.framePath]
@@ -142,10 +144,13 @@ Singleton {
                 Quickshell.execDetached(["rm", "-f", "--", root.framePath]);
                 return;
             }
-            if (exitCode === 0)
+            if (exitCode === 0) {
                 root.shotPath = root.framePath;
-            else
-                captureProcess.running = true;
+            } else {
+                root.overlayActive = false;
+                root.picking = false;
+                root.failed();
+            }
         }
     }
 
@@ -170,17 +175,10 @@ Singleton {
     }
 
     // Called by the overlay when the captured frame never becomes usable.
-    // Remembered, so the next pick goes straight to the fallback instead of
-    // timing out again.
     function magnifyFailed(): void {
         root.overlayActive = false;
-        root.canMagnify = false;
-        if (root.canPick) {
-            pickProcess.running = true;
-        } else {
-            root.picking = false;
-            root.failed();
-        }
+        root.picking = false;
+        root.failed();
     }
 
     // Puts the picked color on the clipboard and says so. Split out of the pick
@@ -199,10 +197,15 @@ Singleton {
             # a swatch rides along as notification media, the same way a copied
             # clipboard image does - a hex string alone is hard to read back
             img=""
-            if command -v magick >/dev/null 2>&1; then
+            if command -v ffmpeg >/dev/null 2>&1; then
                 mkdir -p "$dir"
                 img="$dir/picked.png"
-                magick -size 96x96 xc:"$hex" "$img" 2>/dev/null || img=""
+                # lavfi's color source wants 0xRRGGBB, and the leading # of a
+                # hex would open a comment in this shell besides. format=rgb24
+                # inside the chain rather than -pix_fmt on the output: the
+                # source otherwise negotiates yuv and the swatch lands a step
+                # off the color that was picked.
+                ffmpeg -y -v error -f lavfi -i "color=c=0x$(printf '%s' "$hex" | cut -c2-):s=96x96,format=rgb24" -frames:v 1 "$img" 2>/dev/null || img=""
             fi
             if [ "$notify" = 1 ]; then
                 if [ -n "$img" ]; then
@@ -224,133 +227,21 @@ Singleton {
     Process { id: deliver }
 
     // Names what this session can do without invoking any of it - nothing
-    // appears on screen and no pixel is read.
+    // appears on screen and no pixel is read. It asks one question now, since
+    // grim is the only thing that can freeze the screen: is grim installed?
+    // Still a subprocess rather than a QML test, because PATH is the point -
+    // a grim in ~/.local/bin counts, and only a shell resolves that.
     Process {
         id: probeProcess
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$PATH"
-            has_name() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.NameHasOwner "$1" 2>/dev/null | grep -q true; }
-            pick=no
-            shot=no
-            if has_name org.gnome.Shell.Screenshot; then
-                pick=yes
-            fi
-            command -v hyprpicker >/dev/null 2>&1 && pick=yes
-            shot=no
-            command -v grim >/dev/null 2>&1 && shot=grim
-            [ "$shot" = no ] && [ -n "$NIRI_SOCKET" ] && shot=niri
-            echo "pick=$pick shot=$shot"`]
+            command -v grim >/dev/null 2>&1 && echo shot=grim || echo shot=no`]
         stdout: StdioCollector {
             onStreamFinished: {
-                root.canPick = text.indexOf("pick=yes") >= 0;
-                root.captureBackend = text.indexOf("shot=grim") >= 0 ? "grim"
-                                    : text.indexOf("shot=niri") >= 0 ? "niri" : "";
-                root.canMagnify = root.captureBackend !== "";
-                root.available = root.canPick || root.canMagnify;
+                root.canMagnify = text.indexOf("shot=grim") >= 0;
+                root.available = root.canMagnify;
                 root.probed = true;
             }
         }
-    }
-
-    // Freezes the screen to a file and hands back its path - the no-grim
-    // road. niri writes into the user's configured screenshot folder under
-    // its own timestamped name, so the only handle back is "the newest file
-    // that was not there before" - found by polling, then trusted only once
-    // its PNG trailer has landed so a half-written file never gets decoded.
-    Process {
-        id: captureProcess
-        command: ["bash", "-c", `
-            export PATH="$HOME/.local/bin:$PATH"
-            if [ -n "$NIRI_SOCKET" ]; then
-                line=$(grep -m1 'screenshot-path' "$HOME/.config/niri/config.kdl" 2>/dev/null | grep -v '^ *//' | grep -o '"[^"]*"' | head -1)
-                tpl=$(printf '%s' "$line" | tr -d '"')
-                [ -z "$tpl" ] && tpl="$HOME/Pictures/Screenshots/x.png"
-                dir=$(dirname "$tpl")
-                case "$dir" in "~"*) dir="$HOME"$(printf '%s' "$dir" | cut -c2-) ;; esac
-                [ -d "$dir" ] || exit 1
-                before=$(ls -t "$dir" 2>/dev/null | head -1)
-                niri msg action screenshot-screen >/dev/null 2>&1 || exit 1
-                for _ in $(seq 1 150); do
-                    now=$(ls -t "$dir" 2>/dev/null | head -1)
-                    if [ -n "$now" ] && [ "$now" != "$before" ]; then
-                        f="$dir/$now"
-                        # a finished PNG ends in its IEND chunk - cheaper and
-                        # quicker than waiting out a size-stability window
-                        if [ "$(stat -c %s "$f" 2>/dev/null || echo 0)" -gt 1000 ] && tail -c 12 "$f" 2>/dev/null | grep -q IEND; then
-                            printf '%s' "$f"
-                            exit 0
-                        fi
-                    fi
-                    sleep 0.02
-                done
-            fi
-            exit 1`]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const path = text.trim();
-                if (!root.picking) {
-                    // cancelled while the capture was still in flight - the
-                    // frame arriving now belongs to nobody
-                    if (path)
-                        Quickshell.execDetached(["rm", "-f", "--", path]);
-                    return;
-                }
-                if (path) {
-                    root.shotPath = path;
-                } else {
-                    // nothing to magnify: fall back to letting the compositor
-                    // run its own picker rather than giving up
-                    root.overlayActive = false;
-                    pickProcess.running = true;
-                }
-            }
-        }
-    }
-
-    // Fallback only, for sessions that can pick but not capture. No magnifier -
-    // the compositor draws whatever it draws.
-    Process {
-        id: pickProcess
-        // The gdbus --timeout is in seconds and has to be generous: it bounds
-        // how long the user has to click, and the default 25 is short enough
-        // that hesitating is enough to abort the pick.
-        command: ["bash", "-c", `
-            export PATH="$HOME/.local/bin:$PATH"
-            emit() { awk '{ printf "#%02X%02X%02X", int($1 * 255 + 0.5), int($2 * 255 + 0.5), int($3 * 255 + 0.5) }'; }
-
-            if gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.NameHasOwner org.gnome.Shell.Screenshot 2>/dev/null | grep -q true; then
-                out=$(gdbus call --timeout 300 --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.PickColor 2>/dev/null)
-                # the only digits in a reply are the three doubles themselves,
-                # so everything else can just be blanked out
-                set -- $(printf '%s' "$out" | tr -cs '0-9.' ' ')
-                if [ $# = 3 ]; then
-                    printf '%s %s %s' "$1" "$2" "$3" | emit
-                    exit 0
-                fi
-                exit 1
-            fi
-
-            if command -v hyprpicker >/dev/null 2>&1; then
-                hex=$(hyprpicker -f hex -n 2>/dev/null | tr -d ' ')
-                case "$hex" in
-                    '#'[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) printf '%s' "$hex"; exit 0 ;;
-                esac
-            fi
-            exit 1`]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const hex = text.trim();
-                if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
-                    const upper = hex.toUpperCase();
-                    root.announce(upper);
-                    root.picked(upper);
-                } else {
-                    root.failed();
-                }
-            }
-        }
-        // cleared here rather than beside the emit above so it is false
-        // whichever way the pick ended, cancel and crash included
-        onExited: root.picking = false
     }
 }
