@@ -191,10 +191,14 @@ Singleton {
                             [ -s "$dir/$id.png" ] && continue
                             tmp=$(mktemp)
                             cliphist decode "$id" > "$tmp"
-                            if command -v magick >/dev/null; then
-                                magick "$tmp" -resize '307200@>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
-                            elif command -v convert >/dev/null; then
-                                convert "$tmp" -resize '307200@>' "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                            # ImageMagick spelled this bound '307200@>' - fit
+                            # inside a pixel budget, shrink only. The same sum
+                            # written out: scale by the square root of the ratio
+                            # so the aspect is kept, and min(1,..) so a source
+                            # already under the budget is copied through at its
+                            # own size rather than upscaled into the cache.
+                            if command -v ffmpeg >/dev/null; then
+                                ffmpeg -y -v error -i "$tmp" -frames:v 1 -vf "scale=w='trunc(iw*min(1,sqrt(307200/(iw*ih))))':h='trunc(ih*min(1,sqrt(307200/(iw*ih))))'" "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
                             else
                                 if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
                                     warned=1
@@ -204,8 +208,8 @@ Singleton {
                             fi
                             rm -f "$tmp"
                         done`, "_", root.thumbDir, Settings.alertEnabled("missingDeps") ? "1" : "0",
-                        Strings.tr("magick not found"),
-                        Strings.tr("ImageMagick is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots.")].concat(imgs);
+                        Strings.tr("ffmpeg not found"),
+                        Strings.tr("ffmpeg is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots.")].concat(imgs);
                     thumbnails.running = true;
                 }
             }

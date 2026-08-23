@@ -25,7 +25,44 @@
   
 ## Installation
 
-### 1. Install dependencies
+### 1. Clone
+
+```sh
+git clone https://github.com/kianblakley/pibble.git
+cd pibble
+```
+
+### 2. Install
+
+```sh
+./install.sh
+```
+
+Asks which language to run the shell in, installs the dependencies below through
+your distro's package manager - building the few that nobody packages - and
+offers to start the daemons. Arch, Fedora, Debian/Ubuntu, openSUSE, Void, Alpine
+and Nix are handled natively; anything else gets told what to install by hand.
+
+On Nix it installs into your **user profile** (`nix profile`), which survives a
+rebuild - nixpkgs carries every dependency pibble has, Quickshell included, so
+nothing is built from source there. To declare them in `configuration.nix`
+instead, stop the script and add the same names to `environment.systemPackages`.
+
+| Flag | |
+|---|---|
+| `--dry-run` | print the whole plan, install nothing |
+| `--language ID` | set the language without asking (`--list-languages` lists them) |
+| `--only LIST` / `--skip LIST` | limit it to certain dependencies (`--list-deps` lists them) |
+| `--all` | install the optional dependencies too, not just the recommended |
+| `--daemons LIST` | start `pibble`, `clipboard`, `wallpaper` - or `all` / `none` |
+| `--yes` | non-interactive: take the recommended answer everywhere |
+
+Everything it installs is recorded in `~/.local/state/pibble/install-manifest.tsv`,
+and `./uninstall.sh` removes exactly what that file lists. Anything already on
+your system when you installed pibble was never recorded, so it is never
+removed - and neither are your settings, thumbnails or clipboard cache.
+
+### Dependencies
 
 Necessary:
 
@@ -39,29 +76,20 @@ Optional (required for full feature set):
 | Dependency | Use |
 |---|---|
 | [matugen](https://github.com/InioX/matugen) | Wallpaper-derived color theme |
-| [ImageMagick](https://github.com/ImageMagick/ImageMagick) | Static wallpaper/clipboard thumbnails |
-| [ffmpeg](https://ffmpeg.org/) | Live wallpaper thumbnails |
+| [curl](https://curl.se/) | Fetches the weather shown on the clock page - without it the weather is silently blank |
+| [ffmpeg](https://ffmpeg.org/) | Every generated image: wallpaper and clipboard thumbnails, blurred variants, and video wallpaper previews |
 | [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews (install via your distro's package manager) |
+| [libnotify](https://gitlab.gnome.org/GNOME/libnotify) | `notify-send`, which every alert pibble raises goes through - without it they are dropped silently, including the ones reporting a missing dependency |
+| [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard reads, copy actions, and feeding cliphist |
 | [awww](https://codeberg.org/LGFae/awww) | Recommended static wallpaper backend (can use any) |
 | [mpvpaper](https://github.com/GhostNaN/mpvpaper) | Recommended live wallpaper backend (can use any) |
 | [cliphist](https://github.com/sentriz/cliphist) | Clipboard history support |
-| [grim](https://sr.ht/~emersion/grim) | Screen color picker capture on wlroots compositors (niri needs nothing, but grim is much faster) |
-| [hyprpicker](https://github.com/hyprwm/hyprpicker) | Screen color picker fallback where `grim` is absent |
+| [grim](https://sr.ht/~emersion/grim) | The screen color picker - it freezes the screen so the eyedropper has something to sample. Without it the eyedropper is hidden |
 
-### 2. Clone
+Installing them yourself instead is fine - `./install.sh` skips anything already
+present, and `./install.sh --no-deps` skips the step entirely.
 
-```sh
-git clone https://github.com/kianblakley/pibble.git
-cd pibble
-```
-
-### 3. Start the daemon
-
-```sh
-./pibble start
-```
-
-### 4. Toggle the launcher
+### 3. Toggle the launcher
 
 ```sh
 ./pibble toggle
