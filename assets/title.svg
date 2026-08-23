@@ -13,7 +13,7 @@
 -->
 <style>
 g{opacity:0;animation-duration:4.2s;animation-timing-function:step-end;animation-iteration-count:infinite}
-use{fill:#875DC4}
+use{fill:#ffffff}
 .rest{animation-name:rest}
 @keyframes f0{0%{opacity:1}1.5238%{opacity:0}}
 .f0{animation-name:f0}

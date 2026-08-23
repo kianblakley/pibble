@@ -11,7 +11,7 @@ re-run this to bring the banner back in step.
 Glyphs are emitted as outlines rather than as text, so the banner needs no font
 installed on the machine viewing it. Needs fontTools and a JetBrains Mono TTF:
 
-    python3 assets/make-title.py [--font PATH] [--seed N] [-o assets/title.svg]
+    python3 assets/make-title.py [--color C] [--seed N] [--font PATH] [-o OUT]
 """
 import argparse
 import subprocess
@@ -145,7 +145,7 @@ class Face:
 
 
 def build(face, text, seed, weight, size=104, cycle=4200,
-          color="#875DC4", pad_x=34, pad_y=12):
+          color="#ffffff", pad_x=34, pad_y=12):
     alphabet = face.alphabet()
     scale = size / face.upem
     cell = face.advance("M") * scale
@@ -228,11 +228,12 @@ if __name__ == "__main__":
     ap.add_argument("--text", default="pibble")
     ap.add_argument("--seed", type=int, default=3, help="which run of the effect to bake")
     ap.add_argument("--weight", default="Bold")
+    ap.add_argument("--color", default="#ffffff", help="ink color")
     ap.add_argument("--font", help="TTF to take outlines from (default: fc-match)")
     ap.add_argument("-o", "--out", default="assets/title.svg")
     args = ap.parse_args()
 
     face = Face(args.font or find_font(args.weight))
     with open(args.out, "w") as f:
-        f.write(build(face, args.text, args.seed, args.weight))
+        f.write(build(face, args.text, args.seed, args.weight, color=args.color))
     print("wrote %s (alphabet: %s)" % (args.out, face.alphabet()))
