@@ -1,5 +1,5 @@
 <h1 align=center>
-    <img src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/title.png" alt="pibble">
+    <img src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/title.svg" alt="pibble">
 </h1>
 
 <p align=center>
