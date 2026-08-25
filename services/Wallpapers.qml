@@ -130,13 +130,20 @@ Singleton {
                 # quantize it to a 256-color palette, banding badly once
                 # blurred. The source itself is still played back untouched.
                 # A video's crop is cut from its wide still, a png already.
-                oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
+                # A .webp crop is written as png for a different reason: Qt
+                # only decodes webp when the optional qtimageformats plugin is
+                # installed, and this crop is what both the grid tile and the
+                # wallpaper-changed notification's image point at - writing it
+                # in a format the shell might not be able to read left both
+                # blank (and the notification, whose card shape is chosen from
+                # the image's aspect, demoted to a plain one).
+                oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
                 # versioned like bkey below (r<n>): bump t<n> (here and in
                 # the generation pass) whenever the crop recipe changes, so
                 # stale entries fall out of the sweep instead of sticking
                 # around under the old recipe until their source file happens
                 # to change.
-                key=$(printf '%s' "$PWD/$f|t5" | md5sum | cut -d' ' -f1)
+                key=$(printf '%s' "$PWD/$f|t6" | md5sum | cut -d' ' -f1)
                 # the wide still, versioned the same way (p<n>) and for the
                 # same reason as the two keys around it
                 pkey=$(printf '%s' "$PWD/$f|p3" | md5sum | cut -d' ' -f1)
@@ -313,9 +320,9 @@ Singleton {
                         stem="\${b%.*}" ext="\${b##*.}"
                         isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
-                        oext="$ext"; case "\${ext,,}" in gif|mp4) oext="png" ;; esac
+                        oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
                         # see the matching key note in the scan pass above
-                        key=$(printf '%s' "$f|t5" | md5sum | cut -d' ' -f1)
+                        key=$(printf '%s' "$f|t6" | md5sum | cut -d' ' -f1)
                         # see the matching pkey note in the scan pass above
                         pkey=$(printf '%s' "$f|p3" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
