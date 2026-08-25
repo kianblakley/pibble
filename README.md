@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/Built%20with-Quickshell-875DC4?labelColor=1a1a1a&style=for-the-badge" alt="Built with Quickshell">
 </p>
 
-[<img src="https://img.youtube.com/vi/0Hs5kQCPe_8/maxresdefault.jpg" width="600" />](https://www.youtube.com/embed/0Hs5kQCPe_8)
+https://github.com/user-attachments/assets/1d81fa01-aa78-49b8-88ce-58bb02543fe0
 
 ## Features
 
