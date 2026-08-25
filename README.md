@@ -2,11 +2,11 @@
 
 <p align=center>
     <img src="https://img.shields.io/github/license/kianblakley/pibble?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="License">
-    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="Last commit">
+    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble/dev?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="Last commit">
     <img src="https://img.shields.io/badge/Built%20with-Quickshell-875DC4?labelColor=1a1a1a&style=for-the-badge" alt="Built with Quickshell">
 </p>
 
-<video src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/demo.mp4" controls muted></video>
+[<img src="https://img.youtube.com/vi/0Hs5kQCPe_8/maxresdefault.jpg" width="600" />](https://www.youtube.com/embed/0Hs5kQCPe_8)
 
 ## Features
 
