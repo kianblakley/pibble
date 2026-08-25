@@ -1,14 +1,12 @@
-<h1 align=center>
-    <img src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/title.png" alt="pibble">
-</h1>
+<h1 align=center>pibble</h1>
 
 <p align=center>
     <img src="https://img.shields.io/github/license/kianblakley/pibble?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="License">
-    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="Last commit">
+    <img src="https://img.shields.io/github/last-commit/kianblakley/pibble/dev?color=875DC4&labelColor=1a1a1a&style=for-the-badge" alt="Last commit">
     <img src="https://img.shields.io/badge/Built%20with-Quickshell-875DC4?labelColor=1a1a1a&style=for-the-badge" alt="Built with Quickshell">
 </p>
 
-![App drawer](https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/appdrawer.png?v=2)
+https://github.com/user-attachments/assets/802fafdf-e2e1-4438-8cf0-1fd7924fadd1
 
 ## Features
 
