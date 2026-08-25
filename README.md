@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/Built%20with-Quickshell-875DC4?labelColor=1a1a1a&style=for-the-badge" alt="Built with Quickshell">
 </p>
 
-[![pibble demo](https://img.youtube.com/vi/0Hs5kQCPe_8/maxresdefault.jpg)](https://www.youtube.com/watch?v=0Hs5kQCPe_8)
+<video src="https://raw.githubusercontent.com/kianblakley/pibble/refs/heads/dev/assets/demo.mp4" controls muted></video>
 
 ## Features
 
