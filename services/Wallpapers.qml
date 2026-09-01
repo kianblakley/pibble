@@ -143,7 +143,7 @@ Singleton {
                 # stale entries fall out of the sweep instead of sticking
                 # around under the old recipe until their source file happens
                 # to change.
-                key=$(printf '%s' "$PWD/$f|t6" | md5sum | cut -d' ' -f1)
+                key=$(printf '%s' "$PWD/$f|t7" | md5sum | cut -d' ' -f1)
                 # the wide still, versioned the same way (p<n>) and for the
                 # same reason as the two keys around it
                 pkey=$(printf '%s' "$PWD/$f|p3" | md5sum | cut -d' ' -f1)
@@ -322,7 +322,7 @@ Singleton {
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
                         # see the matching key note in the scan pass above
-                        key=$(printf '%s' "$f|t6" | md5sum | cut -d' ' -f1)
+                        key=$(printf '%s' "$f|t7" | md5sum | cut -d' ' -f1)
                         # see the matching pkey note in the scan pass above
                         pkey=$(printf '%s' "$f|p3" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
@@ -475,7 +475,19 @@ Singleton {
                                     # scale2ref sizes that color source from the
                                     # scaled frame, so neither call has to know
                                     # the output geometry up front.
-                                    [ "$needcrop" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale=480:270:force_original_aspect_ratio=increase,crop=480:270[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1" -frames:v 1 "$cachedir/thumbnails/crops/$key.$oext"
+                                    #
+                                    # overlay=format=gbrp: left to negotiate, the
+                                    # blend picks yuv420p (the color source's
+                                    # format), which quarters the chroma of an
+                                    # RGB source (png/webp/gif) on the way to a
+                                    # true-color output - measured ~30dB PSNR
+                                    # against the same crop kept in RGB, visible
+                                    # as fringing on sharp edges. gbrp keeps the
+                                    # whole chain RGB (bit-exact for an opaque
+                                    # source); the trailing format=rgb24 flattens
+                                    # the alpha gbrp lets through, which the
+                                    # yuv420p path used to drop on its own.
+                                    [ "$needcrop" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale=480:270:force_original_aspect_ratio=increase,crop=480:270[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/thumbnails/crops/$key.$oext"
                                     # The wide still: the same frame
                                     # uncropped, bounded to the box a video's
                                     # already gets (see the ffmpeg call above), so

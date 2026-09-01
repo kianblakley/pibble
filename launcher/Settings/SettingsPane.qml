@@ -424,16 +424,54 @@ Item {
         }
     }
 
-    Item {
+    Flickable {
         id: tabViewport
         clip: true
         width: 820
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: header.bottom
         anchors.topMargin: 18
-        // constant height (tallest page): switching tabs never
+        // constant content height (tallest page): switching tabs never
         // moves the pane, shorter pages stay top-aligned
-        height: Math.max(generalTab.height, pagesTab.height, animationsTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
+        readonly property real tallHeight: Math.max(generalTab.height, pagesTab.height, animationsTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
+        // ...but the viewport itself is capped at what the output can show.
+        // The General tab tops 1000px, so on a short display (~770px usable
+        // at 1440x900) the centered pane overshot both edges, putting the
+        // tab row and the closing rows out of reach with nothing to scroll.
+        // Anywhere the full height fits, the min() resolves to tallHeight
+        // and the pane keeps its constant size exactly as before - the
+        // wheel overlay below disables itself along with it.
+        readonly property real fitHeight: root.parent ? root.parent.height - (26 + header.height + 18 + 26) : tallHeight
+        height: Math.max(120, Math.min(tallHeight, fitHeight))
+        contentWidth: width
+        contentHeight: tallHeight
+        readonly property bool scrollable: contentHeight > height + 0.5
+        // wheel-only: a drag-to-flick would fight the pane-cycle and
+        // power-shade swipes, which the background catcher underneath
+        // already grabs (see LauncherWindow's backdropArea)
+        interactive: false
+        boundsBehavior: Flickable.StopAtBounds
+        // a custom tab toggled off or a font-scale change can shrink the
+        // content out from under a scrolled viewport, stranding contentY
+        // past the new end with no gesture able to bring it back
+        onHeightChanged: clampScroll()
+        onContentHeightChanged: clampScroll()
+        function clampScroll(): void {
+            const maxY = Math.max(0, contentHeight - height);
+            if (contentY > maxY)
+                contentY = maxY;
+        }
+        // the filmstrip scrolls as one item, so a scrolled position on one
+        // tab is meaningless on the next - back to the top on every switch
+        // (which also covers reopening: closing resets the tab to General)
+        Connections {
+            target: LauncherState
+            function onSettingsTabChanged() {
+                tabWheelScroll.stop();
+                tabWheelScroll.to = 0;
+                tabWheelScroll.restart();
+            }
+        }
         // tallest of any custom tab's content column, recomputed
         // whenever one loads/resizes - 0 (a no-op in the Math.max
         // above) when there are none
@@ -528,5 +566,35 @@ Item {
                 LauncherState.cancelCapture();
             mouse.accepted = false;
         }
+    }
+
+    // This layer-shell surface never delivers wheel events to a WheelHandler,
+    // and a Flickable's own wheel handling relies on one (see PageList's
+    // identical note) - so the wheel rides a MouseArea, with NoButton keeping
+    // every press falling through to the controls and gesture catchers
+    // underneath. Disabled outright where the pane fits its output, so the
+    // wheel keeps reaching whatever it reaches today - including PageList's
+    // own wheel area, which this sits above and only takes over on displays
+    // short enough that the outer pane itself has to move.
+    MouseArea {
+        anchors.fill: tabViewport
+        acceptedButtons: Qt.NoButton
+        enabled: tabViewport.scrollable
+        onWheel: wheel => {
+            const maxY = Math.max(0, tabViewport.contentHeight - tabViewport.height);
+            // ~three settings rows per notch, same clip as PageList's wheel
+            tabWheelScroll.to = Math.max(0, Math.min(maxY, tabViewport.contentY - (wheel.angleDelta.y / 120) * 130));
+            tabWheelScroll.restart();
+        }
+    }
+    // animated for the same reason as PageList's: on a short display one
+    // notch covers a good fraction of the range, and an instant jump there
+    // reads as broken where a quick slide doesn't
+    NumberAnimation {
+        id: tabWheelScroll
+        target: tabViewport
+        property: "contentY"
+        duration: 100
+        easing.type: Easing.OutCubic
     }
 }
