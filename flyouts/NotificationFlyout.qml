@@ -68,7 +68,7 @@ Scope {
             property var current: null
             // snapshot of the notification's content: keeps the card intact
             // through the exit animation even if the sender closes the object
-            property var view: ({ own: false, glyph: "", app: "", key: "", summary: "", body: "", image: "", icon: "", timeout: 0 })
+            property var view: ({ own: false, glyph: "", app: "", key: "", summary: "", body: "", image: "", icon: "", tint: "", stamp: 0, timeout: 0 })
             property var queue: []
             property int exitDir: 0
             // this dismissal keeps the bubble up until the card is gone
@@ -151,6 +151,10 @@ Scope {
                 current = n;
                 view = Notifier.viewOf(n);
                 aspectProbe.source = view.image;
+                if (view.stamp && view.image.startsWith("image://")) {
+                    mediaKeeper.stamp = view.stamp;
+                    mediaKeeper.source = view.image;
+                }
                 // errors and low battery always read as red, regardless of
                 // theme/tint, so severity is visible at a glance
                 if (view.glyph === Icons.alertTriangle || view.glyph === Icons.batteryLow) {
@@ -176,10 +180,22 @@ Scope {
                     : (view.icon || view.image);
                 if (!src)
                     tintColor = Theme.notification.accent;
-                else if (tintCache[src] !== undefined)
+                // a replay wears the colour sampled when it first arrived,
+                // rather than sampling again: the icon theme may have changed
+                // under it since, and an inline image comes back as the copy
+                // mediaKeeper scaled, which averages a shade differently
+                else if (view.tint)
+                    tintColor = view.tint;
+                else if (tintCache[src] !== undefined) {
                     tintColor = tintCache[src];
-                else {
+                    Notifier.rememberLook(view.stamp, { tint: String(tintCache[src]) });
+                } else {
                     tintColor = Theme.notification.accent;
+                    // cleared first: a sample that never finished (the icon
+                    // failed to load, the grab was refused) leaves its source
+                    // behind, and asking for that same one again would change
+                    // nothing and so start nothing
+                    tint.src = "";
                     tint.src = src; // updates tintColor when extracted
                 }
             }
@@ -211,12 +227,18 @@ Scope {
                 current = null;
                 if (c)
                     c.expire();
+                // a grab still unanswered now was asked of a window that is
+                // about to unmap, and may never be
+                mediaKeeper.release();
                 phase = "hidden";
                 if (queue.length > 0)
                     gapTimer.restart();
             }
             function computeVariant(): string {
-                if (!view.image)
+                // an image that won't load - a file deleted since, which a
+                // replay's kept path is more likely to be than a live one -
+                // would otherwise hold a thumbnail's place with nothing in it
+                if (!view.image || aspectProbe.status === Image.Error)
                     return "simple";
                 // wide images (16:10 and up: screenshots, photos) read best as a
                 // full strip; squarer ones (avatars, album art) as a thumbnail
@@ -352,8 +374,57 @@ Scope {
                 // while the card is up, re-classify once so a wide screenshot
                 // isn't stuck cropped into the thumbnail circle
                 onStatusChanged: {
-                    if (status === Image.Ready && window.phase === "show")
+                    if ((status === Image.Ready || status === Image.Error) && window.phase === "show")
                         window.variant = window.computeVariant();
+                }
+            }
+            // An image the sender passed inline (a chat avatar, say) exists
+            // only in the notification server's memory, under a URL that stops
+            // resolving once the notification is gone - so a replay had
+            // nothing to show in its place. It is written out here, while the
+            // notification is still up, and the path handed to the replay
+            // cache. Grabbed rather than copied because an item is the only
+            // thing QML can save an image provider's picture from; at its own
+            // size, capped at the 700px the widest card decodes at - asked for
+            // at decode (the same reason every other image here caps its
+            // sourceSize) and again at the grab, since an image provider is
+            // free to ignore the first.
+            Image {
+                id: mediaKeeper
+                property double stamp: 0
+                x: -width
+                y: -height
+                asynchronous: true
+                sourceSize.width: 700
+                // Gives the picture back. Every way out comes through here -
+                // saved, failed to load, grab refused, or the card gone before
+                // the grab was answered (see finalize) - since this item is
+                // otherwise a second full copy held until the next
+                // notification happens to bring an image of its own.
+                function release(): void {
+                    stamp = 0;
+                    source = "";
+                }
+                onStatusChanged: {
+                    if (status === Image.Error) {
+                        release();
+                        return;
+                    }
+                    if (status !== Image.Ready || !stamp || implicitWidth <= 0)
+                        return;
+                    const kept = stamp;
+                    const shrink = Math.min(1, 700 / implicitWidth);
+                    const grabbing = mediaKeeper.grabToImage(result => {
+                        if (result.saveToFile(Notifier.mediaPath(kept)))
+                            Notifier.rememberLook(kept, { image: "file://" + Notifier.mediaPath(kept) });
+                        // unless a later notification has claimed the item
+                        if (mediaKeeper.stamp === kept)
+                            mediaKeeper.release();
+                    }, Qt.size(Math.max(1, Math.round(implicitWidth * shrink)), Math.max(1, Math.round(implicitHeight * shrink))));
+                    // refused outright (no window to render in): the callback
+                    // above is never going to run
+                    if (!grabbing)
+                        release();
                 }
             }
             // dominant-colour extraction: the icon is decoded at 26x26 (fast,
@@ -379,15 +450,23 @@ Scope {
                 width: 26
                 height: 26
                 asynchronous: true
+                // pibble writes some of what it sends to one path over and
+                // over (the eyedropper's swatch), and a cached decode of that
+                // path is the previous picture
+                cache: false
                 sourceSize: Qt.size(26, 26)
                 source: tint.src
                 onStatusChanged: {
                     if (status === Image.Ready) {
+                        const wanted = tint.src;
                         tintSource.grabToImage(result => {
-                            if (result.saveToFile(SystemInfo.tintGrabPath)) {
-                                tint.grabUrl = "file://" + SystemInfo.tintGrabPath;
-                                tint.loadImage(tint.grabUrl);
-                            }
+                            // a grab answered after the next notification has
+                            // asked for its own would be sampled as that one's
+                            if (tint.src !== wanted)
+                                return;
+                            const path = SystemInfo.tintGrabFile(Date.now());
+                            if (result.saveToFile(path))
+                                tint.sample(path);
                         });
                     }
                 }
@@ -395,7 +474,28 @@ Scope {
             Canvas {
                 id: tint
                 property string src: ""
+                property string grabPath: ""
                 property string grabUrl: ""
+                // A fresh file every time (see SystemInfo.tintGrabFile for
+                // what a reused name costs). imageLoaded is only raised for an
+                // image that had to be waited for, so one that is already
+                // there is painted from here instead.
+                function sample(path: string): void {
+                    discard();
+                    grabPath = path;
+                    grabUrl = "file://" + path;
+                    loadImage(grabUrl);
+                    if (isImageLoaded(grabUrl))
+                        requestPaint();
+                }
+                function discard(): void {
+                    if (!grabPath)
+                        return;
+                    unloadImage(grabUrl);
+                    Quickshell.execDetached(["rm", "-f", grabPath]);
+                    grabPath = "";
+                    grabUrl = "";
+                }
                 x: -60
                 y: 0
                 width: 26
@@ -430,19 +530,29 @@ Scope {
                         b += d[i + 2] * wt;
                         w += wt;
                     }
-                    let c = Theme.notification.accent;
+                    // Too little colour to call (w) leaves the bubble on
+                    // the accent snapshot() gave it, and records nothing: the
+                    // accent is the theme's, not this icon's, and kept as a
+                    // sample it would outlive the wallpaper it came from -
+                    // here in tintCache, and in the replay cache as the
+                    // colour the notification "arrived with".
                     if (w > 3) {
-                        c = Qt.rgba(r / w / 255, g / w / 255, b / w / 255, 1);
+                        let c = Qt.rgba(r / w / 255, g / w / 255, b / w / 255, 1);
                         // pull into a visible band; leave true greys grey
                         c = (c.hslHue < 0 || c.hslSaturation < 0.12)
                             ? Qt.hsla(Math.max(0, c.hslHue), c.hslSaturation, Math.min(0.75, Math.max(0.5, c.hslLightness)), 1)
                             : Qt.hsla(c.hslHue, Math.max(c.hslSaturation, 0.5), Math.min(0.68, Math.max(0.45, c.hslLightness)), 1);
+                        // the eyedropper's swatch is a different colour under
+                        // the same path every time, so its path says nothing
+                        // about what a sample of it will be
+                        if (!src.startsWith("file://" + SystemInfo.cacheRoot + "/swatches/"))
+                            window.tintCache[src] = c;
+                        if (src === window.view.icon || src === window.view.image) {
+                            window.tintColor = c;
+                            Notifier.rememberLook(window.view.stamp, { tint: String(c) });
+                        }
                     }
-                    window.tintCache[src] = c;
-                    if (src === window.view.icon || src === window.view.image)
-                        window.tintColor = c;
-                    unloadImage(grabUrl);
-                    grabUrl = "";
+                    discard();
                     src = ""; // also clears tintSource.source
                 }
             }

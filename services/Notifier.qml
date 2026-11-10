@@ -216,6 +216,7 @@ Singleton {
         // desktop-entry hint - recover both from the entry
         const entryId = String(n.desktopEntry ?? "");
         let appName = String(n.appName ?? "");
+        let kept = null;
         // pibble replay (see Notifier.fireReplay) always sends "REPLAY" as its own
         // identity so repeated replays replace each other regardless of origin;
         // the real sender rides along in the desktop-entry hint purely for
@@ -225,7 +226,23 @@ Singleton {
         if (appName === "REPLAY") {
             const originalTimestamp = Number(n.hints?.["x-pibble-orig-ts"] ?? 0);
             const ago = originalTimestamp ? Format.timeAgo(originalTimestamp) : "";
-            appName = entryId ? (ago ? entryId + " - " + ago : entryId) : (ago || "REPLAY");
+            // That same arrival time is the cache entry's identity, and the
+            // entry holds how the card looked when it first came in (see
+            // remember). That wins over anything derived from the re-sent
+            // notification, because the re-send cannot be the same message:
+            // the server fills an empty icon in from the desktop-entry hint
+            // (so a sender that showed none comes back wearing its app icon,
+            // and tinted from it), and image data sent inline has no path to
+            // send again. Entries from before the look was kept have no
+            // `view` and derive from the re-send, as every replay used to.
+            kept = NotifCache.items.find(item => item.timestamp === originalTimestamp)?.view ?? null;
+            if (kept) {
+                icon = kept.icon;
+                image = kept.image;
+                appName = kept.app ? (ago ? kept.app + " - " + ago : kept.app) : (ago || "REPLAY");
+            } else {
+                appName = entryId ? (ago ? entryId + " - " + ago : entryId) : (ago || "REPLAY");
+            }
         } else if (entryId && (!appName || !icon)) {
             const entry = Array.from(DesktopEntries.applications.values).find(e => e.id.toLowerCase() === entryId.toLowerCase());
             if (entry) {
@@ -244,31 +261,61 @@ Singleton {
             // "own" here and lose both its glyph rendering and its icon tinting
             // exemption; the desktop-entry hint still carries the true original
             // sender through a replay, so check that too
-            own: n.appName === "pibble" || entryId === "pibble",
-            glyph: root.glyphFor(iconName, n.urgency, String(n.summary ?? "")),
+            own: kept ? kept.own : (n.appName === "pibble" || entryId === "pibble"),
+            glyph: kept ? kept.glyph : root.glyphFor(iconName, n.urgency, String(n.summary ?? "")),
             app: appName,
             key: root.keyOf(n),
             summary: n.summary ?? "",
             body: n.body ?? "",
             image: image,
             icon: icon,
+            // the colour the bubble settled on the first time round; only a
+            // replay has one
+            tint: kept?.tint ?? "",
+            // which cache entry this notification was remembered as, for the
+            // flyout to hand back with what it learns (see rememberLook); 0
+            // for a replay, which is never remembered
+            stamp: root.stamps[n.id] ?? 0,
             timeout: n.expireTimeout
         };
     }
 
+    // Notification id -> the timestamp of the cache entry remember() wrote for
+    // it. Kept here rather than as an `id` in the entry: ids start over with
+    // every daemon, so one on disk would match a stranger after a restart.
+    property var stamps: ({})
+
     // ---------- replay ----------
 
-    // Raw fields only - enough to rebuild a faithful notify-send call. Anything
-    // display-derived (glyph, resolved icon/image URLs, own/app labels) is
-    // deliberately left out: replaying re-sends the original notification and
-    // lets the live pipeline derive all of that itself, the same way it would
-    // for a first arrival. icon/image get the same slot-swap classification
+    // Two things per notification. The raw fields are enough to rebuild a
+    // notify-send call: icon/image get the same slot-swap classification
     // viewOf does (some senders put a file path in appIcon, or route everything
     // through image as an "image://icon/NAME" pseudo-URL) but keep raw values -
     // a bare icon name or file path - since these feed notify-send's -i/-h flags
     // directly on replay, not a QML Image source.
+    //
+    // `view` is how the card looked, as viewOf derived it on arrival. Re-sending
+    // the raw fields was meant to let the live pipeline derive that again, but
+    // what comes back is not what was sent (see viewOf's replay branch), so the
+    // look is kept and the replay wears it. Its image is kept only when it is a
+    // file: one sent inline lives in the server's memory, under a URL that dies
+    // with the notification, and the flyout writes that to mediaDir and reports
+    // the path - along with the bubble's colour, which it only knows once it
+    // has sampled the icon (see rememberLook).
     readonly property int replayCapacity: 5
+    readonly property string mediaDir: SystemInfo.cacheRoot + "/thumbnails/notifs"
+    function mediaPath(stamp: double): string {
+        return root.mediaDir + "/" + stamp + ".png";
+    }
+    property double lastStamp: 0
     function remember(n): void {
+        // doubles as the entry's identity (see viewOf, rememberLook), so two
+        // arrivals inside one millisecond must not share it - counted up
+        // from the last one handed out rather than from what the cache
+        // holds, which is only as unique as its contents happen to be
+        const stamp = Math.max(Date.now(), root.lastStamp + 1);
+        root.lastStamp = stamp;
+        const view = root.viewOf(n);
         let icon = String(n.appIcon ?? "");
         let image = String(n.image ?? "");
         if (icon.startsWith("file://") || icon.startsWith("/")) {
@@ -297,15 +344,59 @@ Singleton {
             urgency: NotificationUrgency.toString(n.urgency),
             // when the *original* notification arrived, so a later replay can
             // show "<original> - 5m ago" instead of a static "REPLAY" tag
-            timestamp: Date.now()
+            timestamp: stamp,
+            view: {
+                own: view.own,
+                glyph: view.glyph,
+                app: view.app,
+                icon: view.icon,
+                image: view.image.startsWith("file://") ? view.image : "",
+                tint: ""
+            }
         };
         NotifCache.items = [entry].concat(NotifCache.items).slice(0, root.replayCapacity);
+        NotifCache.save();
+        // only the notifications still in the cache can be reported on, so
+        // the map is rebuilt around them and never outgrows it
+        const stamps = {};
+        for (const id in root.stamps) {
+            if (NotifCache.items.some(item => item.timestamp === root.stamps[id]))
+                stamps[id] = root.stamps[id];
+        }
+        stamps[n.id] = stamp;
+        root.stamps = stamps;
+        // Sweep the images of entries that have just fallen off the end, by
+        // the same rule Clipboard prunes its thumbnails with: anything not
+        // named after an entry still cached goes. Also makes the directory,
+        // ahead of the flyout's first write into it.
+        Quickshell.execDetached(["bash", "-c", `
+            dir="$1"; shift
+            mkdir -p "$dir"
+            for f in "$dir"/*.png; do
+                [ -e "$f" ] || continue
+                case " $* " in *" $(basename "$f" .png) "*) ;; *) rm -f "$f" ;; esac
+            done`, "_", root.mediaDir].concat(NotifCache.items.map(item => String(item.timestamp))));
+    }
+
+    // What only the flyout can find out about a remembered notification, and
+    // only once it is on screen: where its inline image was written to
+    // (`image`) and the colour sampled from its icon (`tint`). A no-op for a
+    // stamp of 0 (a replay) or an entry that has been pushed out since.
+    function rememberLook(stamp: double, look): void {
+        const index = stamp ? NotifCache.items.findIndex(item => item.timestamp === stamp) : -1;
+        if (index < 0 || !NotifCache.items[index].view)
+            return;
+        const items = NotifCache.items.slice();
+        items[index] = Object.assign({}, items[index], { view: Object.assign({}, items[index].view, look) });
+        NotifCache.items = items;
         NotifCache.save();
     }
 
     // Replays by re-sending a real notify-send call with the original
     // notification's own icon/image/urgency, rather than a separate "replay"
-    // rendering path: the re-sent notification lands in
+    // rendering path (the icon, image and colour it is *shown* with come from
+    // the entry's kept look where there is one - see viewOf - and from this
+    // re-send only for entries older than that): the re-sent notification lands in
     // NotificationServer.onNotification -> NotificationFlyout.accept() exactly
     // like any live one, so it animates and dismisses identically - a genuine
     // replay, not a second UI that can drift from the first. The sender identity

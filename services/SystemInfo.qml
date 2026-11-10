@@ -17,13 +17,23 @@ Singleton {
     // Single persistent, self-cleaning cache root for everything pibble
     // generates - separate from the source directories so deleting a wallpaper
     // or a clip scrolling past clipsMax can be detected and swept on the next
-    // scan. Three directories, one per kind of generated file: thumbnails/ and
-    // blurred/ (both per wallpaper, see Wallpapers) and clips/.
+    // scan. One directory per shape of generated file: thumbnails/ (split
+    // again into crops, wide, clips and notifs), blurred/ and proxies/ (see
+    // Wallpapers, Clipboard and Notifier for who owns which), and swatches/
+    // (ScreenColor).
     readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/pibble"
 
-    // scratch file for the notification tint's icon-grab round trip (see
-    // NotificationFlyout's tint Canvas)
-    readonly property string tintGrabPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/pibble-tint.png"
+    // Scratch file for the notification tint's icon-grab round trip (see
+    // NotificationFlyout's tint Canvas), deleted once it has been sampled.
+    // One name per grab, never the same one twice. Qt keeps a picture it has
+    // loaded under its URL for a while after the last user lets go, and a
+    // Canvas asked for a URL still held there is handed the old pixels at once
+    // and never told the image loaded - so with a single scratch name, the
+    // second sample inside that while never ran and the bubble stayed on the
+    // theme accent.
+    function tintGrabFile(serial: double): string {
+        return (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/pibble-tint-" + serial + ".png";
+    }
 
     // ---------- deferred one-shot scans ----------
 
