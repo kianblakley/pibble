@@ -100,8 +100,8 @@ export_render_loop() {
     [ -z "$QSG_RENDER_LOOP" ] && export QSG_RENDER_LOOP=threaded
 }
 
-# ipc calls fail on ambiguity if duplicate daemons exist; always talk to the
-# newest and reap any older duplicates.
+# Always talks to the newest daemon (-n), so duplicates never make a call
+# ambiguous; they are reaped alongside, see reap_after.
 ipc() {
     local fn="$1"
     shift
@@ -133,6 +133,13 @@ reap_duplicates() {
         kill "${pids[0]}" 2>/dev/null
         pids=("${pids[@]:1}")
     done
+}
+# For after a call that already reached the daemon: the reap is two process
+# listings (~40ms), which every keypress used to wait behind before the 20ms
+# IPC call could even be sent - for a pile-up that happens once in a blue
+# moon. Kept, because nine daemons did once pile up; just not in the way.
+reap_after() {
+    reap_duplicates >/dev/null 2>&1 &
 }
 stop_daemon() {
     reap_duplicates
@@ -220,6 +227,12 @@ toggle)
     # that page, switches to it if the launcher is already open elsewhere,
     # or closes if it's already the one showing. Always passed through
     # (even empty) since the IPC function takes it as a required argument.
+    if ipc toggle "$2"; then
+        reap_after
+        exit 0
+    fi
+    # Nothing answered: most likely no daemon, so start one. Reaped first all
+    # the same, in case what didn't answer was the newest of several.
     reap_duplicates
     ipc toggle "$2" && exit 0
     # daemon not running: start it, then retry through the same toggle call
@@ -248,8 +261,10 @@ env)
     exit 0
     ;;
 replay)
-    reap_duplicates
-    ipc replay && exit 0
+    if ipc replay; then
+        reap_after
+        exit 0
+    fi
     echo "pibble: daemon not running - run 'pibble start' first" >&2
     exit 1
     ;;
