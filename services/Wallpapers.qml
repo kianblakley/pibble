@@ -280,6 +280,12 @@ Singleton {
                     # literal, where a braced positional past $9 would be read
                     # as a JS substitution rather than a shell one
                     ffsum="$1" ffbody="$2" encsum="$3" encbody="$4"; shift 4
+                    # Background work, and a 5K ffmpeg per wallpaper of it:
+                    # a dropped-in folder is minutes of every core, under a
+                    # shell that is meant to stay smooth. Lowered here so the
+                    # whole pass inherits it; renice rather than nice so the
+                    # argv the pass is spawned with stays as it is.
+                    renice -n 10 -p $$ >/dev/null 2>&1
                     mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"
                     # Layouts this cache has had before: wallpapers/ + xray/
                     # (from when the backdrop had a cache of its own, before
