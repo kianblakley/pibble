@@ -42,8 +42,8 @@ Item {
     // Normally this is just an image: Wallpapers.xrayBlur is the wallpaper
     // already blurred (and saturated) to niri's own kernel, baked
     // into the cache alongside its thumbnail, so opening the launcher
-    // costs one small texture upload and no effect pass at all. See
-    // the xray block on root for the parameters.
+    // costs one texture upload and no effect pass at all. See the xray
+    // block in Wallpapers for the parameters.
     //
     // MultiEffect is only the stopgap for when that image doesn't
     // exist yet (no ImageMagick, or a folder still being worked
@@ -88,9 +88,9 @@ Item {
         // Held loaded across opens instead.
         source: Wallpapers.xrayShown !== "" ? "file://" + Wallpapers.xrayShown : ""
         asynchronous: true
-        // the baked backdrop is small and reused across every open,
-        // so it is worth keeping decoded; the raw wallpaper the
-        // fallback loads is not
+        // the baked backdrop is reused across every open, so it is
+        // worth keeping decoded; the raw wallpaper the fallback loads
+        // is not
         cache: !root.liveBlur
         layer.enabled: root.liveBlur
         layer.effect: MultiEffect {

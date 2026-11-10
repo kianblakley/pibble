@@ -154,7 +154,7 @@ Singleton {
                 # different name, and the old one falls out of the sweep
                 # below like any other dead entry. Bump r<n> (here and in the
                 # generation pass) whenever the ffmpeg command changes.
-                bkey=$(printf '%s' "$PWD/$f|$3|$4|r6" | md5sum | cut -d' ' -f1)
+                bkey=$(printf '%s' "$PWD/$f|$3|$4|r9" | md5sum | cut -d' ' -f1)
                 # the preview proxy, versioned the same way (x<n>): bump it
                 # (here and in the generation pass) when the ffmpeg recipe
                 # changes
@@ -326,7 +326,7 @@ Singleton {
                         # see the matching pkey note in the scan pass above
                         pkey=$(printf '%s' "$f|p3" | md5sum | cut -d' ' -f1)
                         # see the matching bkey note in the scan pass above
-                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r6" | md5sum | cut -d' ' -f1)
+                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r9" | md5sum | cut -d' ' -f1)
                         # see the matching vkey note in the scan pass above
                         vkey=$(printf '%s' "$f|x1" | md5sum | cut -d' ' -f1)
                         wide="$cachedir/thumbnails/wide/$pkey.jpg"
@@ -522,11 +522,7 @@ Singleton {
                         #
                         # Cropped to the output's aspect so the launcher's
                         # PreserveAspectCrop has nothing left to crop and the
-                        # blur lands at the sigma it was baked for. The crop
-                        # rounds to a whole pixel of an image a quarter of the
-                        # screen's size, which measures ~3 output pixels below
-                        # the compositor's blur of the same wallpaper -
-                        # deliberately left as is.
+                        # blur lands at the sigma it was baked for.
                         #
                         # gblur's sigma is ImageMagick's "-blur 0xsigma" (a 0
                         # radius there means "derive it from sigma", which is
@@ -534,11 +530,31 @@ Singleton {
                         # the same 3x3 the -color-matrix did, row per output
                         # channel. Measured against the ImageMagick recipe this
                         # replaced, the two land within 0.07% RMSE.
+                        #
+                        # format=gbrap16le pins the chain to full-res planar
+                        # RGB (alpha kept for the flatten onto black), at 16
+                        # bits so the blur and the saturation matrix round
+                        # once, at the end, rather than once each - the matrix
+                        # multiplies gblur's rounding error by up to 1.46, which
+                        # measured as errors of 3 levels where one rounding
+                        # leaves 1.5. Left to
+                        # negotiate it ran in yuva420p - and worse than the
+                        # crop's version of this: colorchannelmixer is
+                        # RGB-only, so ffmpeg quietly bounced the frame
+                        # yuv->rgb->yuv around it, and each bounce upsamples
+                        # the quarter-res chroma by row-doubling. On a smooth
+                        # red gradient (chroma carrying what luma isn't) that
+                        # is a 2px staircase - faint horizontal scan lines
+                        # across the whole backdrop, measured at 3.2x the
+                        # row-to-row noise floor in R and exactly 1.0x with
+                        # this chain. gblur also blurs at niri's real fidelity
+                        # this way: the compositor blurs RGB framebuffer
+                        # pixels, not subsampled chroma.
                         if [ "$needblur" = "1" ] && command -v ffmpeg >/dev/null 2>&1; then
                             bsrc="$f"
                             [ "$isvid" = "1" ] && bsrc="$wide"
                             xw="\${xgeom%x*}" xh="\${xgeom#*x}"
-                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,gblur=sigma=$xsigma,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1" -frames:v 1 "$cachedir/blurred/$bkey.png"
+                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,format=gbrap16le,gblur=sigma=$xsigma,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/blurred/$bkey.png"
                         fi
                     done
                     # clips/ is not swept here: the clipboard owns it, keys it
@@ -597,12 +613,11 @@ Singleton {
     // itself runs in (its textures are plain 8-bit ABGR, no linearization) -
     // which is what -color-matrix does here, and why nothing converts to
     // linear light first. Niri's noise step is the one part deliberately not
-    // reproduced: it can't be baked in (this image is upscaled on the way to
-    // the screen, so it would land as blotches rather than dither), and the
-    // alternative - a noise tile drawn live over the backdrop - is a
-    // full-screen texture that also shows as grain over the desktop whenever
-    // there's no wallpaper baked to sit under it. The banding it would have
-    // hidden is accepted instead.
+    // reproduced: baked in, it is incompressible (every PNG in the cache
+    // several times its size), and the alternative - a noise tile drawn live
+    // over the backdrop - is a full-screen texture that also shows as grain
+    // over the desktop whenever there's no wallpaper baked to sit under it.
+    // The banding it would have hidden is accepted instead.
     //
     // Sigma is niri's radius in *output* pixels. On a fractionally scaled
     // output the compositor hands anyone not speaking wp-fractional-scale a
@@ -612,17 +627,23 @@ Singleton {
     // a long way off. A mapped surface is told the real fractional scale, so
     // that is what gets measured. See XrayScaleProbe.
     readonly property real xraySigma: 19.17
-    // Baked at a quarter of the output's logical resolution. A blur this
-    // wide leaves nothing that a quarter-rate sampling can't carry: against
-    // the same blur done at full output resolution, the quarter-size bake
-    // scaled back up measures 55dB PSNR - visually identical, at a sixteenth
-    // of the ffmpeg run, the file size, the decode and the texture upload.
-    readonly property int xrayScale: 4
+    // Baked at the output's own pixel size, so it reaches the screen without
+    // being resampled. It used to be a quarter of the logical size, on the
+    // grounds that a blur this wide has nothing a quarter-rate sampling can't
+    // carry (55dB PSNR against the full-size blur) - true of the blur, but not
+    // of its 8 bits: a gradient that climbs one level over many pixels is a
+    // contour line in the file, and scaled up 5x that line is a staircase of
+    // 5px steps. Over a dark, smooth backdrop the steps read as a grid laid
+    // across the whole screen (measured at 20-28x the noise floor at a 5px
+    // period; still 15-20x baked at logical size, which a 1.25x output
+    // stretches into the same 5px beat; 1x like this). It costs the bigger
+    // file, decode and texture the quarter size was avoiding - 44MB of
+    // texture on a 5120x2160 output against 2MB.
     readonly property size xraySize: {
         const s = root.screen;
-        if (!s)
+        if (!s || root.xrayOutputScale <= 0)
             return Qt.size(0, 0);
-        return Qt.size(Math.max(1, Math.round(s.width / root.xrayScale)), Math.max(1, Math.round(s.height / root.xrayScale)));
+        return Qt.size(Math.max(1, Math.round(s.width * root.xrayOutputScale)), Math.max(1, Math.round(s.height * root.xrayOutputScale)));
     }
     // output pixels per logical pixel, 0 until measured (see
     // XrayScaleProbe). Nothing bakes until it resolves - baking a whole
@@ -640,10 +661,10 @@ Singleton {
     // fallback, since a scale of 0 is also what holds the bake back.
     property var xrayOutputScales: ({})
     onScreenChanged: root.xrayOutputScale = (root.screen ? root.xrayOutputScales[root.screen.name] : 0) ?? 0
-    // the blur as it applies to the baked image rather than to the screen:
-    // output pixels -> logical pixels -> the quarter-size image. 0 while the
-    // scale is unknown, which is what holds the bake back.
-    readonly property real xrayCacheSigma: root.xrayOutputScale > 0 ? root.xraySigma / root.xrayOutputScale / root.xrayScale : 0
+    // the blur as it applies to the baked image, which is in output pixels
+    // and so is xraySigma itself. 0 while the scale is unknown, which is what
+    // holds the bake back.
+    readonly property real xrayCacheSigma: root.xrayOutputScale > 0 ? root.xraySigma : 0
     // The baked backdrop for the current wallpaper, or "" if there isn't one
     // yet (no ffmpeg, or a folder still being worked through), which
     // falls the launcher back to blurring live.
