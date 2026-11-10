@@ -679,12 +679,20 @@ Singleton {
     // fallback is only worth naming once a scan that was actually looking for
     // the current backdrops has come back without one (see scanKey); before
     // that it is just a full-size wallpaper decode that the bake replaces
-    // moments later.
+    // moments later. A scan from before the output scale resolved is not one
+    // that looked: it ran under a zero-size key (which it matches, being the
+    // key of the moment) and the generation pass sat the bake out, so its
+    // answer is "not looked for yet" - the same gate the pass uses. Taking
+    // it anyway cost a 5K decode of the raw wallpaper at every daemon start
+    // (and an "Unsupported image format" line for one Qt can't read), thrown
+    // away a second later when the scale landed.
     readonly property string xrayWant: {
         if (Settings.bgBlur !== "xray")
             return "";
         if (root.xrayBlur !== "")
             return root.xrayBlur;
+        if (root.xraySize.width <= 0 || root.xrayCacheSigma <= 0)
+            return "";
         return root.scanKey === root.xrayCacheKey ? root.matugenSource : "";
     }
     // What the backdrop actually draws, and whether that is the raw wallpaper
