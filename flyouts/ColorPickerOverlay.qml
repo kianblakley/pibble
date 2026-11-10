@@ -22,6 +22,12 @@ Scope {
     readonly property int span: 21
     readonly property int magSize: 210
 
+    // see window.onScreenChanged
+    function remapPicker(): void {
+        if (!window.visible && window.screen && window.screen.width > 0)
+            window.visible = true;
+    }
+
     PanelWindow {
         id: window
 
@@ -37,6 +43,18 @@ Scope {
         // during a pick. A mask change is a plain wl_surface attribute, no
         // configure, no lifecycle, no crash path.
         visible: true
+        // The one way the surface does go: the compositor closes a layer
+        // surface along with its output (niri, on unplug and on `output off`
+        // alike), and Quickshell answers that by writing false over the
+        // `visible` above - the binding is gone, and when the output comes
+        // back nothing maps the picker again. Four such removals in one
+        // daemon's log here, each leaving the eyedropper dead until a reload.
+        // So it is put back the moment a real screen is there again - a new
+        // surface on a new output, nothing like the unmap described above -
+        // and not for the nameless 0x0 placeholder Qt stands in meanwhile,
+        // which has nothing to map onto. A tick late, because mapping moves
+        // the screen too and this would be answering itself.
+        onScreenChanged: Qt.callLater(root.remapPicker)
         anchors { top: true; bottom: true; left: true; right: true }
         mask: ScreenColor.overlayActive ? null : emptyInput
         Region { id: emptyInput }
