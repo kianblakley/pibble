@@ -66,7 +66,11 @@ Singleton {
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
             pgrep -x wl-paste >/dev/null 2>&1 && echo WATCH:1 || echo WATCH:0
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
-                n=$(cliphist decode "$id" 2>/dev/null | wc -c)
+                # the length only captions text tiles ("412 chars"); an image
+                # tile shows its dimensions, which the preview already carries,
+                # so an image is never decoded here - decoding every screenshot
+                # in the history just to count it was most of this scan
+                n=0
                 full=""
                 cached=0
                 case "$preview" in
@@ -78,13 +82,17 @@ Singleton {
                     # showing a frame earlier
                     '[[ binary data'*) [ -s "$2/$id.png" ] && cached=1 ;;
                     *)
-                        # full text for search, capped well past any
-                        # realistic clip so scanning ~200 of these stays
-                        # cheap; backslashes, tabs and newlines are escaped
-                        # (reversed by unescapeClipField) since they'd
-                        # otherwise corrupt this tab/newline-delimited
-                        # record format
-                        content=$(cliphist decode "$id" 2>/dev/null | head -c 20000)
+                        # One decode for both the caption's length (in
+                        # characters, which is what the caption says) and the
+                        # full text for search. The search copy is capped well
+                        # past any realistic clip so the escaping below stays
+                        # cheap at ~200 of these; backslashes, tabs and
+                        # newlines are escaped (reversed by unescapeClipField)
+                        # since they'd otherwise corrupt this tab/newline-
+                        # delimited record format
+                        content=$(cliphist decode "$id" 2>/dev/null)
+                        n=\${#content}
+                        content=\${content:0:20000}
                         # The backslash comes out of a variable and every
                         # replacement is quoted, rather than being written
                         # inline: an unquoted \\t as replacement text is
