@@ -228,10 +228,19 @@ Text {
     // A screenItem is measured off its own width instead: it is a separate
     // item, sized by whatever lays it out rather than by this label's text, so
     // the circle the resting metrics avoid isn't there to begin with.
+    //
+    // Asked of a hidden item it is no, before the mask is looked at: the mask
+    // radius ticks every frame of a reveal, and reading it subscribes to it,
+    // so each tick re-ran this - the mapToItem included - for every label in
+    // the tree, the 184 in a settings pane that isn't up among them. Not
+    // reading the radius here is what leaves them out, and onScreen already
+    // wants the item visible, so the answer is the same.
     readonly property bool unmasked: {
         if (!root.followsPane)
             return true;
         const item = root.shownItem;
+        if (!item.visible)
+            return false;
         const center = item.mapToItem(null, (item === root ? sizer.advanceWidth : item.width) / 2, 0);
         return Anim.unmasked(center.x, center.y);
     }
