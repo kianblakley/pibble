@@ -11,7 +11,11 @@
 # depends on it.
 set -euo pipefail
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# -P: quickshell keys the settings directory by the *resolved* path to
+# shell.qml (and ./pibble resolves it the same way), so a repo reached through
+# a symlink has to hash the real path or the language lands in a directory the
+# shell never reads.
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/pibble"
 manifest="$state_dir/install-manifest.tsv"
 
@@ -54,15 +58,24 @@ Environment (honoured when set, useful for unattended runs):
 USAGE
 }
 
+# Without this a trailing `--language` with nothing after it dies on `shift 2`
+# under set -e: exit 1, and not a word about why.
+need_value() {
+    [ "$2" -ge 2 ] && return 0
+    printf '%s needs a value\n\n' "$1" >&2
+    usage >&2
+    exit 2
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-    --language) opt_language="${2:-}"; shift 2 ;;
+    --language) need_value "$1" $#; opt_language="${2:-}"; shift 2 ;;
     --language=*) opt_language="${1#*=}"; shift ;;
-    --daemons) opt_daemons="${2:-}"; shift 2 ;;
+    --daemons) need_value "$1" $#; opt_daemons="${2:-}"; shift 2 ;;
     --daemons=*) opt_daemons="${1#*=}"; shift ;;
-    --only) only_deps="${2:-}"; shift 2 ;;
+    --only) need_value "$1" $#; only_deps="${2:-}"; shift 2 ;;
     --only=*) only_deps="${1#*=}"; shift ;;
-    --skip) skip_list="${2:-}"; shift 2 ;;
+    --skip) need_value "$1" $#; skip_list="${2:-}"; shift 2 ;;
     --skip=*) skip_list="${1#*=}"; shift ;;
     --no-deps) skip_deps=1; shift ;;
     --all) install_optional=1; shift ;;
@@ -284,6 +297,23 @@ pm_repo_has() {
     esac
 }
 
+# The version the distro's repos would install, as bare dotted numbers
+# ("0.3.1"), or nothing where it can't be read - which callers take to mean
+# "no reason to think it is too old".
+pm_repo_version() {
+    local pkg="$1" out=""
+    case "$pm" in
+    pacman) out="$(LC_ALL=C pacman -Si "$pkg" 2>/dev/null | grep '^Version' || true)" ;;
+    dnf) out="$(dnf -q repoquery --latest-limit=1 --qf '%{version}\n' "$pkg" 2>/dev/null || true)" ;;
+    apt) out="$(LC_ALL=C apt-cache policy "$pkg" 2>/dev/null | grep 'Candidate:' || true)"; out="${out#*Candidate: }"; out="${out#*:}" ;;
+    zypper) out="$(LC_ALL=C zypper -q info "$pkg" 2>/dev/null | grep '^Version' || true)" ;;
+    xbps) out="$(xbps-query -R -p pkgver "$pkg" 2>/dev/null || true)"; out="${out#"$pkg"-}" ;;
+    nix) out="$(nix_query eval --raw "nixpkgs#$pkg.version" 2>/dev/null || true)" ;;
+    esac
+    [[ "$out" =~ ([0-9]+(\.[0-9]+)+) ]] && printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+}
+
 pm_installed() {
     local pkg="$1"
     case "$pm" in
@@ -354,29 +384,78 @@ ensure_toolchain() {
         pacman) pkg="base-devel cmake ninja git" ;;
         dnf) pkg="gcc-c++ cmake ninja-build git pkgconf-pkg-config" ;;
         apt) pkg="build-essential cmake ninja-build git pkg-config" ;;
-        zypper) pkg="gcc-c++ cmake ninja git pkg-config" ;;
+        # pkgconf-pkg-config, not the pkg-config it provides: what is recorded
+        # has to be a name the package database answers to
+        zypper) pkg="gcc-c++ cmake ninja git pkgconf-pkg-config" ;;
         xbps) pkg="base-devel cmake ninja git pkg-config" ;;
         apk) pkg="build-base cmake ninja git pkgconf" ;;
         esac
         ;;
     esac
     [ -n "$pkg" ] || { fail "don't know how to install the $kind toolchain on this distro"; return 1; }
-    info "installing $kind toolchain ($pkg)"
     # shellcheck disable=SC2086
-    pm_install $pkg || return 1
-    local p
-    for p in $pkg; do
-        pm_installed "$p" 2>/dev/null && ! already_recorded "$pm" "$p" && record "$pm" "$p" "" toolchain
+    install_build_pkgs "$kind toolchain" $pkg
+}
+
+# install_build_pkgs LABEL pkg...
+# Installs, and records as role=toolchain, only the packages that aren't
+# already on the system. Anything that was here before the installer ran (git,
+# more often than not - the repo was cloned with it) must never reach the
+# manifest, or uninstall would offer to remove something pibble didn't add.
+install_build_pkgs() {
+    local label="$1" p missing=""
+    shift
+    for p in "$@"; do
+        pm_installed "$p" 2>/dev/null || missing="$missing $p"
+    done
+    [ -n "$missing" ] || return 0
+    info "installing $label ($(printf '%s' "${missing# }"))"
+    # shellcheck disable=SC2086
+    pm_install $missing || return 1
+    for p in $missing; do
+        already_recorded "$pm" "$p" || record "$pm" "$p" "" toolchain
     done
     return 0
 }
 
-cargo_bin_dir() { printf '%s' "${CARGO_HOME:-$HOME/.cargo}/bin"; }
+# Where cargo is told to install: the shell's own helper scripts put
+# ~/.local/bin (and ~/go/bin) in front of PATH before they look for matugen,
+# cliphist and the rest, and never look in ~/.cargo/bin - a binary left in
+# cargo's default place is one the running shell cannot find.
+cargo_root() { printf '%s' "$HOME/.local"; }
+cargo_bin_dir() { printf '%s/bin' "$(cargo_root)"; }
 go_bin_dir() {
     local b
     b="$(go env GOBIN 2>/dev/null || true)"
     [ -n "$b" ] && { printf '%s' "$b"; return 0; }
     printf '%s/bin' "$(go env GOPATH 2>/dev/null || printf '%s/go' "$HOME")"
+}
+
+# `cargo install` and `go install` put their binaries under the user's home, in
+# directories a distro may leave off PATH. Without them here a dependency built
+# a minute ago reads as missing: the daemons step skips it, and a second run
+# builds it all over again and records it twice. The shell adds both itself,
+# but a compositor's autostart line does not - warn_user_bin_dirs says so at
+# the end.
+orig_path="$PATH"
+PATH="$PATH:$(cargo_bin_dir):$(go_bin_dir)"
+
+warn_user_bin_dirs() {
+    local row dep bin role why found dir
+    for row in "${deps[@]}"; do
+        IFS='|' read -r dep bin role why <<<"$row"
+        [ -n "$bin" ] || continue
+        found="$(command -v "$bin" 2>/dev/null || true)"
+        dir="${found%/*}"
+        case "$dir" in
+        "$(cargo_bin_dir)" | "$(go_bin_dir)") ;;
+        *) continue ;;
+        esac
+        case ":$orig_path:" in
+        *":$dir:"*) ;;
+        *) warn "$bin is in $dir, which is not on your PATH - pibble looks there by itself, but a command in your compositor's autostart won't find it until you add it" ;;
+        esac
+    done
 }
 
 # ------------------------------------------------------------ arch AUR helper ---
@@ -416,9 +495,9 @@ aur_install() {
         return 0
     fi
     local tmp
-    tmp="$(mktemp -d)"
+    tmp="$(mktemp -d)" && [ -n "$tmp" ] || return 1
     run git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp/$pkg" &&
-        (cd "$tmp/$pkg" && run makepkg -si --noconfirm)
+        (cd "$tmp/$pkg" && run makepkg -sir --noconfirm)
     local rc=$?
     rm -rf "$tmp"
     [ $rc -eq 0 ] && record aur "$pkg" "$bin" dep
@@ -430,6 +509,16 @@ aur_install() {
 # One row per dependency: key|binary|role|why
 # binary empty = a library, presence is checked through the package manager.
 deps=(
+    # The three Qt rows come before quickshell on purpose: where Quickshell is
+    # built from source its build list names the same packages, and whichever
+    # asks first is the one that records them. Asked for here they are
+    # dependencies; asked for by the build they would be "toolchain", and
+    # offered for removal as if the shell didn't need them to run.
+    "util-linux||required|setsid as the pibble command and the launcher call it - busybox's has neither -f nor -w"
+    "procps||required|pgrep and pkill, which the pibble command finds its daemon with"
+    "qtquick-dialogs||required|a QML module the shell imports - only Debian/Ubuntu package it on its own"
+    "qtquick-effects||required|a QML module the shell imports - only Debian/Ubuntu package it on its own"
+    "qtsvg||recommended|app and notification icons - without it icons from SVG themes are blank"
     "quickshell|qs|required|runs the shell"
     "libnotify|notify-send|recommended|pibble's own alerts - without it they are silently dropped"
     "wl-clipboard|wl-copy|recommended|clipboard reads and copy actions"
@@ -447,6 +536,18 @@ deps=(
 pkg_for() {
     local dep="$1"
     case "$dep:$pm" in
+    qtsvg:pacman) printf 'qt6-svg' ;;
+    qtsvg:dnf) printf 'qt6-qtsvg' ;;
+    qtsvg:apt) printf 'qt6-svg-plugins' ;;
+    # no qt6-svg here: the image plugin ships inside the library package
+    qtsvg:zypper) printf 'libQt6Svg6' ;;
+    qtsvg:xbps) printf 'qt6-svg' ;;
+    qtsvg:apk) printf 'qt6-qtsvg' ;;
+    qtsvg:nix) printf 'qt6.qtsvg' ;;
+    util-linux:apk) printf 'util-linux-misc' ;;
+    procps:apk) printf 'procps-ng' ;;
+    qtquick-dialogs:apt) printf 'qml6-module-qtquick-dialogs' ;;
+    qtquick-effects:apt) printf 'qml6-module-qtquick-effects' ;;
     qtmultimedia:pacman) printf 'qt6-multimedia-ffmpeg' ;;
     qtmultimedia:dnf) printf 'qt6-qtmultimedia' ;;
     qtmultimedia:apt) printf 'qml6-module-qtmultimedia' ;;
@@ -466,42 +567,74 @@ pkg_for() {
     esac
 }
 
+# Rows that only mean something on one package manager. Everywhere but
+# Debian/Ubuntu the two QML modules are part of Qt's declarative package, which
+# Quickshell already depends on - there is nothing to install.
+dep_applies() {
+    case "$1" in
+    qtquick-dialogs | qtquick-effects) [ "$pm" = apt ] ;;
+    # part of the base system everywhere except Alpine, where busybox stands
+    # in for both
+    util-linux | procps) [ "$pm" = apk ] ;;
+    *) return 0 ;;
+    esac
+}
+
 # Where a dependency comes from when the distro doesn't package it.
 fallback_install() {
     local dep="$1" bin="${2:-}"
     case "$dep" in
     quickshell)
         case "$pm" in
-        pacman) aur_install quickshell "$bin" || aur_install quickshell-git "$bin" ;;
+        # quickshell itself is in extra now; this is only reached when that
+        # one is missing or too old
+        pacman) aur_install quickshell-git "$bin" ;;
         dnf)
             info "enabling COPR errornointernet/quickshell"
-            pm_installed dnf-plugins-core || pm_install dnf-plugins-core
-            as_root dnf -y copr enable errornointernet/quickshell &&
-                record copr errornointernet/quickshell "" repo &&
-                pm_install quickshell &&
-                record dnf quickshell "$bin" dep
+            # dnf5 has `copr` built in; only the older dnf needs the plugin
+            # package, and then it is pibble's to take away again
+            if ! dnf copr --help >/dev/null 2>&1; then
+                install_build_pkgs "COPR support" dnf-plugins-core || return 1
+            fi
+            # a COPR the user had already switched on is theirs, not ours
+            local had_copr=0 f
+            for f in /etc/yum.repos.d/*errornointernet*quickshell*.repo; do
+                [ -e "$f" ] && grep -q '^enabled=1' "$f" 2>/dev/null && had_copr=1
+            done
+            as_root dnf -y copr enable errornointernet/quickshell || return 1
+            [ "$had_copr" = 1 ] || already_recorded copr errornointernet/quickshell ||
+                record copr errornointernet/quickshell "" repo
+            if pm_installed quickshell; then
+                # Fedora's own, older build is already here: `dnf install`
+                # calls that done, so it has to be asked to upgrade. It was
+                # not pibble's install, so it is not recorded either.
+                as_root dnf -y upgrade --refresh quickshell
+            else
+                as_root dnf -y install --refresh quickshell &&
+                    record dnf quickshell "$bin" dep
+            fi
             ;;
         *) build_quickshell ;;
         esac
         ;;
-    matugen)
-        case "$pm" in
-        pacman) aur_install matugen-bin "$bin" || aur_install matugen "$bin" ;;
-        *) cargo_install matugen matugen ;;
-        esac
-        ;;
+    matugen) cargo_install matugen matugen ;;
     awww)
+        # what its build links against and generates from; the build toolchain
+        # alone is not enough
+        local awww_dev=""
         case "$pm" in
-        pacman) aur_install awww "$bin" || cargo_git_install awww https://codeberg.org/LGFae/awww awww ;;
-        *) cargo_git_install awww https://codeberg.org/LGFae/awww awww ;;
+        pacman) awww_dev="lz4 wayland wayland-protocols" ;;
+        dnf) awww_dev="lz4-devel wayland-devel wayland-protocols-devel" ;;
+        apt) awww_dev="liblz4-dev libwayland-dev wayland-protocols" ;;
+        zypper) awww_dev="liblz4-devel wayland-devel wayland-protocols-devel" ;;
+        xbps) awww_dev="liblz4-devel wayland-devel wayland-protocols" ;;
+        apk) awww_dev="lz4-dev wayland-dev wayland-protocols" ;;
         esac
+        # shellcheck disable=SC2086
+        install_build_pkgs "awww's build dependencies" $awww_dev &&
+            cargo_git_install https://codeberg.org/LGFae/awww awww awww-daemon
         ;;
-    cliphist)
-        case "$pm" in
-        pacman) aur_install cliphist "$bin" ;;
-        *) go_install cliphist go.senan.xyz/cliphist ;;
-        esac
-        ;;
+    cliphist) go_install cliphist go.senan.xyz/cliphist ;;
     mpvpaper)
         case "$pm" in
         pacman) aur_install mpvpaper "$bin" ;;
@@ -519,17 +652,41 @@ cargo_install() {
     local bin="$1" crate="$2"
     ensure_toolchain rust || return 1
     info "building $crate with cargo (this takes a few minutes)"
-    run cargo install --locked "$crate" || return 1
-    record cargo "$crate" "$bin" dep
+    run cargo install --locked --root "$(cargo_root)" "$crate" || return 1
+    already_recorded cargo "$crate" || record cargo "$crate" "$bin" dep
 }
 
+# cargo_git_install URL crate...
+# The crates have to be named: a repository holding more than one package with
+# a binary (awww and awww-daemon) makes a bare `cargo install --git` refuse to
+# choose. Each is recorded on its own row, because `cargo uninstall` takes them
+# one at a time too. Every crate here is named after the binary it builds.
 cargo_git_install() {
-    local bin="$1" url="$2" crate="$3"
+    local url="$1" crate
+    shift
     ensure_toolchain rust || return 1
     ensure_toolchain build || return 1
-    info "building $crate from $url (this takes a few minutes)"
-    run cargo install --locked --git "$url" || return 1
-    record cargo "$crate" "$bin" dep
+    # The newest release tag rather than whatever the default branch holds
+    # today, which is not guaranteed to build. Read into a variable and cut
+    # with an expansion - piping into `head` trips pipefail, see pm_repo_has.
+    local tags tag=""
+    tags="$(git ls-remote --tags --refs --sort=-v:refname "$url" 'v[0-9]*' 2>/dev/null || true)"
+    tag="${tags%%$'\n'*}"
+    tag="${tag##*refs/tags/}"
+    info "building $* from $url${tag:+ ($tag)} (this takes a few minutes)"
+    # shellcheck disable=SC2086
+    run cargo install --locked --root "$(cargo_root)" --git "$url" ${tag:+--tag "$tag"} "$@" || {
+        # cargo installs what it can and fails on the rest; half of a
+        # client/daemon pair reads as "already installed" on the next run and
+        # is never retried, so take it back out
+        for crate in "$@"; do
+            run cargo uninstall --root "$(cargo_root)" "$crate" >/dev/null 2>&1 || true
+        done
+        return 1
+    }
+    for crate in "$@"; do
+        already_recorded cargo "$crate" || record cargo "$crate" "$crate" dep
+    done
 }
 
 go_install() {
@@ -546,58 +703,66 @@ go_install() {
 save_file_list() {
     local pkg="$1" src="$2"
     [ "$dry_run" = 1 ] && { printf '    %s* would record %s'"'"'s installed files from %s%s\n' "$c_dim" "$pkg" "$src" "$c_off"; return 0; }
-    [ -r "$src" ] || { warn "$pkg installed but its file list wasn'"'"'t written - uninstall won'"'"'t be able to remove it automatically"; return 0; }
+    [ -r "$src" ] || { warn "$pkg installed but its file list wasn't written - uninstall won't be able to remove it automatically"; return 0; }
     mkdir -p "$state_dir"
-    grep -v '"'"'^#'"'"' "$src" | grep '"'"'^/'"'"' >"$state_dir/files-$pkg.txt" || true
+    grep -v '^#' "$src" | grep '^/' >"$state_dir/files-$pkg.txt" || true
+    # Quickshell's install step also links `qs` to the binary, and leaves the
+    # link out of the list it writes - uninstall would strand it.
+    local f
+    while IFS= read -r f; do
+        case "$f" in
+        */bin/quickshell) [ -L "${f%/*}/qs" ] && printf '%s\n' "${f%/*}/qs" >>"$state_dir/files-$pkg.txt" ;;
+        esac
+    done <"$state_dir/files-$pkg.txt"
+    return 0
 }
 
 build_mpvpaper() {
     ensure_toolchain build || return 1
     local mpv_dev
     case "$pm" in
-    dnf) mpv_dev="mpv-libs-devel wayland-devel wayland-protocols-devel meson" ;;
+    dnf) mpv_dev="mpv-devel wayland-devel wayland-protocols-devel meson" ;;
     apt) mpv_dev="libmpv-dev libwayland-dev wayland-protocols meson" ;;
     zypper) mpv_dev="mpv-devel wayland-devel wayland-protocols-devel meson" ;;
     xbps) mpv_dev="mpv-devel wayland-devel wayland-protocols meson" ;;
     *) fail "don't know mpvpaper's build deps on this distro"; return 1 ;;
     esac
     # shellcheck disable=SC2086
-    pm_install $mpv_dev || return 1
-    for p in $mpv_dev; do
-        already_recorded "$pm" "$p" || record "$pm" "$p" "" toolchain
-    done
+    install_build_pkgs "mpvpaper's build dependencies" $mpv_dev || return 1
     if [ "$dry_run" = 1 ]; then
         info "would clone and build mpvpaper from https://github.com/GhostNaN/mpvpaper"
         record source mpvpaper mpvpaper dep
         return 0
     fi
-    local tmp; tmp="$(mktemp -d)"
+    local tmp; tmp="$(mktemp -d)" && [ -n "$tmp" ] || return 1
     run git clone --depth 1 https://github.com/GhostNaN/mpvpaper "$tmp/mpvpaper" &&
         (cd "$tmp/mpvpaper" && run meson setup build && run ninja -C build &&
             as_root ninja -C build install) || { rm -rf "$tmp"; return 1; }
     save_file_list mpvpaper "$tmp/mpvpaper/build/meson-logs/install-log.txt"
     rm -rf "$tmp"
-    record source mpvpaper mpvpaper dep
+    already_recorded source mpvpaper || record source mpvpaper mpvpaper dep
 }
 
 # Quickshell isn't packaged outside Arch/Fedora/Nix, so on everything else it
 # gets built. It needs Qt 6.6+; distros older than that can't run pibble at all,
 # which is worth saying plainly rather than failing halfway through a build.
 build_quickshell() {
+    # Alpine packages neither Quickshell nor CLI11, which its build cannot do
+    # without, so there is nothing for this script to install or build from.
+    if [ "$pm" = apk ]; then
+        fail "Alpine has no Quickshell package and no CLI11 to build it with - pibble can't be set up here by this script. Build Quickshell 0.3+ by hand, then re-run."
+        return 1
+    fi
     ensure_toolchain build || return 1
     local qt_deps=""
     case "$pm" in
-    apt) qt_deps="qt6-base-dev qt6-declarative-dev qt6-declarative-private-dev qt6-wayland qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev libwayland-dev wayland-protocols libdrm-dev libgbm-dev libjemalloc-dev libpam0g-dev libpipewire-0.3-dev libcli11-dev spirv-tools qml6-module-qtqml-workerscript qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-window qml6-module-qtquick-layouts" ;;
-    zypper) qt_deps="qt6-base-devel qt6-declarative-devel qt6-declarative-private-devel qt6-wayland-devel qt6-shadertools-devel wayland-devel wayland-protocols-devel libdrm-devel Mesa-libgbm-devel jemalloc-devel pam-devel pipewire-devel cli11-devel" ;;
-    xbps) qt_deps="qt6-base-devel qt6-declarative-devel qt6-wayland-devel qt6-shadertools-devel wayland-devel wayland-protocols libdrm-devel jemalloc-devel pam-devel libpipewire-devel cli11" ;;
+    apt) qt_deps="qt6-base-dev qt6-declarative-dev qt6-declarative-private-dev qt6-wayland qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev libwayland-dev wayland-protocols libdrm-dev libgbm-dev libjemalloc-dev libpam0g-dev libpipewire-0.3-dev libcli11-dev spirv-tools libegl-dev libpolkit-agent-1-dev libpolkit-gobject-1-dev libglib2.0-dev libxcb1-dev libvulkan-dev qt6-svg-plugins qml6-module-qtquick-dialogs qml6-module-qtquick-effects qml6-module-qtqml-workerscript qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-window qml6-module-qtquick-layouts" ;;
+    zypper) qt_deps="qt6-base-devel qt6-declarative-devel qt6-declarative-private-devel qt6-wayland-devel qt6-waylandclient-private-devel qt6-shadertools-devel wayland-devel wayland-protocols-devel libdrm-devel libgbm-devel Mesa-libEGL-devel jemalloc-devel pam-devel pipewire-devel cli11-devel polkit-devel glib2-devel libxcb-devel vulkan-headers spirv-tools" ;;
+    xbps) qt_deps="qt6-base-devel qt6-declarative-devel qt6-wayland-devel qt6-shadertools-devel wayland-devel wayland-protocols libdrm-devel MesaLib-devel jemalloc-devel pam-devel pipewire-devel cli11 polkit-devel glib-devel libxcb-devel Vulkan-Headers SPIRV-Tools" ;;
     *) fail "don't know Quickshell's build deps on this distro - see https://quickshell.outfoxxed.me/docs/guide/install"; return 1 ;;
     esac
     # shellcheck disable=SC2086
-    pm_install $qt_deps || { fail "couldn't install Quickshell's build dependencies"; return 1; }
-    local p
-    for p in $qt_deps; do
-        already_recorded "$pm" "$p" || record "$pm" "$p" "" toolchain
-    done
+    install_build_pkgs "Quickshell's build dependencies" $qt_deps || { fail "couldn't install Quickshell's build dependencies"; return 1; }
 
     local qt_ver=""
     if command -v qmake6 >/dev/null 2>&1; then qt_ver="$(qmake6 -query QT_VERSION 2>/dev/null)"; fi
@@ -610,16 +775,52 @@ build_quickshell() {
         fi
     fi
 
+    # The crash handler (which is also what restarts Quickshell after a crash)
+    # needs cpptrace, and not every distro packages it - Debian doesn't.
+    # Without it the build is configured with the handler off rather than
+    # left to fail at the first find_package.
+    local crash_flag="-DCRASH_HANDLER=OFF" cpptrace=""
+    case "$pm" in
+    apt) cpptrace="libcpptrace-dev" ;;
+    zypper | xbps) cpptrace="cpptrace-devel" ;;
+    esac
+    if [ -n "$cpptrace" ] && pm_repo_has "$cpptrace" && install_build_pkgs "Quickshell's crash handler" "$cpptrace"; then
+        crash_flag="-DCRASH_HANDLER=ON"
+    else
+        warn "cpptrace isn't packaged here - building Quickshell without its crash handler"
+    fi
+
     if [ "$dry_run" = 1 ]; then
         info "would clone and build Quickshell from https://git.outfoxxed.me/quickshell/quickshell"
         record source quickshell qs dep
         return 0
     fi
-    local tmp; tmp="$(mktemp -d)"
+    local tmp; tmp="$(mktemp -d)" && [ -n "$tmp" ] || return 1
+
+    # pibble's blur needs Quickshell's BackgroundEffect, which is generated
+    # from a protocol file that first shipped in wayland-protocols 1.45 -
+    # newer than Debian 13 carries. They are only read at build time, so a
+    # newer set goes into the build's own temp directory and nowhere else.
+    local wp_path=""
+    if command -v pkg-config >/dev/null 2>&1 && ! pkg-config --atleast-version=1.45 wayland-protocols 2>/dev/null; then
+        info "this distro's wayland-protocols is older than 1.45 - fetching a newer set for the build"
+        install_build_pkgs "meson" meson || { rm -rf "$tmp"; return 1; }
+        run git clone --depth 1 --branch 1.45 https://gitlab.freedesktop.org/wayland/wayland-protocols.git "$tmp/wayland-protocols" &&
+            (cd "$tmp/wayland-protocols" &&
+                run meson setup build -Dtests=false --prefix="$tmp/wayland-protocols-prefix" >/dev/null &&
+                run meson install -C build >/dev/null) || {
+            rm -rf "$tmp"
+            fail "couldn't fetch wayland-protocols 1.45, which Quickshell needs to build"
+            return 1
+        }
+        wp_path="$tmp/wayland-protocols-prefix/share/pkgconfig"
+    fi
+
     info "building Quickshell from source (this takes a while)"
     run git clone --recursive https://git.outfoxxed.me/quickshell/quickshell "$tmp/quickshell" &&
         (cd "$tmp/quickshell" &&
-            run cmake -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DDISTRIBUTOR=pibble-installer &&
+            run env PKG_CONFIG_PATH="$wp_path${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+                cmake -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DDISTRIBUTOR=pibble-installer "$crash_flag" &&
             run cmake --build build &&
             as_root cmake --install build) || {
         rm -rf "$tmp"
@@ -628,7 +829,47 @@ build_quickshell() {
     }
     save_file_list quickshell "$tmp/quickshell/build/install_manifest.txt"
     rm -rf "$tmp"
-    record source quickshell qs dep
+    already_recorded source quickshell || record source quickshell qs dep
+}
+
+# The oldest release of a dependency that pibble works with, where there is
+# one. These are facts about the shell's own code, not preferences:
+#   quickshell 0.3.0  first to ship the Quickshell.WindowManager module
+#                     (services/ActiveOutput.qml) and BackgroundEffect
+#                     (launcher/LauncherWindow.qml); on anything older the
+#                     shell fails to load at all
+#   matugen 4.1.0     first to take --prefer, which Theme.qml passes; older
+#                     ones reject the whole command line
+min_version() {
+    case "$1" in
+    quickshell) printf '0.3.0' ;;
+    matugen) printf '4.1.0' ;;
+    esac
+}
+
+# version_ge A B: is A the same as or newer than B
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$2" ]
+}
+
+installed_version() {
+    local bin="$1" out
+    out="$("$bin" --version 2>/dev/null || true)"
+    out="${out%%$'\n'*}"
+    [[ "$out" =~ ([0-9]+(\.[0-9]+)+) ]] && printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+}
+
+# Installed, but older than pibble can use. Prints the version it found.
+dep_too_old() {
+    local dep="$1" bin="$2" min have
+    min="$(min_version "$dep")"
+    [ -n "$min" ] && [ -n "$bin" ] || return 1
+    command -v "$bin" >/dev/null 2>&1 || return 1
+    have="$(installed_version "$bin")"
+    [ -n "$have" ] || return 1
+    version_ge "$have" "$min" && return 1
+    printf '%s' "$have"
 }
 
 dep_present() {
@@ -642,12 +883,23 @@ dep_present() {
 }
 
 install_dep() {
-    local dep="$1" bin="$2" pkg
+    local dep="$1" bin="$2" pkg min repo_ver
     pkg="$(pkg_for "$dep")"
-    if pm_repo_has "$pkg"; then
+    min="$(min_version "$dep")"
+    repo_ver=""
+    if [ -n "$min" ] && pm_repo_has "$pkg"; then
+        repo_ver="$(pm_repo_version "$pkg")"
+    fi
+    if [ -n "$repo_ver" ] && ! version_ge "$repo_ver" "$min"; then
+        info "$dep: $pm carries $repo_ver, and pibble needs $min or newer - getting it elsewhere"
+    elif pm_repo_has "$pkg"; then
         info "$dep: from $pm as '$pkg'"
+        # the binary can be missing while the package is present (a broken or
+        # partial install); reinstalling is right, recording it is not
+        local had=0
+        pm_installed "$pkg" 2>/dev/null && had=1
         if pm_install "$pkg"; then
-            record "$pm" "$pkg" "$bin" dep
+            [ "$had" = 1 ] || already_recorded "$pm" "$pkg" || record "$pm" "$pkg" "$bin" dep
             return 0
         fi
         warn "$pkg failed to install from the repos, trying a fallback"
@@ -779,11 +1031,17 @@ check_compositor() {
     warn "no Wayland compositor found - pibble needs one (niri, Hyprland, sway, ...). Install it yourself; this script won't pick one for you."
 }
 
+# Set when something the shell cannot start without did not go in. The run
+# still finishes - the rest of what it did stands - but it exits non-zero, so
+# an unattended install can tell "done" from "done, and it will not run".
+required_failed=0
+
 install_deps() {
     step "Dependencies"
     if [ -z "$pm" ]; then
         fail "couldn't identify a package manager for ${distro_name:-this system}"
         info "install the dependencies listed in README.md by hand, then re-run with --no-deps"
+        required_failed=1
         return 1
     fi
     # nix installs into the user profile, which - unlike the system
@@ -798,7 +1056,23 @@ install_deps() {
     else
         info "${distro_name:-unknown distro} - using $pm"
     fi
+    # Alpine packages neither Quickshell nor the CLI11 its build needs, so the
+    # one dependency pibble cannot do without is out of this script's reach
+    # there. Said once, up front, and nothing else is installed: a dozen
+    # packages around a shell that cannot start is not an install. Somebody
+    # who has built Quickshell by hand gets the rest as usual.
+    if [ "$pm" = apk ] && [ -z "$only_deps" ] && { ! command -v qs >/dev/null 2>&1 || [ -n "$(dep_too_old quickshell qs || true)" ]; }; then
+        fail "Alpine is not supported by this installer: it has no Quickshell package, and no CLI11 to build one with"
+        info "nothing has been installed. Build Quickshell $(min_version quickshell) or newer by hand, then run this again for the rest."
+        required_failed=1
+        return 1
+    fi
     [ -z "$only_deps" ] && check_compositor
+    # Void, Alpine, Artix and the like. Reported, not fixed: an init system is
+    # no more this script's to install than a compositor is.
+    if [ -z "$only_deps" ] && ! command -v systemctl >/dev/null 2>&1; then
+        warn "no systemctl here - the launcher's power off and reboot buttons call it, and will do nothing on this system"
+    fi
 
     local row dep bin role why want
     for row in "${deps[@]}"; do
@@ -806,27 +1080,43 @@ install_deps() {
         if [ -n "$only_deps" ] && [[ ",$only_deps," != *",$dep,"* ]]; then
             continue
         fi
+        dep_applies "$dep" || continue
         if [ -n "$skip_list" ] && [[ ",$skip_list," == *",$dep,"* ]]; then
             skip "$dep - skipped (--skip)"
             continue
         fi
+        local old="" verb=install
         if dep_present "$dep" "$bin"; then
-            skip "$dep - already installed"
-            continue
+            old="$(dep_too_old "$dep" "$bin" || true)"
+            if [ -z "$old" ]; then
+                skip "$dep - already installed"
+                continue
+            fi
+            warn "$dep $old is installed, but pibble needs $(min_version "$dep") or newer"
+            verb=upgrade
         fi
         case "$role" in
         required | recommended) want=y ;;
         optional) [ "$install_optional" = 1 ] && want=y || want=n ;;
         esac
-        if ! ask_yn "install $dep? ($why)" "$want"; then
+        if ! ask_yn "$verb $dep? ($why)" "$want"; then
             skip "$dep - skipped"
             continue
         fi
         if install_dep "$dep" "$bin"; then
-            ok "$dep installed"
+            old="$(dep_too_old "$dep" "$bin" || true)"
+            if [ -z "$old" ] || [ "$dry_run" = 1 ]; then
+                ok "$dep installed"
+            elif [ "$role" = required ]; then
+                fail "$dep $old is what got installed, and pibble needs $(min_version "$dep") or newer - it will not run on this one"
+                required_failed=1
+            else
+                warn "$dep $old is what got installed, and pibble needs $(min_version "$dep") or newer; the features it powers stay off"
+            fi
         else
             if [ "$role" = required ]; then
                 fail "$dep is required and couldn't be installed - pibble will not run without it"
+                required_failed=1
             else
                 warn "$dep couldn't be installed; the features it powers stay off"
             fi
@@ -960,9 +1250,14 @@ fi
 start_daemons
 
 step "Done"
+warn_user_bin_dirs
 if [ -f "$manifest" ] && [ "$dry_run" = 0 ]; then
     installed_count=$(grep -c "$(printf '\tdep$')" "$manifest" || true)
     info "$installed_count package(s) recorded in $manifest"
     info "./uninstall.sh removes exactly those, and nothing that was already here"
+fi
+if [ "$required_failed" = 1 ]; then
+    fail "a required dependency is missing - pibble will not start until it is installed (see above)"
+    exit 1
 fi
 info "open the launcher with: $repo/pibble toggle"
