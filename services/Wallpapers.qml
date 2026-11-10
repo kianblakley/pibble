@@ -656,9 +656,18 @@ Singleton {
     // stretches into the same 5px beat; 1x like this). It costs the bigger
     // file, decode and texture the quarter size was avoiding - 44MB of
     // texture on a 5120x2160 output against 2MB.
+    //
+    // Zero, which holds every bake back (see xrayCacheKey), for a screen with
+    // no size as well as for no screen: with every output unplugged (or
+    // switched off - niri removes it either way) Qt stands a nameless 0x0
+    // placeholder in for the one that left, and ActiveOutput hands that on.
+    // Rounded up to 1x1 it read as a real output, so the scan rekeyed, the
+    // generation pass baked a 1x1 backdrop per wallpaper, and its sweep took
+    // every real bake with it - all 25 regenerated from scratch, 25s of
+    // ffmpeg, on each reconnect.
     readonly property size xraySize: {
         const s = root.screen;
-        if (!s || root.xrayOutputScale <= 0)
+        if (!s || s.width <= 0 || s.height <= 0 || root.xrayOutputScale <= 0)
             return Qt.size(0, 0);
         return Qt.size(Math.max(1, Math.round(s.width * root.xrayOutputScale)), Math.max(1, Math.round(s.height * root.xrayOutputScale)));
     }
