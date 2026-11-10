@@ -62,6 +62,9 @@ PanelWindow {
         LauncherState.shown = root.shown;
         Wallpapers.launcherShown = root.shown;
         Wallpapers.syncXrayShown();
+        // see blurHandoff
+        root.blurModeWas = Settings.bgBlur;
+        root.blurHandoff = false;
         // While the surface stays mapped, backingWindowVisible is already true
         // and never changes again, so the reveal has to be kicked off here
         // instead. A no-op the rest of the time: on the unmapped path the
@@ -365,7 +368,44 @@ PanelWindow {
     // mapped for the daemon's life now, so a reveal-sized region would sit
     // there permanently at its 1px floor - drawing a blurred dot at the reveal
     // origin with the launcher not even open.
-    BackgroundEffect.blurRegion: (root.surfaceIdle || Settings.bgBlur !== "compositor") ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
+    BackgroundEffect.blurRegion: (root.surfaceIdle || !(Settings.bgBlur === "compositor" || root.blurHandoff)) ? noBlurRegion : (LauncherState.growMode ? growRegion : fadeBlurRegion)
+    // Compositor blur, held on across a switch to "xray" until that mode's own
+    // backdrop has loaded. Left alone the two do not meet: the region stops
+    // being asked for on the frame the setting changes, and the backdrop is an
+    // image that only starts loading on that same frame - 80ms of decode for a
+    // 5120x2160 bake, and every time, since leaving "xray" lets the image go
+    // rather than keep 44MB of texture for a mode that is off. For those
+    // frames the launcher had no backdrop at all. Switching the other way has
+    // no such gap, the compositor having nothing to load.
+    //
+    // Only out of "compositor": coming from "off" there is no backdrop to
+    // lose, and a few frames of the compositor's blur on the way would be one
+    // turning up and then changing. That takes remembering the mode being
+    // left, which a change handler never sees - noted on every change, and on
+    // every open too, since the setting can have loaded before this window was
+    // there to hear it.
+    //
+    // A backdrop that never loads (no wallpaper set) keeps the compositor's
+    // until the launcher closes.
+    property bool blurHandoff: false
+    property string blurModeWas: ""
+    Connections {
+        target: Settings
+        function onBgBlurChanged(): void {
+            root.blurHandoff = root.shown && root.blurModeWas === "compositor" && Settings.bgBlur === "xray";
+            root.blurModeWas = Settings.bgBlur;
+        }
+    }
+    // Let go a few frames after the backdrop reports loaded, not on the same
+    // one. Loaded is when the picture can be drawn, not when a frame with it
+    // in has reached the compositor, and a frame already on its way out would
+    // carry the region change without the picture. The overlap is free to
+    // look at: the backdrop is opaque, and covers exactly what the region did.
+    Timer {
+        interval: 50
+        running: root.blurHandoff && xrayBackdrop.loaded
+        onTriggered: root.blurHandoff = false
+    }
     // Clipped to the output, which is not cosmetic. A Region is rasterised as
     // one span per scanline, and this ellipse is as tall as it is wide - several
     // screens' worth by the end of the reveal - so most of the spans it costs to
@@ -920,6 +960,7 @@ PanelWindow {
         }
     }
     XrayBackdrop {
+        id: xrayBackdrop
         maskSource: growMask
         // an idle mapped surface draws nothing at all (see root.surfaceIdle);
         // the backdrop is otherwise the one thing here that is opaque on its

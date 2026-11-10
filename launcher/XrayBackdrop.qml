@@ -59,6 +59,9 @@ Item {
     // no baked file for the current wallpaper yet, so the wallpaper is
     // being blurred live below
     readonly property bool liveBlur: Wallpapers.xrayShownLive
+    // there is a picture to draw - what LauncherWindow waits on before it
+    // stops asking the compositor to blur (see blurHandoff there)
+    readonly property bool loaded: xrayBg.status === Image.Ready
     Image {
         id: xrayBg
         anchors.fill: parent
