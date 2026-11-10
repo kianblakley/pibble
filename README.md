@@ -38,8 +38,9 @@ cd pibble
 
 Asks which language to run the shell in, installs the dependencies below through
 your distro's package manager - building the few that nobody packages - and
-offers to start the daemons. Arch, Fedora, Debian/Ubuntu, openSUSE, Void, Alpine
-and Nix are handled natively; anything else gets told what to install by hand.
+offers to start the daemons. Arch, Fedora, Debian/Ubuntu, openSUSE, Void and Nix
+are handled natively; anything else gets told what to install by hand. Alpine is
+not supported: it packages neither Quickshell nor what Quickshell needs to build.
 
 On Nix it installs into your **user profile** (`nix profile`), which survives a
 rebuild - nixpkgs carries every dependency pibble has, Quickshell included, so
@@ -62,27 +63,36 @@ removed - and neither are your settings, thumbnails or clipboard cache.
 
 ### Dependencies
 
-Necessary:
+Necessary - the shell does not load without these:
 
 | Dependency | Use |
 |---|---|
-| A Wayland compositor, e.g. [Niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland), [Sway](https://github.com/swaywm/sway) | Hosts the shell |
-| [Quickshell](https://github.com/quickshell-mirror/quickshell) | Runs the shell |
+| A Wayland compositor with layer-shell, e.g. [Niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland), [Sway](https://github.com/swaywm/sway) | Hosts the shell. GNOME has no layer-shell and cannot |
+| [Quickshell](https://github.com/quickshell-mirror/quickshell) **0.3.0 or newer** | Runs the shell. Older builds lack modules it imports - Fedora's own package is one (0.2.1); `./install.sh` takes the `errornointernet/quickshell` COPR instead |
+| Qt 6's QtQuick Dialogs and Effects modules | Imported by the launcher. Part of Qt's declarative package everywhere except Debian/Ubuntu, where they are `qml6-module-qtquick-dialogs` and `qml6-module-qtquick-effects` |
+| bash, coreutils, util-linux, procps | The `pibble` command and the shell's helper scripts. Already on any desktop install |
 
-Optional (required for full feature set):
+Recommended - it runs without them, but not usefully:
 
 | Dependency | Use |
 |---|---|
-| [matugen](https://github.com/InioX/matugen) | Wallpaper-derived color theme |
-| [curl](https://curl.se/) | Fetches the weather shown on the clock page - without it the weather is silently blank |
-| [ffmpeg](https://ffmpeg.org/) | Every generated image: wallpaper and clipboard thumbnails, blurred variants, and video wallpaper previews |
-| [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews (install via your distro's package manager) |
+| Qt 6 SVG plugin (`qt6-svg`, `qt6-qtsvg`, `qt6-svg-plugins`) | App and notification icons - without it icons from SVG themes are blank |
 | [libnotify](https://gitlab.gnome.org/GNOME/libnotify) | `notify-send`, which every alert pibble raises goes through - without it they are dropped silently, including the ones reporting a missing dependency |
-| [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard reads, copy actions, and feeding cliphist |
-| [awww](https://codeberg.org/LGFae/awww) | Recommended static wallpaper backend (can use any) |
-| [mpvpaper](https://github.com/GhostNaN/mpvpaper) | Recommended live wallpaper backend (can use any) |
-| [cliphist](https://github.com/sentriz/cliphist) | Clipboard history support |
-| [grim](https://sr.ht/~emersion/grim) | The screen color picker - it freezes the screen so the eyedropper has something to sample. Without it the eyedropper is hidden |
+| A wallpaper setter: [awww](https://codeberg.org/LGFae/awww) for stills, [mpvpaper](https://github.com/GhostNaN/mpvpaper) for video | Applies the wallpaper you pick. Any setter works - the command is a setting |
+
+Optional - each one is a feature:
+
+| Dependency | Use | Without it |
+|---|---|---|
+| [ffmpeg](https://ffmpeg.org/) | Every generated image: wallpaper and clipboard thumbnails, blurred variants, video previews | Slow full-size tiles, blank video tiles, no blurred backdrop |
+| [qtmultimedia](https://doc.qt.io/qt-6/qtmultimedia-index.html) | Live wallpaper previews | Stills only |
+| [cliphist](https://github.com/sentriz/cliphist) + [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard history, and copying an entry back | Empty clipboard page |
+| [matugen](https://github.com/InioX/matugen) **4.1.0 or newer** | Wallpaper-derived color theme | "Dynamic" keeps its last palette. Older releases reject the options pibble passes |
+| [curl](https://curl.se/) | Fetches the weather shown on the clock page | The weather is silently blank |
+| [grim](https://sr.ht/~emersion/grim) | Freezes the screen so the color picker's eyedropper has something to sample | The eyedropper is hidden |
+| `gtk-launch` (GTK 3) | Launches apps the way a desktop would | Apps with a quoted `Exec=` line or D-Bus activation may not start |
+| systemd (`systemctl`) | Power off and reboot | The power menu's buttons do nothing |
+| UPower, PipeWire | Battery readout, volume flyout | Each is hidden |
 
 Installing them yourself instead is fine - `./install.sh` skips anything already
 present, and `./install.sh --no-deps` skips the step entirely.
