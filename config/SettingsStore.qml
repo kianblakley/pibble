@@ -9,9 +9,19 @@ Scope {
     id: root
 
     // Dynamic-theme kickoff must happen exactly once, on the true initial
-    // load: onLoaded re-fires on every save, because writeAdapter's own write
-    // loops back through the file watcher below.
+    // load: onLoaded re-fires on every hand edit the file watcher below picks
+    // up.
     property bool themeKicked: false
+
+    // When the store last wrote the file itself. The watcher is there for hand
+    // edits, but it reports the store's own write too, a millisecond or two
+    // after it, and reading that back was a reload per save: the eight
+    // re-notifies and the heal below for nothing, and a race - a second save
+    // inside that window had already moved the adapter on, and the read-back
+    // of the first put it back. A change seen inside the window is taken to be
+    // the store's own and left unread; two saves a few milliseconds apart come
+    // back as one change, which is why this is a time and not a count.
+    property double wroteAt: 0
 
     FileView {
         id: store
@@ -23,7 +33,11 @@ Scope {
         // keeps its stale in-memory copy and silently overwrites the file on
         // its next save
         watchChanges: true
-        onFileChanged: reload()
+        onFileChanged: {
+            if (Date.now() - root.wroteAt < 100)
+                return;
+            reload();
+        }
         adapter: Settings
 
         onLoaded: {
@@ -58,6 +72,7 @@ Scope {
     Connections {
         target: Settings
         function onSaveRequested() {
+            root.wroteAt = Date.now();
             store.writeAdapter();
         }
     }
