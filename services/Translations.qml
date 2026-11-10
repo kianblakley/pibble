@@ -207,6 +207,8 @@ Singleton {
             "%1% remaining - plug in soon.": "剩余 %1%，请尽快充电。",
             "wl-copy not found": "未找到 wl-copy",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy（wl-clipboard）用于把历史条目放回剪贴板 — 安装它才能从此页复制。",
+            "grim not found": "未找到 grim",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim 用于为取色器截取屏幕 — 安装它才能从屏幕取色。",
             "ffmpeg not found": "未找到 ffmpeg",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg 用于生成视频壁纸缩略图和模糊预览 — 安装它可获得更清晰、更快的预览。"
         },
@@ -392,6 +394,8 @@ Singleton {
             "%1% remaining - plug in soon.": "queda %1% - enchufa pronto.",
             "wl-copy not found": "wl-copy no encontrado",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy (wl-clipboard) se usa para devolver las entradas del historial al portapapeles: instálalo para copiar desde esta página.",
+            "grim not found": "grim no encontrado",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim se usa para capturar la pantalla para el selector de color: instálalo para tomar colores de la pantalla.",
             "ffmpeg not found": "ffmpeg no encontrado",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg se usa para generar miniaturas y vistas previas de fondos de vídeo: instálalo para previsualizaciones más nítidas y rápidas."
         },
@@ -577,6 +581,8 @@ Singleton {
             "%1% remaining - plug in soon.": "осталось %1% — скоро подключите зарядку.",
             "wl-copy not found": "wl-copy не найден",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy (wl-clipboard) нужен, чтобы возвращать записи истории в буфер обмена — установите его для копирования с этой страницы.",
+            "grim not found": "grim не найден",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim нужен, чтобы захватывать экран для пипетки — установите его, чтобы брать цвета с экрана.",
             "ffmpeg not found": "ffmpeg не найден",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg создаёт миниатюры и размытые превью видеообоев — установите его для более чётких и быстрых превью."
         },
@@ -762,6 +768,8 @@ Singleton {
             "%1% remaining - plug in soon.": "il reste %1% — branchez bientôt.",
             "wl-copy not found": "wl-copy introuvable",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy (wl-clipboard) sert à replacer les entrées de l'historique dans le presse-papiers — installez-le pour copier depuis cette page.",
+            "grim not found": "grim introuvable",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim sert à capturer l'écran pour la pipette à couleurs — installez-le pour prélever des couleurs à l'écran.",
             "ffmpeg not found": "ffmpeg introuvable",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg génère les miniatures et les aperçus floutés des fonds d'écran vidéo — installez-le pour des aperçus plus nets et plus rapides."
         },
@@ -947,6 +955,8 @@ Singleton {
             "%1% remaining - plug in soon.": "残り %1% です。早めに充電してください。",
             "wl-copy not found": "wl-copy が見つかりません",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy（wl-clipboard）は履歴の項目をクリップボードに戻すために使います。このページからコピーするにはインストールしてください。",
+            "grim not found": "grim が見つかりません",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim はカラーピッカー用に画面をキャプチャするために使います。画面から色を拾うにはインストールしてください。",
             "ffmpeg not found": "ffmpeg が見つかりません",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg は動画壁紙のサムネイルとぼかしプレビューの生成に使います。より速く鮮明なプレビューのためにインストールしてください。"
         },
@@ -1132,6 +1142,8 @@ Singleton {
             "%1% remaining - plug in soon.": "%1% बचा है — जल्द चार्ज लगाएँ।",
             "wl-copy not found": "wl-copy नहीं मिला",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "wl-copy (wl-clipboard) इतिहास की प्रविष्टियाँ वापस क्लिपबोर्ड में डालने के लिए है — इस पेज से कॉपी करने को इंस्टॉल करें।",
+            "grim not found": "grim नहीं मिला",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "grim रंग चुनने के लिए स्क्रीन कैप्चर करता है — स्क्रीन से रंग लेने को इंस्टॉल करें।",
             "ffmpeg not found": "ffmpeg नहीं मिला",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "ffmpeg वीडियो वॉलपेपर के थंबनेल और धुंधली झलकें बनाता है — तेज़ और साफ़ झलकों के लिए इंस्टॉल करें।"
         },
@@ -1317,6 +1329,8 @@ Singleton {
             "%1% remaining - plug in soon.": "بقي %1% — وصّل الشاحن قريبًا.",
             "wl-copy not found": "wl-copy غير موجود",
             "wl-copy (wl-clipboard) is used to place clipboard history entries back on the clipboard - install it to copy from this page.": "يُستخدم wl-copy (wl-clipboard) لإعادة عناصر السجل إلى الحافظة — ثبّته للنسخ من هذه الصفحة.",
+            "grim not found": "grim غير موجود",
+            "grim is used to capture the screen for the color picker - install it to pick colors from the screen.": "يُستخدم grim لالتقاط الشاشة من أجل منتقي الألوان — ثبّته لاختيار الألوان من الشاشة.",
             "ffmpeg not found": "ffmpeg غير موجود",
             "ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews.": "يُستخدم ffmpeg لإنشاء مصغّرات خلفيات الفيديو ومعايناتها المموهة — ثبّته لمعاينات أوضح وأسرع."
         }

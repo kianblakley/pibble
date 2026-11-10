@@ -89,7 +89,7 @@ Optional - each one is a feature:
 | [cliphist](https://github.com/sentriz/cliphist) + [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard history, and copying an entry back | Empty clipboard page |
 | [matugen](https://github.com/InioX/matugen) **4.1.0 or newer** | Wallpaper-derived color theme | "Dynamic" keeps its last palette. Older releases reject the options pibble passes |
 | [curl](https://curl.se/) | Fetches the weather shown on the clock page | The weather is silently blank |
-| [grim](https://sr.ht/~emersion/grim) | Freezes the screen so the color picker's eyedropper has something to sample | The eyedropper is hidden |
+| [grim](https://sr.ht/~emersion/grim) | Freezes the screen so the color picker's eyedropper has something to sample | Clicking the eyedropper only reports that grim is missing |
 | `gtk-launch` (GTK 3) | Launches apps the way a desktop would | Apps with a quoted `Exec=` line or D-Bus activation may not start |
 | systemd (`systemctl`) | Power off and reboot | The power menu's buttons do nothing |
 | UPower, PipeWire | Battery readout, volume flyout | Each is hidden |

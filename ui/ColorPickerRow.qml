@@ -38,7 +38,9 @@ Item {
     Component.onCompleted: {
         syncHueFromColor();
         // deferred rather than probed at singleton construction: it costs a
-        // subprocess, and nothing needs the answer until this row exists
+        // subprocess, and nothing needs the answer until this row exists.
+        // Asked this early so the first click on the eyedropper already has
+        // it and starts the pick without waiting on one.
         ScreenColor.probe();
     }
 
@@ -62,9 +64,24 @@ Item {
     // Guards against adopting a pick this row didn't ask for - ScreenColor is a
     // singleton and its `picked` is broadcast, not addressed to a caller.
     property bool awaitingPick: false
+    // The same guard one step earlier: a click first asks whether a pick is
+    // possible at all (see ScreenColor.check), and that answer is broadcast
+    // too.
+    property bool awaitingCheck: false
 
     Connections {
         target: ScreenColor
+        function onChecked(found: bool): void {
+            if (!root.awaitingCheck)
+                return;
+            root.awaitingCheck = false;
+            // a no has already been raised as an alert, and the launcher
+            // stays where it is
+            if (!found)
+                return;
+            root.awaitingPick = true;
+            root.pickRequested();
+        }
         function onPicked(hex: string): void {
             if (!root.awaitingPick)
                 return;
@@ -305,11 +322,11 @@ Item {
                 // Sits at the far edge of the hex readout rather than in the Row
                 // above it: the input beside it is a fixed 220 wide, so laying
                 // this out in flow would push it off the field's rounded end.
-                // Hidden outright where no backend can pick (see ScreenColor) -
-                // a button that only ever reports failure is worse than none.
+                // Shown whether or not a pick is possible: without grim a click
+                // says so instead (see ScreenColor.check), which a hidden
+                // button never got the chance to.
                 Rectangle {
                     id: eyedropper
-                    visible: ScreenColor.available
                     width: 24
                     height: 24
                     radius: Theme.radius(12)
@@ -331,8 +348,8 @@ Item {
                         onClicked: {
                             if (ScreenColor.picking)
                                 return;
-                            root.awaitingPick = true;
-                            root.pickRequested();
+                            root.awaitingCheck = true;
+                            ScreenColor.check();
                         }
                     }
                 }

@@ -529,7 +529,7 @@ deps=(
     "curl|curl|recommended|weather on the clock page"
     "awww|awww|optional|static wallpaper backend"
     "mpvpaper|mpvpaper|optional|live wallpaper backend"
-    "grim|grim|optional|the screen colour picker - without it the eyedropper is hidden"
+    "grim|grim|optional|the screen colour picker - without it the eyedropper only reports grim missing"
 )
 
 # The distro's package name for a dependency, where it differs from the key.

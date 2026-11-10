@@ -33,10 +33,13 @@ import "root:/config"
 //    screencopy back without proving a fixed Qt first.
 //
 // So grim is the whole of what the eyedropper needs, and without it there is
-// no eyedropper: the button is hidden rather than shown broken. Everything
-// after the capture is Quickshell's own - the frame is an Image, and the pixel
-// under the cursor is read straight out of it by the lens Canvas in
-// ColorPickerOverlay. Nothing external reads a pixel.
+// no eyedropper: a click on the button says grim is missing and goes no
+// further (see check). The button used to be hidden there instead, which left
+// nothing to say why - every other missing tool raises an alert at the point
+// it is reached for, and a button that is not there is never reached for.
+// Everything after the capture is Quickshell's own - the frame is an Image,
+// and the pixel under the cursor is read straight out of it by the lens Canvas
+// in ColorPickerOverlay. Nothing external reads a pixel.
 //
 // Two fallbacks used to sit behind grim and both were dropped, each for the
 // same reason: it cost a dependency to cover a case that barely existed.
@@ -68,14 +71,11 @@ Singleton {
     signal picked(string hex)
     signal failed
 
-    // False until probe() has actually found grim, rather than optimistically
-    // true: where nothing can pick, a button that appears and then vanishes
-    // reads worse than one that was never there.
-    property bool available: false
     property bool probed: false
     // Whether grim can capture a frame, and so whether the magnifier overlay
     // runs. It is the whole of what makes a pick possible: with no frame there
     // is no pixel to read, and nothing else is asked to pick on our behalf.
+    // False until a probe has actually found grim.
     property bool canMagnify: false
 
     // While true the overlay owns the screen. `shotPath` is the frozen frame
@@ -90,6 +90,26 @@ Singleton {
     function probe(): void {
         if (root.probed || probeProcess.running)
             return;
+        probeProcess.running = true;
+    }
+
+    // What a click on the eyedropper asks before anything leaves the screen:
+    // can a pick happen at all? `checked` carries the answer, and a no has
+    // already been said as a missing-dependency alert by the time it arrives.
+    //
+    // A no on record is looked up again rather than trusted, so installing
+    // grim is picked up by the next click instead of the next daemon start -
+    // the same way cliphist and ffmpeg are noticed. A yes is trusted: the
+    // lookup is a subprocess, and a pick that starts a beat late would show.
+    // A grim removed since then fails in the capture and ends the pick there.
+    signal checked(bool found)
+    property bool asked: false
+    function check(): void {
+        if (root.canMagnify) {
+            root.checked(true);
+            return;
+        }
+        root.asked = true;
         probeProcess.running = true;
     }
 
@@ -239,8 +259,13 @@ Singleton {
         stdout: StdioCollector {
             onStreamFinished: {
                 root.canMagnify = text.indexOf("shot=grim") >= 0;
-                root.available = root.canMagnify;
                 root.probed = true;
+                if (!root.asked)
+                    return;
+                root.asked = false;
+                if (!root.canMagnify)
+                    Notifier.missingDependency(Strings.tr("grim not found"), Strings.tr("grim is used to capture the screen for the color picker - install it to pick colors from the screen."));
+                root.checked(root.canMagnify);
             }
         }
     }
