@@ -679,93 +679,16 @@ Item {
             easing.type: Easing.OutCubic
         }
 
-        // hand-rolled scroll indicator: a MouseArea with
-        // preventStealing (rather than a DragHandler) is
-        // what reliably beats the swipe-to-power
-        // catcher's own DragHandler for the drag grab.
-        // Width matches the 18px gap pagesListWrap leaves
-        // to the right of pagesFlick exactly, so it can't
-        // extend leftward over row content
-        Item {
-            id: pagesScrollHit
+        // Width matches the 18px gap pagesListWrap leaves to the right of
+        // pagesFlick exactly, so it can't extend leftward over row content
+        ScrollTrack {
             anchors.right: parent.right
             anchors.top: pagesFlick.top
             anchors.bottom: pagesFlick.bottom
-            width: 18
-            readonly property bool shouldShow: pagesFlick.contentHeight > pagesFlick.height
-
-            Rectangle {
-                id: pagesScrollTrack
-                anchors.right: parent.right
-                anchors.rightMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                width: 6
-                // grows/shrinks in vertically, from the
-                // center out, as the list crosses the
-                // row-count that needs scrolling, rather
-                // than popping in/out
-                height: pagesScrollHit.shouldShow ? parent.height : 0
-                Behavior on height {
-                    NumberAnimation { duration: Anim.menu(180); easing.type: Easing.OutCubic }
-                }
-                radius: Theme.radius(3)
-                color: Qt.alpha(Theme.muted, 0.15)
-
-                Rectangle {
-                    id: pagesScrollThumb
-                    width: parent.width
-                    radius: Theme.radius(3)
-                    color: Qt.alpha(Theme.accent, pagesScrollArea.pressed ? 0.85 : 0.6)
-                    // floored so it stays grabbable once the
-                    // list is long enough that the honest
-                    // proportional size would be a sliver -
-                    // no ceiling, since capping the top end
-                    // would misrepresent how much is
-                    // visible (e.g. 6 of 7 rows shown should
-                    // read as a thumb spanning ~85% of the
-                    // track, not a stub). Also capped to the
-                    // track's own (animating) height, so the
-                    // floor doesn't leave the thumb poking
-                    // out past a track that's mid-shrink or
-                    // fully collapsed
-                    height: Math.min(pagesScrollTrack.height, Math.max(12, pagesFlick.visibleArea.heightRatio * pagesScrollTrack.height))
-                    // yPosition alone assumes the thumb is
-                    // exactly heightRatio*trackHeight tall
-                    // (yPosition + heightRatio caps at 1,
-                    // landing y+height on the track's
-                    // bottom edge); once height is floored
-                    // instead, that no longer reaches the
-                    // bottom, so rescale yPosition's own
-                    // range ([0, 1-heightRatio]) to
-                    // [0, 1] first
-                    y: {
-                        const range = 1 - pagesFlick.visibleArea.heightRatio;
-                        const progress = range > 0 ? pagesFlick.visibleArea.yPosition / range : 0;
-                        return progress * (pagesScrollTrack.height - height);
-                    }
-                }
-            }
-
-            MouseArea {
-                id: pagesScrollArea
-                anchors.fill: parent
-                enabled: pagesScrollHit.shouldShow
-                preventStealing: true
-                property real pressY: 0
-                property real pressThumbY: 0
-                onPressed: mouse => {
-                    pressY = mouse.y;
-                    pressThumbY = pagesScrollThumb.y;
-                }
-                onPositionChanged: mouse => {
-                    if (!pressed)
-                        return;
-                    const usable = Math.max(1, pagesScrollTrack.height - pagesScrollThumb.height);
-                    const newY = Math.max(0, Math.min(usable, pressThumbY + (mouse.y - pressY)));
-                    const maxContentY = Math.max(0, pagesFlick.contentHeight - pagesFlick.height);
-                    pagesFlick.contentY = (newY / usable) * maxContentY;
-                }
-            }
+            viewSize: pagesFlick.height
+            contentSize: pagesFlick.contentHeight
+            position: pagesFlick.contentY
+            onDragged: target => pagesFlick.contentY = target
         }
     }
 

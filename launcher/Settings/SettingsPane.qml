@@ -618,4 +618,21 @@ Item {
         duration: 100
         easing.type: Easing.OutCubic
     }
+    // The wheel is the only way to move the pane, and nothing else says a tab
+    // runs on past the bottom edge - the last row that fits looks like the
+    // last row. Sits in the pane's own margin, just outside the viewport's
+    // clip, so no tab slides underneath it on a switch; collapses on a tab
+    // that fits.
+    ScrollTrack {
+        anchors.left: tabViewport.right
+        anchors.top: tabViewport.top
+        anchors.bottom: tabViewport.bottom
+        viewSize: tabViewport.height
+        contentSize: tabViewport.activeHeight
+        position: tabViewport.contentY
+        onDragged: target => {
+            tabWheelScroll.stop();
+            tabViewport.contentY = target;
+        }
+    }
 }
