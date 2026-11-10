@@ -303,7 +303,9 @@ Singleton {
     // the path - along with the bubble's colour, which it only knows once it
     // has sampled the icon (see rememberLook).
     readonly property int replayCapacity: 5
-    readonly property string mediaDir: SystemInfo.cacheRoot + "/thumbnails/notifs"
+    readonly property string mediaDir: SystemInfo.cacheRoot + "/notifications"
+    // where it was before; see the sweep in remember()
+    readonly property string legacyMediaDir: SystemInfo.cacheRoot + "/thumbnails/notifs"
     function mediaPath(stamp: double): string {
         return root.mediaDir + "/" + stamp + ".png";
     }
@@ -369,13 +371,26 @@ Singleton {
         // the same rule Clipboard prunes its thumbnails with: anything not
         // named after an entry still cached goes. Also makes the directory,
         // ahead of the flyout's first write into it.
+        //
+        // The directory this used to be is removed rather than carried
+        // over, unlike the wallpaper and clipboard caches: the entries that
+        // own those images name them by their old path, so moving the files
+        // would save nothing. At most five replays lose their picture, the
+        // same way one does when the wallpaper or clip it showed is deleted.
+        // The rmdir is for thumbnails/, which it sat in beside folders of
+        // Wallpapers' and Clipboard's - it goes with whichever of the three
+        // moves out last.
         Quickshell.execDetached(["bash", "-c", `
-            dir="$1"; shift
+            dir="$1" old="$2"; shift 2
             mkdir -p "$dir"
+            if [ -d "$old" ]; then
+                rm -f "$old"/*.png
+                rmdir "$old" "\${old%/*}" 2>/dev/null
+            fi
             for f in "$dir"/*.png; do
                 [ -e "$f" ] || continue
                 case " $* " in *" $(basename "$f" .png) "*) ;; *) rm -f "$f" ;; esac
-            done`, "_", root.mediaDir].concat(NotifCache.items.map(item => String(item.timestamp))));
+            done`, "_", root.mediaDir, root.legacyMediaDir].concat(NotifCache.items.map(item => String(item.timestamp))));
     }
 
     // What only the flyout can find out about a remembered notification, and

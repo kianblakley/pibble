@@ -17,10 +17,10 @@ Singleton {
     // Single persistent, self-cleaning cache root for everything pibble
     // generates - separate from the source directories so deleting a wallpaper
     // or a clip scrolling past clipsMax can be detected and swept on the next
-    // scan. One directory per shape of generated file: thumbnails/ (split
-    // again into crops, wide, clips and notifs), blurred/ and proxies/ (see
-    // Wallpapers, Clipboard and Notifier for who owns which), and swatches/
-    // (ScreenColor).
+    // scan. One directory per service that writes into it, named for what
+    // the files are for: wallpapers/ (split again into tiles, stills,
+    // backdrops and video-previews - see Wallpapers), clipboard/ (Clipboard),
+    // notifications/ (Notifier) and swatches/ (ScreenColor).
     readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/pibble"
 
     // Scratch file for the notification tint's icon-grab round trip (see

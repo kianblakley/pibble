@@ -31,15 +31,18 @@ Singleton {
     // <stem>blurred.<ext> next to the source is still honored as a
     // user-supplied override of the blurred one.
     //
-    // The cache is split by the *shape* of what it holds, not by which pane
-    // reads it - one file often serves two - so a variant's directory says
-    // what it is:
+    // Everything this service generates sits under wallpapers/ in the cache,
+    // one folder per kind of file. Each is named for the main thing it is
+    // drawn as, though one file often serves two (a video's still is also
+    // what its tile and backdrop are cut from):
     //
-    //   thumbnails/crops   480x270 center crop, every type
-    //   thumbnails/wide    uncropped, source aspect, <=1920x1080
-    //   thumbnails/clips   the clipboard's own thumbs (Clipboard owns these)
-    //   blurred            output-sized and pre-blurred, see the xray block
-    //   proxies            preview-res video re-encodes, see below
+    //   wallpapers/tiles            the crop: 480x270, centered, every type
+    //   wallpapers/stills           the wide still: uncropped, source
+    //                               aspect, <=1920x1080
+    //   wallpapers/backdrops        output-sized and pre-blurred, see the
+    //                               xray block
+    //   wallpapers/video-previews   the proxy: a preview-res video
+    //                               re-encode, see below
     //
     // thumb is what a grid tile draws and pan is what the carousel slides a
     // fixed window across, so an image's thumb is its crop and its pan is its
@@ -111,6 +114,27 @@ Singleton {
         command: ["bash", "-c", `
             cd "$1" || { echo NODIR; exit 0; }
             cachedir="$2"
+            # What these four folders were called before they were gathered
+            # under wallpapers/. Renamed across rather than left to
+            # regenerate: the files are the same ones under the same keys,
+            # and a big folder is minutes of ffmpeg to rebuild. Done here
+            # and not in the generation pass because this is what reports
+            # what is cached - a move made after the listing below would
+            # leave one launcher open looking at an empty cache. A folder
+            # whose new name already exists has been superseded, and goes.
+            carry() {
+                [ -d "$1" ] || return 0
+                mkdir -p "\${2%/*}"
+                if [ -e "$2" ]; then rm -rf "$1"; else mv "$1" "$2"; fi
+            }
+            carry "$cachedir/thumbnails/crops" "$cachedir/wallpapers/tiles"
+            carry "$cachedir/thumbnails/wide" "$cachedir/wallpapers/stills"
+            carry "$cachedir/blurred" "$cachedir/wallpapers/backdrops"
+            carry "$cachedir/proxies" "$cachedir/wallpapers/video-previews"
+            # thumbnails/ also held the clipboard's and the notifications'
+            # folders, which their own services move out (see Clipboard and
+            # Notifier), so it only goes once the last of them has
+            [ -d "$cachedir/thumbnails" ] && rmdir "$cachedir/thumbnails" 2>/dev/null
             # First line: whether a generation pass currently holds the
             # cache lock (the flock taken in the generation script below).
             # The retry loop keys off this to keep polling while work is
@@ -165,8 +189,8 @@ Singleton {
                 keys "$PWD/$f" "$3" "$4"
                 # the wide still is a jpeg for an image and a png for a video -
                 # see the two calls in the generation pass
-                wide="$cachedir/thumbnails/wide/$pkey.jpg"
-                [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
+                wide="$cachedir/wallpapers/stills/$pkey.jpg"
+                [ "$isvid" = "1" ] && wide="$cachedir/wallpapers/stills/$pkey.png"
                 thumb="" blur="" pan="" pxy=""
                 # only trust caches newer than the source image
                 [ "$wide" -nt "$f" ] && pan="$wide"
@@ -177,16 +201,16 @@ Singleton {
                     # from it (see the generation pass for why one exists)
                     # takes over once it lands
                     thumb="$pan"
-                    [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/crops/$key.$oext"
-                    [ "$cachedir/proxies/$vkey.mp4" -nt "$f" ] && pxy="$cachedir/proxies/$vkey.mp4"
+                    [ "$cachedir/wallpapers/tiles/$key.$oext" -nt "$f" ] && thumb="$cachedir/wallpapers/tiles/$key.$oext"
+                    [ "$cachedir/wallpapers/video-previews/$vkey.mp4" -nt "$f" ] && pxy="$cachedir/wallpapers/video-previews/$vkey.mp4"
                 else
                     # a fresh image/gif stands in as its own tile (the Image
                     # element decodes it directly, just slowly) until the crop
                     # lands
                     thumb="$PWD/$f"
-                    [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] && thumb="$cachedir/thumbnails/crops/$key.$oext"
+                    [ "$cachedir/wallpapers/tiles/$key.$oext" -nt "$f" ] && thumb="$cachedir/wallpapers/tiles/$key.$oext"
                 fi
-                [ "$cachedir/blurred/$bkey.png" -nt "$f" ] && blur="$cachedir/blurred/$bkey.png"
+                [ "$cachedir/wallpapers/backdrops/$bkey.png" -nt "$f" ] && blur="$cachedir/wallpapers/backdrops/$bkey.png"
                 [ -e "\${stem}blurred.$ext" ] && blur="$PWD/\${stem}blurred.$ext"
                 printf '%s|%s|%s|%s|%s\\n' "$PWD/$f" "$thumb" "$blur" "$pan" "$pxy"
             done | sort`, "_", root.dir, SystemInfo.cacheRoot,
@@ -300,18 +324,19 @@ Singleton {
                     # whole pass inherits it; renice rather than nice so the
                     # argv the pass is spawned with stays as it is.
                     renice -n 10 -p $$ >/dev/null 2>&1
-                    mkdir -p "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"
-                    # Layouts this cache has had before: wallpapers/ + xray/
-                    # (from when the backdrop had a cache of its own, before
-                    # thumbnails/ and blurred/ moved up next to the
-                    # clipboard's), then a flat thumbnails/ beside a pan/ -
-                    # both since split by shape into the two directories
-                    # above. Regenerating an entry is a second or so, so the
-                    # old trees just go rather than being migrated. The find
-                    # is what clears the flat layout without touching the
-                    # subdirectories that replaced it.
-                    rm -rf "$cachedir/wallpapers" "$cachedir/xray" "$cachedir/pan"
-                    find "$cachedir/thumbnails" -maxdepth 1 -type f -delete 2>/dev/null
+                    mkdir -p "$cachedir/wallpapers/tiles" "$cachedir/wallpapers/stills" "$cachedir/wallpapers/backdrops" "$cachedir/wallpapers/video-previews"
+                    # Layouts this cache had long before the one the scan
+                    # carries over: an earlier wallpapers/ beside an xray/
+                    # (from when the backdrop had a cache of its own), then
+                    # a flat thumbnails/ beside a pan/. Regenerating an
+                    # entry is a second or so, so those just go rather than
+                    # being migrated. wallpapers/ is a name in use again, so
+                    # that one is cleared around the four folders above
+                    # instead of removed.
+                    rm -rf "$cachedir/xray" "$cachedir/pan"
+                    for c in "$cachedir/wallpapers"/*; do
+                        case "\${c##*/}" in tiles|stills|backdrops|video-previews) ;; *) rm -rf "$c" ;; esac
+                    done
                     # one generation pass at a time: scans are cheap and fire
                     # on every open, and two passes racing on the same cache
                     # entry is duplicated ffmpeg work at best
@@ -346,17 +371,17 @@ Singleton {
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
                         keys "$f" "$xgeom" "$xsigma"
-                        wide="$cachedir/thumbnails/wide/$pkey.jpg"
-                        [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
+                        wide="$cachedir/wallpapers/stills/$pkey.jpg"
+                        [ "$isvid" = "1" ] && wide="$cachedir/wallpapers/stills/$pkey.png"
                         live="$live $key $bkey $pkey $vkey"
                         needcrop=0 needblur=0 needwide=0 needproxy=0
-                        [ "$cachedir/thumbnails/crops/$key.$oext" -nt "$f" ] || needcrop=1
+                        [ "$cachedir/wallpapers/tiles/$key.$oext" -nt "$f" ] || needcrop=1
                         [ "$wide" -nt "$f" ] || needwide=1
                         if [ "$gb" = "1" ]; then
-                            [ "$cachedir/blurred/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
+                            [ "$cachedir/wallpapers/backdrops/$bkey.png" -nt "$f" ] || [ -e "$walldir/\${stem}blurred.$ext" ] || needblur=1
                         fi
                         if [ "$gp" = "1" ] && [ "$isvid" = "1" ]; then
-                            [ "$cachedir/proxies/$vkey.mp4" -nt "$f" ] || needproxy=1
+                            [ "$cachedir/wallpapers/video-previews/$vkey.mp4" -nt "$f" ] || needproxy=1
                         fi
                         if [ "$needcrop" = "1" ] || [ "$needblur" = "1" ] || [ "$needwide" = "1" ] || [ "$needproxy" = "1" ]; then
                             if ! command -v ffmpeg >/dev/null 2>&1; then
@@ -432,7 +457,7 @@ Singleton {
                                     # next sweep.
                                     if [ "$needproxy" = "1" ]; then
                                         vw=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$f" 2>/dev/null | head -1)
-                                        vtmp="$cachedir/proxies/$vkey.tmp.mp4"
+                                        vtmp="$cachedir/wallpapers/video-previews/$vkey.tmp.mp4"
                                         if [ -n "$vw" ] && [ "$vw" -le 1920 ] 2>/dev/null; then
                                             ffmpeg -y -v error -i "$f" -an -c:v copy -movflags +faststart "$vtmp"
                                         elif [ -n "$venc" ]; then
@@ -448,7 +473,7 @@ Singleton {
                                             warnedEncoder=1
                                             notify-send -a pibble -i system-software-install "$encsum" "$encbody"
                                         fi
-                                        if [ -s "$vtmp" ]; then mv "$vtmp" "$cachedir/proxies/$vkey.mp4"; else rm -f "$vtmp"; fi
+                                        if [ -s "$vtmp" ]; then mv "$vtmp" "$cachedir/wallpapers/video-previews/$vkey.mp4"; else rm -f "$vtmp"; fi
                                     fi
                                     # The tile crop, cut from the wide still just
                                     # written rather than from the video, with the
@@ -470,7 +495,7 @@ Singleton {
                                     # -gravity center -extent": scale to cover the
                                     # box, then cut the centre out of it.
                                     if [ "$needcrop" = "1" ] && [ -e "$wide" ]; then
-                                        ffmpeg -y -v error -i "$wide" -frames:v 1 -vf "scale=480:270:force_original_aspect_ratio=increase,crop=480:270" "$cachedir/thumbnails/crops/$key.$oext"
+                                        ffmpeg -y -v error -i "$wide" -frames:v 1 -vf "scale=480:270:force_original_aspect_ratio=increase,crop=480:270" "$cachedir/wallpapers/tiles/$key.$oext"
                                     fi
                                 else
                                     # -frames:v 1: first frame only, so an
@@ -504,7 +529,7 @@ Singleton {
                                     # source); the trailing format=rgb24 flattens
                                     # the alpha gbrp lets through, which the
                                     # yuv420p path used to drop on its own.
-                                    [ "$needcrop" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale=480:270:force_original_aspect_ratio=increase,crop=480:270[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/thumbnails/crops/$key.$oext"
+                                    [ "$needcrop" = "1" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$f" -filter_complex "[1:v]scale=480:270:force_original_aspect_ratio=increase,crop=480:270[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/wallpapers/tiles/$key.$oext"
                                     # The wide still: the same frame
                                     # uncropped, bounded to the box a video's
                                     # already gets (see the ffmpeg call above), so
@@ -569,24 +594,21 @@ Singleton {
                             bsrc="$f"
                             [ "$isvid" = "1" ] && bsrc="$wide"
                             xw="\${xgeom%x*}" xh="\${xgeom#*x}"
-                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,format=gbrap16le,$xblur,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/blurred/$bkey.png"
+                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,format=gbrap16le,$xblur,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/wallpapers/backdrops/$bkey.png"
                         fi
                     done
-                    # clips/ is not swept here: the clipboard owns it, keys it
-                    # by entry id rather than source path, and prunes it
-                    # against clipsMax on its own scan
-                    # proxies join the sweep unguarded: their keys are
-                    # source-only (unlike blurred's geometry-keyed ones), so
-                    # this pass always knows the live set even when it isn't
-                    # generating any
-                    for d in "$cachedir/thumbnails/crops" "$cachedir/thumbnails/wide" "$cachedir/blurred" "$cachedir/proxies"; do
-                        # with nothing asking for blurred variants the keys
+                    # the previews join the sweep unguarded: their keys are
+                    # source-only (unlike the backdrops' geometry-keyed
+                    # ones), so this pass always knows the live set even
+                    # when it isn't generating any
+                    for d in "$cachedir/wallpapers/tiles" "$cachedir/wallpapers/stills" "$cachedir/wallpapers/backdrops" "$cachedir/wallpapers/video-previews"; do
+                        # with nothing asking for backdrops the keys
                         # this pass knows are not the ones those files were
                         # baked under, so leave them alone rather than
                         # sweeping the lot: asking again picks them straight
                         # back up, and any entry that really is dead by then
                         # goes with the first sweep that can tell.
-                        [ "$d" = "$cachedir/blurred" ] && [ "$gb" != "1" ] && continue
+                        [ "$d" = "$cachedir/wallpapers/backdrops" ] && [ "$gb" != "1" ] && continue
                         for c in "$d"/*; do
                             [ -e "$c" ] || continue
                             k="\${c##*/}"; k="\${k%.*}"

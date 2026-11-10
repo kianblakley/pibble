@@ -17,13 +17,11 @@ Singleton {
     // cliphist installed but nothing is feeding it (no `wl-paste --watch`
     // running to pipe clipboard changes into `cliphist store`)
     property bool watcherRunning: true
-    // Under thumbnails/ with the wallpaper variants, since that is what these
-    // are - but keyed by cliphist entry id, not by a hash of a source path,
-    // and pruned by this service alone (see prune below). Nothing sweeps the
-    // whole tree.
-    readonly property string thumbDir: SystemInfo.cacheRoot + "/thumbnails/clips"
-    // layout from before that move; migrated in the scan below
-    readonly property string legacyThumbDir: SystemInfo.cacheRoot + "/clips"
+    // Thumbnails of the image entries, keyed by cliphist entry id and pruned
+    // by this service alone (see prune below). Nothing else sweeps it.
+    readonly property string thumbDir: SystemInfo.cacheRoot + "/clipboard"
+    // the two places this has lived before; migrated in the scan below
+    readonly property var legacyThumbDirs: [SystemInfo.cacheRoot + "/clips", SystemInfo.cacheRoot + "/thumbnails/clips"]
     // Re-runs on every launcher open, since the clipboard changes between
     // them. Restarting rather than starting: a scan still in flight from a
     // previous open would otherwise land after this one and show stale entries.
@@ -54,15 +52,20 @@ Singleton {
         id: scan
         command: ["bash", "-c", `
             export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-            # Carry the old flat cache over rather than dropping it: these are
-            # id-keyed either way, so the files are still valid under the new
-            # path, and regenerating one means decoding a screenshot back out
-            # of cliphist. Runs before the scan below reports what is cached.
-            if [ -d "$3" ]; then
+            # Carry the cache over from where it used to live rather than
+            # dropping it: these are id-keyed wherever they sit, so the files
+            # are still valid under the new path, and regenerating one means
+            # decoding a screenshot back out of cliphist. Runs before the scan
+            # below reports what is cached. The rmdir is for thumbnails/, which
+            # the newer of the two sat in beside folders of Wallpapers' and
+            # Notifier's - it goes with whichever of the three moves out last.
+            for old in "$3" "$4"; do
+                [ -d "$old" ] || continue
                 mkdir -p "$2"
-                mv "$3"/*.png "$2"/ 2>/dev/null
-                rmdir "$3" 2>/dev/null
-            fi
+                mv "$old"/*.png "$2"/ 2>/dev/null
+                rmdir "$old" 2>/dev/null
+            done
+            [ -d "\${4%/*}" ] && rmdir "\${4%/*}" 2>/dev/null
             command -v cliphist >/dev/null || { echo NOCLIPHIST; exit 0; }
             pgrep -x wl-paste >/dev/null 2>&1 && echo WATCH:1 || echo WATCH:0
             cliphist list | head -n "$1" | while IFS=$'\t' read -r id preview; do
@@ -112,7 +115,7 @@ Singleton {
                         ;;
                 esac
                 printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$n" "$cached" "$full" "$preview"
-            done`, "_", String(Settings.clipsMax), root.thumbDir, root.legacyThumbDir]
+            done`, "_", String(Settings.clipsMax), root.thumbDir].concat(root.legacyThumbDirs)
         stdout: StdioCollector {
             onStreamFinished: {
                 if (text.trim() === "NOCLIPHIST") {
