@@ -120,6 +120,15 @@ Singleton {
             gen=0
             [ -e "$cachedir/.generating" ] && ! flock -n "$cachedir/.generating" true && gen=1
             echo "GEN:$gen"
+            # The four cache keys of one wallpaper, out of a single md5sum:
+            # each string goes in as its own input, and the sums come back
+            # in the same order. Written as four pipelines this was twelve
+            # processes per wallpaper, run on every launcher open; the
+            # generation pass has the same function, and the keys the two
+            # compute have to agree.
+            keys() {
+                { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r9") <(printf '%s' "$1|x1"))
+            }
             shopt -s nullglob nocaseglob
             for f in *.png *.jpg *.jpeg *.webp *.gif *.mp4; do
                 case "$f" in *blurred.*) continue ;; esac
@@ -138,27 +147,22 @@ Singleton {
                 # blank (and the notification, whose card shape is chosen from
                 # the image's aspect, demoted to a plain one).
                 oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
-                # versioned like bkey below (r<n>): bump t<n> (here and in
-                # the generation pass) whenever the crop recipe changes, so
-                # stale entries fall out of the sweep instead of sticking
-                # around under the old recipe until their source file happens
-                # to change.
-                key=$(printf '%s' "$PWD/$f|t7" | md5sum | cut -d' ' -f1)
-                # the wide still, versioned the same way (p<n>) and for the
-                # same reason as the two keys around it
-                pkey=$(printf '%s' "$PWD/$f|p3" | md5sum | cut -d' ' -f1)
-                # the blurred variant is the one cache entry that depends on
-                # more than the source file, so the output geometry, the blur
-                # and the recipe version go in its key too: a resized output,
-                # a retuned kernel or a changed recipe then lands on a
-                # different name, and the old one falls out of the sweep
-                # below like any other dead entry. Bump r<n> (here and in the
-                # generation pass) whenever the ffmpeg command changes.
-                bkey=$(printf '%s' "$PWD/$f|$3|$4|r9" | md5sum | cut -d' ' -f1)
-                # the preview proxy, versioned the same way (x<n>): bump it
-                # (here and in the generation pass) when the ffmpeg recipe
-                # changes
-                vkey=$(printf '%s' "$PWD/$f|x1" | md5sum | cut -d' ' -f1)
+                # key: the crop, versioned (t<n>): bump it in keys() (both
+                # copies) whenever the crop recipe changes, so stale entries
+                # fall out of the sweep instead of sticking around under the
+                # old recipe until their source file happens to change.
+                # pkey: the wide still, versioned the same way (p<n>) and for
+                # the same reason.
+                # bkey: the blurred variant is the one cache entry that
+                # depends on more than the source file, so the output
+                # geometry, the blur and the recipe version go in its key too:
+                # a resized output, a retuned kernel or a changed recipe then
+                # lands on a different name, and the old one falls out of the
+                # sweep below like any other dead entry. Bump r<n> whenever
+                # the ffmpeg command changes.
+                # vkey: the preview proxy, versioned the same way (x<n>): bump
+                # it when the ffmpeg recipe changes.
+                keys "$PWD/$f" "$3" "$4"
                 # the wide still is a jpeg for an image and a png for a video -
                 # see the two calls in the generation pass
                 wide="$cachedir/thumbnails/wide/$pkey.jpg"
@@ -218,7 +222,8 @@ Singleton {
                 // The scan's raw output is the canonical form of everything
                 // `walls` is derived from, so an unchanged one means an
                 // unchanged model: keep the existing array and its delegates.
-                if (body !== root.lastScanText) {
+                const changed = body !== root.lastScanText;
+                if (changed) {
                     root.lastScanText = body;
                     root.list = walls;
                 }
@@ -227,9 +232,16 @@ Singleton {
                 // sources and blurred
                 // variants in the background; the next scan picks them up and
                 // applying never has to blur synchronously. Also sweeps cache
-                // entries whose source wallpaper is gone - runs every scan
-                // (not just when something's missing) so deletions get cleaned
-                // up promptly.
+                // entries whose source wallpaper is gone.
+                //
+                // Spawned when there is something to make, or when the scan's
+                // output moved - a wallpaper gone is a line gone, which is
+                // what the sweep is for - and not otherwise: it used to run on
+                // every scan, i.e. every launcher open, and with nothing to do
+                // it still rekeyed every wallpaper (~20 processes each, 7s of
+                // forking at 500 of them) before finding that out. The first
+                // scan of a daemon always reads as a change, so the legacy
+                // layout cleanup at its top still runs once per start.
                 //
                 // Both consumers of the blurred variant gate it the same way:
                 // it's wanted if the launcher draws it (xray mode) or the
@@ -269,6 +281,8 @@ Singleton {
                 if (missing !== "" && (generating || missing !== root.generationMissing))
                     generationRetry.restart();
                 root.generationMissing = missing;
+                if (missing === "" && !changed)
+                    return;
                 Quickshell.execDetached(["bash", "-c", `
                     # The last four arguments carry the two alerts already
                     # translated: the shell's language is a QML question, and
@@ -320,21 +334,18 @@ Singleton {
                     *" libx264 "*) venc="-c:v libx264 -preset veryfast -crf 18" ;;
                     *" libopenh264 "*) venc="-c:v libopenh264 -b:v 8M" ;;
                     esac
+                    # the scan's keys(), to the letter - see the notes there
+                    keys() {
+                        { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r9") <(printf '%s' "$1|x1"))
+                    }
                     live=""
                     for f in "$@"; do
-                        b=$(basename "$f")
+                        b="\${f##*/}"
                         stem="\${b%.*}" ext="\${b##*.}"
                         isvid=0; case "\${ext,,}" in mp4) isvid=1 ;; esac
                         # see the matching oext note in the scan pass above
                         oext="$ext"; case "\${ext,,}" in gif|mp4|webp) oext="png" ;; esac
-                        # see the matching key note in the scan pass above
-                        key=$(printf '%s' "$f|t7" | md5sum | cut -d' ' -f1)
-                        # see the matching pkey note in the scan pass above
-                        pkey=$(printf '%s' "$f|p3" | md5sum | cut -d' ' -f1)
-                        # see the matching bkey note in the scan pass above
-                        bkey=$(printf '%s' "$f|$xgeom|$xsigma|r9" | md5sum | cut -d' ' -f1)
-                        # see the matching vkey note in the scan pass above
-                        vkey=$(printf '%s' "$f|x1" | md5sum | cut -d' ' -f1)
+                        keys "$f" "$xgeom" "$xsigma"
                         wide="$cachedir/thumbnails/wide/$pkey.jpg"
                         [ "$isvid" = "1" ] && wide="$cachedir/thumbnails/wide/$pkey.png"
                         live="$live $key $bkey $pkey $vkey"
@@ -580,7 +591,7 @@ Singleton {
                         [ "$d" = "$cachedir/blurred" ] && [ "$gb" != "1" ] && continue
                         for c in "$d"/*; do
                             [ -e "$c" ] || continue
-                            k=$(basename "$c"); k="\${k%.*}"
+                            k="\${c##*/}"; k="\${k%.*}"
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
                     done`, "_", root.dir, SystemInfo.cacheRoot, wantBlur ? "1" : "0", Settings.alertEnabled("missingDeps") ? "1" : "0",
