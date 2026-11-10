@@ -445,7 +445,24 @@ Item {
         height: Math.max(120, Math.min(tallHeight, fitHeight))
         contentWidth: width
         contentHeight: tallHeight
-        readonly property bool scrollable: contentHeight > height + 0.5
+        // How far the tab that is showing can scroll, which is not how far
+        // the filmstrip can: contentHeight is the tallest tab's, so measured
+        // against that every shorter tab scrolled too, off into the empty
+        // space under its last row - and on the Pages tab the wheel overlay
+        // below took the wheel away from the page list for it.
+        readonly property real activeHeight: {
+            const builtIn = [generalTab, pagesTab, animationsTab, navigationTab, flyoutsTab][root.tabIndex];
+            if (builtIn)
+                return builtIn.height;
+            for (let i = 0; i < customTabs.count; i++) {
+                const c = customTabs.itemAt(i);
+                if (c && c.slideIndex === root.tabIndex)
+                    return c.height;
+            }
+            return 0;
+        }
+        readonly property real scrollRange: Math.max(0, activeHeight - height)
+        readonly property bool scrollable: scrollRange > 0.5
         // wheel-only: a drag-to-flick would fight the pane-cycle and
         // power-shade swipes, which the background catcher underneath
         // already grabs (see LauncherWindow's backdropArea)
@@ -453,13 +470,18 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         // a custom tab toggled off or a font-scale change can shrink the
         // content out from under a scrolled viewport, stranding contentY
-        // past the new end with no gesture able to bring it back
-        onHeightChanged: clampScroll()
-        onContentHeightChanged: clampScroll()
+        // past the new end with no gesture able to bring it back. Slid
+        // rather than set, and measured from wherever a scroll already in
+        // flight is headed: switching to a shorter tab lands here as well
+        // as in the back-to-the-top below, in no promised order, and
+        // setting contentY outright snapped the outgoing tab upwards.
+        onScrollRangeChanged: clampScroll()
         function clampScroll(): void {
-            const maxY = Math.max(0, contentHeight - height);
-            if (contentY > maxY)
-                contentY = maxY;
+            const heading = tabWheelScroll.running ? tabWheelScroll.to : contentY;
+            if (heading <= scrollRange)
+                return;
+            tabWheelScroll.to = scrollRange;
+            tabWheelScroll.restart();
         }
         // the filmstrip scrolls as one item, so a scrolled position on one
         // tab is meaningless on the next - back to the top on every switch
@@ -572,18 +594,17 @@ Item {
     // and a Flickable's own wheel handling relies on one (see PageList's
     // identical note) - so the wheel rides a MouseArea, with NoButton keeping
     // every press falling through to the controls and gesture catchers
-    // underneath. Disabled outright where the pane fits its output, so the
-    // wheel keeps reaching whatever it reaches today - including PageList's
-    // own wheel area, which this sits above and only takes over on displays
-    // short enough that the outer pane itself has to move.
+    // underneath. Disabled outright where the showing tab fits, so the wheel
+    // keeps reaching whatever it reaches today - including PageList's own
+    // wheel area, which this sits above and only takes over on displays
+    // short enough that the Pages tab itself has to move.
     MouseArea {
         anchors.fill: tabViewport
         acceptedButtons: Qt.NoButton
         enabled: tabViewport.scrollable
         onWheel: wheel => {
-            const maxY = Math.max(0, tabViewport.contentHeight - tabViewport.height);
             // ~three settings rows per notch, same clip as PageList's wheel
-            tabWheelScroll.to = Math.max(0, Math.min(maxY, tabViewport.contentY - (wheel.angleDelta.y / 120) * 130));
+            tabWheelScroll.to = Math.max(0, Math.min(tabViewport.scrollRange, tabViewport.contentY - (wheel.angleDelta.y / 120) * 130));
             tabWheelScroll.restart();
         }
     }
