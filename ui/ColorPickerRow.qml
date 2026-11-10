@@ -105,7 +105,7 @@ Item {
     Row {
         id: pickerRow
         // right-anchored with the same margin as the theme swatches
-        // above, so the SV square's left edge lines up with theirs;
+        // above, so the picker's left edge lines up with theirs;
         // top-anchored to the reset button's vertical center (not its
         // top), per request
         anchors.right: parent.right
@@ -113,125 +113,136 @@ Item {
         anchors.top: resetRow.verticalCenter
         spacing: 20
 
-        // SV square + hue slider + hex entry, editing whichever swatch
-        // is selected on the right
+        // hue slider + SV square over the hex entry, editing whichever
+        // swatch is selected on the right
         Column {
             spacing: 16
 
-            Item {
-                id: shadeSquare
-                width: 330
-                height: 330
+            Row {
+                id: shadeRow
+                spacing: 16
 
-                Canvas {
-                    id: shadeCanvas
-                    anchors.fill: parent
-                    property real paintHue: root.hue
-                    onPaintHueChanged: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        const g1 = ctx.createLinearGradient(0, 0, width, 0);
-                        g1.addColorStop(0, "#ffffff");
-                        g1.addColorStop(1, Qt.hsva(paintHue, 1, 1, 1).toString());
-                        ctx.fillStyle = g1;
-                        ctx.fillRect(0, 0, width, height);
-                        const g2 = ctx.createLinearGradient(0, 0, 0, height);
-                        g2.addColorStop(0, "rgba(0,0,0,0)");
-                        g2.addColorStop(1, "#000000");
-                        ctx.fillStyle = g2;
-                        ctx.fillRect(0, 0, width, height);
-                    }
-                }
-                MouseArea {
-                    id: shadeArea
-                    anchors.fill: parent
-                    preventStealing: true
-                    function apply(mx: real, my: real) {
-                        const s = Math.max(0, Math.min(1, mx / width));
-                        const v = Math.max(0, Math.min(1, 1 - my / height));
-                        root.setSlotHsv(root.hue, s, v);
-                    }
-                    onPressed: mouse => shadeArea.apply(mouse.x, mouse.y)
-                    onPositionChanged: mouse => { if (pressed) shadeArea.apply(mouse.x, mouse.y); }
-                    onReleased: Settings.save()
-                }
-                // "circle" crosshair: a white ring with a thin dark
-                // outer ring for contrast against light colors
-                Rectangle {
-                    width: 16
-                    height: 16
-                    radius: Theme.radius(8)
-                    color: "transparent"
-                    border.width: 1
-                    border.color: Qt.rgba(0, 0, 0, 0.45)
-                    x: root.sat * shadeSquare.width - width / 2
-                    y: (1 - root.val) * shadeSquare.height - height / 2
+                // Stands beside the square rather than lying under it. Under
+                // it the bar was a third row in what is already the tallest
+                // thing on the General tab, which ran 58px past a 1080p
+                // output; beside it the picker is 76px shorter and the tab
+                // fits.
+                Item {
+                    id: hueSlider
+                    width: 22
+                    height: shadeSquare.height
+
                     Rectangle {
                         anchors.fill: parent
-                        anchors.margins: 1
-                        radius: Theme.radius(width / 2)
-                        color: "transparent"
+                        radius: Theme.radius(4)
+                        gradient: Gradient {
+                            // deliberately desaturated so the bar reads
+                            // softer than the primaries it actually picks -
+                            // the hue it selects is unaffected, since that
+                            // comes from the y position, not this fill
+                            GradientStop { position: 0.0; color: Qt.hsva(0 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.17; color: Qt.hsva(1 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.33; color: Qt.hsva(2 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.5; color: Qt.hsva(3 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.67; color: Qt.hsva(4 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 0.83; color: Qt.hsva(5 / 6, 0.5, 0.85, 1) }
+                            GradientStop { position: 1.0; color: Qt.hsva(6 / 6, 0.5, 0.85, 1) }
+                        }
+                    }
+                    MouseArea {
+                        id: hueArea
+                        anchors.fill: parent
+                        preventStealing: true
+                        function apply(my: real) {
+                            const h = Math.max(0, Math.min(1, my / height));
+                            // set directly rather than waiting for the
+                            // round-tripped color to report it back: at
+                            // zero saturation (e.g. the Mono defaults) hue
+                            // has no effect on the resulting color at all,
+                            // so the handle would otherwise never move
+                            root.hue = h;
+                            root.setSlotHsv(h, root.sat, root.val);
+                        }
+                        onPressed: mouse => hueArea.apply(mouse.y)
+                        onPositionChanged: mouse => { if (pressed) hueArea.apply(mouse.y); }
+                        onReleased: Settings.save()
+                    }
+                    Rectangle {
+                        width: 16
+                        height: 16
+                        radius: Theme.radius(8)
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: root.hue * hueSlider.height - height / 2
+                        color: Qt.hsva(root.hue, 0.5, 0.85, 1)
                         border.width: 2
                         border.color: "#ffffff"
                     }
                 }
-            }
 
-            Item {
-                id: hueSlider
-                width: shadeSquare.width
-                height: 22
+                Item {
+                    id: shadeSquare
+                    // with the slider and its gap, the 330 the hex readout
+                    // below and the theme swatches above are laid out to
+                    width: 330 - hueSlider.width - shadeRow.spacing
+                    height: width
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.radius(4)
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        // deliberately desaturated so the bar reads
-                        // softer than the primaries it actually picks -
-                        // the hue it selects is unaffected, since that
-                        // comes from the x position, not this fill
-                        GradientStop { position: 0.0; color: Qt.hsva(0 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 0.17; color: Qt.hsva(1 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 0.33; color: Qt.hsva(2 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 0.5; color: Qt.hsva(3 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 0.67; color: Qt.hsva(4 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 0.83; color: Qt.hsva(5 / 6, 0.5, 0.85, 1) }
-                        GradientStop { position: 1.0; color: Qt.hsva(6 / 6, 0.5, 0.85, 1) }
+                    Canvas {
+                        id: shadeCanvas
+                        anchors.fill: parent
+                        property real paintHue: root.hue
+                        onPaintHueChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            const g1 = ctx.createLinearGradient(0, 0, width, 0);
+                            g1.addColorStop(0, "#ffffff");
+                            g1.addColorStop(1, Qt.hsva(paintHue, 1, 1, 1).toString());
+                            ctx.fillStyle = g1;
+                            ctx.fillRect(0, 0, width, height);
+                            const g2 = ctx.createLinearGradient(0, 0, 0, height);
+                            g2.addColorStop(0, "rgba(0,0,0,0)");
+                            g2.addColorStop(1, "#000000");
+                            ctx.fillStyle = g2;
+                            ctx.fillRect(0, 0, width, height);
+                        }
                     }
-                }
-                MouseArea {
-                    id: hueArea
-                    anchors.fill: parent
-                    preventStealing: true
-                    function apply(mx: real) {
-                        const h = Math.max(0, Math.min(1, mx / width));
-                        // set directly rather than waiting for the
-                        // round-tripped color to report it back: at
-                        // zero saturation (e.g. the Mono defaults) hue
-                        // has no effect on the resulting color at all,
-                        // so the handle would otherwise never move
-                        root.hue = h;
-                        root.setSlotHsv(h, root.sat, root.val);
+                    MouseArea {
+                        id: shadeArea
+                        anchors.fill: parent
+                        preventStealing: true
+                        function apply(mx: real, my: real) {
+                            const s = Math.max(0, Math.min(1, mx / width));
+                            const v = Math.max(0, Math.min(1, 1 - my / height));
+                            root.setSlotHsv(root.hue, s, v);
+                        }
+                        onPressed: mouse => shadeArea.apply(mouse.x, mouse.y)
+                        onPositionChanged: mouse => { if (pressed) shadeArea.apply(mouse.x, mouse.y); }
+                        onReleased: Settings.save()
                     }
-                    onPressed: mouse => hueArea.apply(mouse.x)
-                    onPositionChanged: mouse => { if (pressed) hueArea.apply(mouse.x); }
-                    onReleased: Settings.save()
-                }
-                Rectangle {
-                    width: 16
-                    height: 16
-                    radius: Theme.radius(8)
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: root.hue * hueSlider.width - width / 2
-                    color: Qt.hsva(root.hue, 0.5, 0.85, 1)
-                    border.width: 2
-                    border.color: "#ffffff"
+                    // "circle" crosshair: a white ring with a thin dark
+                    // outer ring for contrast against light colors
+                    Rectangle {
+                        width: 16
+                        height: 16
+                        radius: Theme.radius(8)
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Qt.rgba(0, 0, 0, 0.45)
+                        x: root.sat * shadeSquare.width - width / 2
+                        y: (1 - root.val) * shadeSquare.height - height / 2
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: Theme.radius(width / 2)
+                            color: "transparent"
+                            border.width: 2
+                            border.color: "#ffffff"
+                        }
+                    }
                 }
             }
 
             Rectangle {
-                width: shadeSquare.width
+                width: shadeRow.width
                 height: 42
                 radius: Theme.radius(8)
                 color: Qt.alpha(Theme.accent, 0.06)
