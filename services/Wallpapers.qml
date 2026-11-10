@@ -127,7 +127,7 @@ Singleton {
             # generation pass has the same function, and the keys the two
             # compute have to agree.
             keys() {
-                { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r9") <(printf '%s' "$1|x1"))
+                { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r10") <(printf '%s' "$1|x1"))
             }
             shopt -s nullglob nocaseglob
             for f in *.png *.jpg *.jpeg *.webp *.gif *.mp4; do
@@ -288,8 +288,8 @@ Singleton {
                     # translated: the shell's language is a QML question, and
                     # passing the finished strings in as argv beats trying to
                     # interpolate them into a script body
-                    walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6" gp="$7"; shift 7
-                    # shifted first rather than read as the 7th-10th
+                    walldir="$1" cachedir="$2" gb="$3" alerts="$4" xgeom="$5" xsigma="$6" gp="$7" xblur="$8"; shift 8
+                    # shifted first rather than read as the 9th-12th
                     # positionals directly: this script is a QML template
                     # literal, where a braced positional past $9 would be read
                     # as a JS substitution rather than a shell one
@@ -336,7 +336,7 @@ Singleton {
                     esac
                     # the scan's keys(), to the letter - see the notes there
                     keys() {
-                        { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r9") <(printf '%s' "$1|x1"))
+                        { read -r key _; read -r pkey _; read -r bkey _; read -r vkey _; } < <(md5sum <(printf '%s' "$1|t7") <(printf '%s' "$1|p3") <(printf '%s' "$1|$2|$3|r10") <(printf '%s' "$1|x1"))
                     }
                     live=""
                     for f in "$@"; do
@@ -541,18 +541,16 @@ Singleton {
                         # PreserveAspectCrop has nothing left to crop and the
                         # blur lands at the sigma it was baked for.
                         #
-                        # gblur's sigma is ImageMagick's "-blur 0xsigma" (a 0
-                        # radius there means "derive it from sigma", which is
-                        # what gblur does anyway), and colorchannelmixer takes
-                        # the same 3x3 the -color-matrix did, row per output
-                        # channel. Measured against the ImageMagick recipe this
-                        # replaced, the two land within 0.07% RMSE.
+                        # The blur itself arrives as $xblur: three box blurs
+                        # rather than a gblur, see xrayBoxFilter for why.
+                        # colorchannelmixer is niri's saturation step, a 3x3
+                        # with one row per output channel.
                         #
                         # format=gbrap16le pins the chain to full-res planar
                         # RGB (alpha kept for the flatten onto black), at 16
                         # bits so the blur and the saturation matrix round
                         # once, at the end, rather than once each - the matrix
-                        # multiplies gblur's rounding error by up to 1.46, which
+                        # multiplies the blur's rounding error by up to 1.46, which
                         # measured as errors of 3 levels where one rounding
                         # leaves 1.5. Left to
                         # negotiate it ran in yuva420p - and worse than the
@@ -564,14 +562,14 @@ Singleton {
                         # is a 2px staircase - faint horizontal scan lines
                         # across the whole backdrop, measured at 3.2x the
                         # row-to-row noise floor in R and exactly 1.0x with
-                        # this chain. gblur also blurs at niri's real fidelity
+                        # this chain. The blur also runs at niri's real fidelity
                         # this way: the compositor blurs RGB framebuffer
                         # pixels, not subsampled chroma.
                         if [ "$needblur" = "1" ] && command -v ffmpeg >/dev/null 2>&1; then
                             bsrc="$f"
                             [ "$isvid" = "1" ] && bsrc="$wide"
                             xw="\${xgeom%x*}" xh="\${xgeom#*x}"
-                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,format=gbrap16le,gblur=sigma=$xsigma,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/blurred/$bkey.png"
+                            [ -e "$bsrc" ] && ffmpeg -y -v error -f lavfi -i color=black -i "$bsrc" -filter_complex "[1:v]scale=$xw:$xh:force_original_aspect_ratio=increase,crop=$xw:$xh,format=gbrap16le,$xblur,colorchannelmixer=rr=1.3937:rg=-0.3576:rb=-0.0361:gr=-0.1063:gg=1.1424:gb=-0.0361:br=-0.1063:bg=-0.3576:bb=1.4639[fg];[0:v][fg]scale2ref[bg][fg2];[bg][fg2]overlay=shortest=1:format=gbrp,format=rgb24" -frames:v 1 "$cachedir/blurred/$bkey.png"
                         fi
                     done
                     # clips/ is not swept here: the clipboard owns it, keys it
@@ -595,7 +593,7 @@ Singleton {
                             case " $live " in *" $k "*) ;; *) rm -f "$c" ;; esac
                         done
                     done`, "_", root.dir, SystemInfo.cacheRoot, wantBlur ? "1" : "0", Settings.alertEnabled("missingDeps") ? "1" : "0",
-                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma), wantProxy ? "1" : "0",
+                    root.xraySize.width + "x" + root.xraySize.height, String(root.xrayCacheSigma), wantProxy ? "1" : "0", root.xrayBoxFilter,
                     Strings.tr("ffmpeg not found"),
                     Strings.tr("ffmpeg is used to generate video wallpaper thumbnails and blurred previews - install it for sharper, faster previews."),
                     Strings.tr("No H.264 encoder found"),
@@ -620,10 +618,9 @@ Singleton {
     // noise 0.02; saturation 1.5 }`). Its dual kawase chain - 3 downsample
     // then 3 upsample passes, each tapping at `offset` halves of a
     // destination pixel with the 5/8-tap kernels in
-    // src/render_helpers/shaders/blur_{down,up}.frag - has an impulse
-    // response indistinguishable from a gaussian of sigma 19.17: simulating
-    // the chain and blurring a hard edge with `-blur 0x19.17` both spread it
-    // over exactly 50px, 10% to 90%. So one gaussian is the whole chain.
+    // src/render_helpers/shaders/blur_{down,up}.frag - spreads a single
+    // pixel as widely as a gaussian of sigma 19.17 would. See xrayBoxFilter
+    // for what stands in for it.
     //
     // Saturation is niri's postprocess step: a mix toward Rec.709 luma,
     // applied to the blurred result in the same non-linear sRGB the blur
@@ -691,6 +688,33 @@ Singleton {
     // and so is xraySigma itself. 0 while the scale is unknown, which is what
     // holds the bake back.
     readonly property real xrayCacheSigma: root.xrayOutputScale > 0 ? root.xraySigma : 0
+    // The ffmpeg filter that does the blurring: three box blurs one after
+    // another, sized so their variances add up to the sigma's.
+    //
+    // Width alone does not make two blurs look alike - the shape of the
+    // kernel decides how much fine detail survives. Niri's chain is flatter
+    // than a gaussian (excess kurtosis -0.37, averaged over the 8x8 positions
+    // a pixel can sit at relative to its coarsest pass); three boxes are -0.4.
+    // ffmpeg's gblur, which this used to be, is at its default one step a
+    // two-sided exponential: the sigma asked for, but all peak and tails, so
+    // edges niri smooths away came through it and the backdrop visibly
+    // sharpened on a switch from compositor blur to xray. Against a
+    // simulation of niri's chain on a 5120x2160 wallpaper (itself within 0.14
+    // levels RMS of a capture of the real thing): gblur 1.75 levels RMS and
+    // 17 at the 99.9th percentile, gblur at its 6-step best 0.80 and 6.6,
+    // this 0.52 and 3.1.
+    //
+    // A box of radius r has variance r(r+1)/3, so the three radii have to
+    // satisfy sum(r(r+1)) = 3*sigma^2. Whole radii only: start from the
+    // largest r that undershoots with all three, then widen as many of them
+    // by one as lands closest (19, 19, 18 for 19.17 - a sigma of 19.166).
+    readonly property string xrayBoxFilter: {
+        const want = 3 * root.xrayCacheSigma * root.xrayCacheSigma;
+        const low = Math.floor((Math.sqrt(1 + 4 * want / 3) - 1) / 2);
+        const wider = Math.max(0, Math.min(3, Math.round((want - 3 * low * (low + 1)) / (2 * (low + 1)))));
+        const box = (r, n) => n > 0 ? `boxblur=lr=${r}:lp=${n}` : "";
+        return [box(low + 1, wider), box(low, 3 - wider)].filter(f => f !== "").join(",");
+    }
     // The baked backdrop for the current wallpaper, or "" if there isn't one
     // yet (no ffmpeg, or a folder still being worked through), which
     // falls the launcher back to blurring live.
