@@ -1501,11 +1501,20 @@ PanelWindow {
     // 180ms after a flip. The thumbs are already downscaled on disk (see
     // Clipboard's thumbnail pass), so the on-demand decode the tiles do is
     // cheap enough not to need pre-warming.
+    //
+    // The wallpaper warm pass holds the grid's crops. Only the grid's: these
+    // Images keep every crop decoded for the life of the daemon (that is the
+    // point - the tiles find them in the pixmap cache on every open), and
+    // they load the moment they exist, warm tick or not. The carousel never
+    // draws a crop; it pans across the wide stills, which it decodes itself.
+    // So in a carousel style the list is empty, ~0.5MiB per wallpaper back.
+    // Switching to the grid builds it then, into a warm tick already past
+    // its end, so the crops load at once rather than one a frame.
     Item {
         visible: LauncherState.warmingWallpapers
         opacity: 0.004
         Repeater {
-            model: Wallpapers.list
+            model: Settings.wallpaperStyle === "grid" ? Wallpapers.list : []
             Image {
                 required property int index
                 required property var modelData
