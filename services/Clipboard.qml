@@ -162,76 +162,105 @@ Singleton {
                     done`, "_", root.thumbDir].concat(root.entries.map(c => c.id));
                 prune.running = true;
 
-                // only the ones the scan didn't already find a thumb for:
-                // with every image cached this skips the pass (and the
-                // entries rewrite in its onExited) entirely
-                const imgs = root.entries.filter(c => c.image && !c.thumb).map(c => c.id);
-                if (imgs.length) {
-                    thumbnails.command = ["bash", "-c", `
-                        export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
-                        # $3/$4 carry the alert's already-translated summary
-                        # and body: the shell's language is a QML question, and
-                        # passing the finished strings in as argv beats trying
-                        # to interpolate them into a script body
-                        dir="$1" alerts="$2" depsum="$3" depbody="$4"; shift 4
-                        mkdir -p "$dir"
-                        warned=0
-                        # Downscale at generation time so the on-disk thumb is
-                        # small: the QML reader thread decodes the whole PNG
-                        # before sourceSize applies, so a full-res screenshot
-                        # would starve the app-icon decodes queued behind it.
-                        #
-                        # Capped on pixel *count* (307200 = the 480x640 box this
-                        # used to fit into), not on a bounding box. A box caps
-                        # the long side, so a shape far from square spends its
-                        # whole budget there and comes back with almost nothing
-                        # on the short one: a 5120x183 strip fitted to 480x640
-                        # is 480x17, which is 8k pixels where a landscape
-                        # screenshot gets 130k, and it's what made a narrow clip
-                        # look like it hadn't loaded until the on-demand full-res
-                        # decode landed behind it. An area cap spends the same
-                        # budget on every shape (that strip becomes ~2930x105),
-                        # so the placeholder is worth showing whatever the
-                        # aspect. LauncherWindow's "is the thumb already the
-                        # original" test is the same figure - keep the two
-                        # together.
-                        for id in "$@"; do
-                            [ -s "$dir/$id.png" ] && continue
-                            tmp=$(mktemp)
-                            cliphist decode "$id" > "$tmp"
-                            # ImageMagick spelled this bound '307200@>' - fit
-                            # inside a pixel budget, shrink only. The same sum
-                            # written out: scale by the square root of the ratio
-                            # so the aspect is kept, and min(1,..) so a source
-                            # already under the budget is copied through at its
-                            # own size rather than upscaled into the cache.
-                            if command -v ffmpeg >/dev/null; then
-                                ffmpeg -y -v error -i "$tmp" -frames:v 1 -vf "scale=w='trunc(iw*min(1,sqrt(307200/(iw*ih))))':h='trunc(ih*min(1,sqrt(307200/(iw*ih))))'" "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
-                            else
-                                if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
-                                    warned=1
-                                    notify-send -a pibble -i system-software-install "$depsum" "$depbody"
-                                fi
-                                cp "$tmp" "$dir/$id.png"
-                            fi
-                            rm -f "$tmp"
-                        done`, "_", root.thumbDir, Settings.alertEnabled("missingDeps") ? "1" : "0",
-                        Strings.tr("ffmpeg not found"),
-                        Strings.tr("ffmpeg is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots.")].concat(imgs);
-                    thumbnails.running = true;
-                }
+                root.startThumbnails([]);
             }
         }
     }
     Process {
         id: prune
     }
+
+    // Thumbnails the image entries that have none yet, skipping `skip` (see
+    // the collector below). With every image cached there is nothing to run
+    // and the entries are left untouched.
+    function startThumbnails(skip: var): void {
+        const imgs = root.entries.filter(c => c.image && !c.thumb && !skip.includes(c.id)).map(c => c.id);
+        if (!imgs.length)
+            return;
+        // A scan can land while a pass is still running (one runs on every
+        // launcher open); setting `running` again then does nothing, and the
+        // new ids wait for the collector below to start them.
+        if (thumbnails.running)
+            return;
+        thumbnails.asked = imgs;
+        thumbnails.command = ["bash", "-c", `
+            export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
+            # $3/$4 carry the alert's already-translated summary
+            # and body: the shell's language is a QML question, and
+            # passing the finished strings in as argv beats trying
+            # to interpolate them into a script body
+            dir="$1" alerts="$2" depsum="$3" depbody="$4"; shift 4
+            mkdir -p "$dir"
+            warned=0
+            # Downscale at generation time so the on-disk thumb is
+            # small: the QML reader thread decodes the whole PNG
+            # before sourceSize applies, so a full-res screenshot
+            # would starve the app-icon decodes queued behind it.
+            #
+            # Capped on pixel *count* (307200 = the 480x640 box this
+            # used to fit into), not on a bounding box. A box caps
+            # the long side, so a shape far from square spends its
+            # whole budget there and comes back with almost nothing
+            # on the short one: a 5120x183 strip fitted to 480x640
+            # is 480x17, which is 8k pixels where a landscape
+            # screenshot gets 130k, and it's what made a narrow clip
+            # look like it hadn't loaded until the on-demand full-res
+            # decode landed behind it. An area cap spends the same
+            # budget on every shape (that strip becomes ~2930x105),
+            # so the placeholder is worth showing whatever the
+            # aspect. LauncherWindow's "is the thumb already the
+            # original" test is the same figure - keep the two
+            # together.
+            for id in "$@"; do
+              if [ ! -s "$dir/$id.png" ]; then
+                tmp=$(mktemp)
+                cliphist decode "$id" > "$tmp"
+                # ImageMagick spelled this bound '307200@>' - fit
+                # inside a pixel budget, shrink only. The same sum
+                # written out: scale by the square root of the ratio
+                # so the aspect is kept, and min(1,..) so a source
+                # already under the budget is copied through at its
+                # own size rather than upscaled into the cache.
+                if command -v ffmpeg >/dev/null; then
+                    ffmpeg -y -v error -i "$tmp" -frames:v 1 -vf "scale=w='trunc(iw*min(1,sqrt(307200/(iw*ih))))':h='trunc(ih*min(1,sqrt(307200/(iw*ih))))'" "$dir/$id.png" 2>/dev/null || cp "$tmp" "$dir/$id.png"
+                else
+                    if [ "$warned" = "0" ] && [ "$alerts" = "1" ]; then
+                        warned=1
+                        notify-send -a pibble -i system-software-install "$depsum" "$depbody"
+                    fi
+                    cp "$tmp" "$dir/$id.png"
+                fi
+                rm -f "$tmp"
+              fi
+              # reported only once the file is really there: the
+              # entries are marked from this list, not from what
+              # was asked for
+              [ -s "$dir/$id.png" ] && echo "$id"
+            done`, "_", root.thumbDir, Settings.alertEnabled("missingDeps") ? "1" : "0",
+            Strings.tr("ffmpeg not found"),
+            Strings.tr("ffmpeg is used to downscale clipboard image thumbnails - install it to keep memory/decode cost down for large screenshots.")].concat(imgs);
+        thumbnails.running = true;
+    }
     Process {
         id: thumbnails
-        onExited: {
-            root.entries = root.entries.map(c => c.image
-                ? Object.assign({}, c, { thumb: root.thumbDir + "/" + c.id + ".png" })
-                : c);
+        // the ids this pass was started with
+        property var asked: []
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // Only what the pass wrote. Marking every image entry here
+                // used to hand an image that arrived mid-pass a path with no
+                // file behind it - a blank tile that nothing retried, since a
+                // marked entry is never asked for again and the scan's
+                // unchanged-output guard kept the marking.
+                const made = text.split("\n").filter(l => l.trim());
+                root.entries = root.entries.map(c => c.image && made.includes(c.id)
+                    ? Object.assign({}, c, { thumb: root.thumbDir + "/" + c.id + ".png" })
+                    : c);
+                // whatever a scan brought in while this ran; not the ids this
+                // pass already tried and failed on, which the next scan may
+                // retry but a loop here must not
+                root.startThumbnails(thumbnails.asked);
+            }
         }
     }
 
