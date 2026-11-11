@@ -69,7 +69,7 @@ Item {
         tabIndex = resolvedTabIndex
     anchors.centerIn: parent
     width: 860
-    height: 26 + header.height + 18 + tabViewport.height + 26
+    height: 26 + header.height + 18 + tabViewport.viewHeight + 26
     transform: Translate {
         y: LauncherState.powerPull - LauncherState.rebootPull
     }
@@ -442,7 +442,16 @@ Item {
         // and the pane keeps its constant size exactly as before - the
         // wheel overlay below disables itself along with it.
         readonly property real fitHeight: root.parent ? root.parent.height - (26 + header.height + 18 + 26) : tallHeight
-        height: Math.max(120, Math.min(tallHeight, fitHeight))
+        // what the pane is sized from, so it stays put from tab to tab
+        readonly property real viewHeight: Math.max(120, Math.min(tallHeight, fitHeight))
+        // A tab that misses fitting by a hair hangs that far into the pane's
+        // bottom margin instead of scrolling. The Pages tab with a full page
+        // list runs a few px past what a 1080p output has room for, and that
+        // was enough to put up a scrollbar, and take the wheel off the page
+        // list, for a scroll too short to bring anything new into view.
+        readonly property real hairline: 8
+        readonly property real overshoot: Math.max(0, activeHeight - viewHeight)
+        height: viewHeight + (overshoot <= hairline ? overshoot : 0)
         contentWidth: width
         contentHeight: tallHeight
         // How far the tab that is showing can scroll, which is not how far
