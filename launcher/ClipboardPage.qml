@@ -31,6 +31,61 @@ Item {
         expandCard.scrollBy(delta);
     }
 
+    // How an image clip's thumb is requested and boxed. Out here rather than
+    // on the cell because two things have to agree on every part of it: the
+    // tile that draws the thumb and the preloader (bottom of this file) that
+    // decodes it a page ahead. Qt's pixmap cache is keyed on the url, the
+    // sourceSize *and* the fillMode, so a preload that differs in any of the
+    // three is a second decode the tile never picks up.
+    readonly property size thumbSize: Qt.size(480, 640)
+    function thumbUrl(c: var): string {
+        return c && c.image && c.thumb ? "file://" + c.thumb : "";
+    }
+    // The height this image's own aspect asks for, taken on the clipping box's
+    // width (the picture is drawn into a box inset by 4 on every side, so the
+    // aspect goes on 240-8, not on the tile's full width) and carried back out
+    // to the tile by adding that inset back on. Taken on 240 the box came out
+    // fractionally too flat for the image, and PreserveAspectFit answered by
+    // pillarboxing it: a landscape screenshot sat a few pixels short of both
+    // sides.
+    function imageNatH(c: var): int {
+        if (!c || !c.image)
+            return 0;
+        const d = (c.dims || "").split("x");
+        const iw = parseInt(d[0]) || 16;
+        const ih = parseInt(d[1]) || 9;
+        return Math.round(232 * ih / iw) + 8;
+    }
+    // The shortest tile the grid draws: a text tile with one line in it, which
+    // is the floor a wide image shares rather than one of its own. A fixed 70
+    // had every landscape shot noticeably wider than 16:9 letterboxed inside a
+    // box taller than it asked for, while the tile beside it holding one line
+    // of text was shorter still.
+    function minTileHFor(lineH: real): int {
+        return Math.max(44, Math.ceil(lineH) + 26);
+    }
+    // That floor for an image tile. A cell holding an image measures an empty
+    // string, so its line height is this probe's - one empty label in the tile
+    // font, read the way a cell reads its own measureText.
+    Text {
+        id: lineProbe
+        visible: false
+        textFormat: Text.PlainText
+        font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
+    }
+    readonly property int imageMinH: root.minTileHFor(lineProbe.lineCount > 0
+        ? lineProbe.paintedHeight / lineProbe.lineCount
+        : Theme.fontSize(16))
+    // Whether the clamps on an image tile's height had to hand this image a
+    // box of the wrong shape - a panorama wants less height than a single line
+    // of text, a phone screenshot far more than 320. That's the one case the
+    // picture can't fill its box and keep its aspect, and it's what the
+    // Image's fillMode turns on.
+    function imageClamped(c: var): bool {
+        const h = root.imageNatH(c);
+        return h > 0 && (h < root.imageMinH || h > 320);
+    }
+
     Item {
         id: drawer
         anchors.centerIn: parent
@@ -275,41 +330,12 @@ Item {
                                 text: cell.bodyText
                                 font { family: Theme.fontFamily; pixelSize: Theme.fontSize(13) }
                             }
-                            // The height this image's own aspect asks for, taken
-                            // on the clipping box's width (the picture is drawn
-                            // into a box inset by 4 on every side, so the
-                            // aspect goes on 240-8, not on the tile's full
-                            // width) and carried back out to the tile by adding
-                            // that inset back on. Taken on 240 the box came out
-                            // fractionally too flat for the image, and
-                            // PreserveAspectFit answered by pillarboxing it: a
-                            // landscape screenshot sat a few pixels short of
-                            // both sides.
-                            readonly property int imgNatH: {
-                                const c = shownClip;
-                                if (!c || !c.image)
-                                    return 0;
-                                const d = (c.dims || "").split("x");
-                                const iw = parseInt(d[0]) || 16;
-                                const ih = parseInt(d[1]) || 9;
-                                return Math.round(232 * ih / iw) + 8;
-                            }
-                            // The shortest tile the grid draws: a text tile with
-                            // one line in it, which is the floor a wide image
-                            // shares rather than one of its own. A fixed 70 had
-                            // every landscape shot noticeably wider than 16:9
-                            // letterboxed inside a box taller than it asked
-                            // for, while the tile beside it holding one line of
-                            // text was shorter still.
-                            readonly property int minTileH: Math.max(44, Math.ceil(cell.lineHpx) + 26)
-                            // Whether the clamps below had to hand this image a
-                            // box of the wrong shape - a panorama wants less
-                            // height than a single line of text, a phone
-                            // screenshot far more than 320. That's the one case
-                            // the picture can't fill its box and keep its
-                            // aspect, and it's what the Image's fillMode turns
-                            // on.
-                            readonly property bool imgClamped: imgNatH > 0 && (imgNatH < cell.minTileH || imgNatH > 320)
+                            // An image tile's box - see imageNatH, imageMinH
+                            // and imageClamped on the page, which the thumb
+                            // preloader reads as well.
+                            readonly property int imgNatH: root.imageNatH(cell.shownClip)
+                            readonly property int minTileH: root.minTileHFor(cell.lineHpx)
+                            readonly property bool imgClamped: root.imageClamped(cell.shownClip)
                             readonly property real lineHpx: measureText.lineCount > 0
                                 ? measureText.paintedHeight / measureText.lineCount
                                 : Theme.fontSize(16)
@@ -318,7 +344,7 @@ Item {
                                 if (!c)
                                     return 0;
                                 if (c.image)
-                                    return Math.max(cell.minTileH, Math.min(320, cell.imgNatH));
+                                    return Math.max(root.imageMinH, Math.min(320, cell.imgNatH));
                                 // capped on whole lines rather than on raw pixels:
                                 // a snippet too long for the tile is cut by the
                                 // highlight's clip either way (TextEdit can't
@@ -450,11 +476,22 @@ Item {
                                         // above and below instead, which is at
                                         // least the clip the user copied.
                                         fillMode: cell.imgClamped ? Image.PreserveAspectFit : Image.PreserveAspectCrop
-                                        sourceSize: Qt.size(480, 640)
-                                        source: {
-                                            const c = cell.shownClip;
-                                            return c && c.image && c.thumb ? "file://" + c.thumb : "";
-                                        }
+                                        sourceSize: root.thumbSize
+                                        source: root.thumbUrl(cell.shownClip)
+                                        // A slot handed a different image keeps
+                                        // painting the old one until the new
+                                        // one has decoded, where it used to
+                                        // drop to the bare tile for the frames
+                                        // in between: flipping between two
+                                        // pages of screenshots blinked every
+                                        // tile empty on the way. The preloader
+                                        // at the bottom of this file makes a
+                                        // flip to the next or previous page
+                                        // land decoded, so this is what covers
+                                        // the rest - a query changing what the
+                                        // slot holds, or paging faster than the
+                                        // decodes keep up with.
+                                        retainWhileLoading: true
                                     }
                                 }
                                 // plain (non-searching) preview: elide is only reliable on the
@@ -613,6 +650,61 @@ Item {
             id: expandCard
 
             pane: drawer
+        }
+    }
+
+    // The thumbs of the page either side of the one showing, decoded ahead of
+    // the flip. Tile images load asynchronously, and Qt drops a decoded image
+    // almost as soon as nothing shows it (its cache of unreferenced pixmaps is
+    // 2MB, about two of these), so a page change used to send a dozen PNGs back
+    // through the decoder and leave every tile empty for the 2-4 frames that
+    // took - on every flip, in either direction, however many times the two
+    // pages had already been seen. An Image asking for a pixmap something else
+    // is already holding gets it on the spot instead, async or not, and these
+    // are that something else: never drawn, only held.
+    //
+    // Each has to ask exactly as the tile will (see thumbSize above), fillMode
+    // included. The next page comes first in the model so its decodes are
+    // queued ahead of the previous page's, which the tiles were showing a
+    // moment ago and is the cheaper of the two to have late.
+    //
+    // Only while the pane is up: at most two pages of thumbs, each capped at
+    // 307200 pixels by the thumbnail pass, so ~1.2MB apiece decoded.
+    //
+    // It follows the grid one turn of the event loop behind, off a copy of the
+    // page and the matches rather than the live ones. Bound to the live ones
+    // it moves on in the same instant the tiles do and, evaluated first, lets
+    // go of the very thumbs they are about to ask for - which nothing then
+    // holds, so they are dropped and decoded again and the flip blinks exactly
+    // as it did with no preloader at all. A turn late, the tiles have taken
+    // theirs before these let go.
+    property int heldPage: 0
+    property var heldMatches: []
+    function holdCurrent(): void {
+        root.heldPage = LauncherState.clipPage;
+        root.heldMatches = LauncherState.clipMatches;
+    }
+    Component.onCompleted: root.holdCurrent()
+    Connections {
+        target: LauncherState
+        function onClipPageChanged() { Qt.callLater(root.holdCurrent); }
+        function onClipMatchesChanged() { Qt.callLater(root.holdCurrent); }
+    }
+    Repeater {
+        model: LauncherState.shown && LauncherState.pane === "clips" ? 2 * LauncherState.clipPageSize : 0
+
+        Image {
+            required property int index
+            readonly property var clip: {
+                const size = LauncherState.clipPageSize;
+                const page = root.heldPage + (index < size ? 1 : -1);
+                return page < 0 ? null : root.heldMatches[page * size + index % size] ?? null;
+            }
+            visible: false
+            asynchronous: true
+            fillMode: root.imageClamped(clip) ? Image.PreserveAspectFit : Image.PreserveAspectCrop
+            sourceSize: root.thumbSize
+            source: root.thumbUrl(clip)
         }
     }
 
