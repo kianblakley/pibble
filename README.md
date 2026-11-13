@@ -33,7 +33,7 @@ cd pibble
 ### 2. Install
 
 ```sh
-./install.sh
+./pibble install
 ```
 
 Asks which language to run the shell in, installs the dependencies below through
@@ -57,7 +57,7 @@ instead, stop the script and add the same names to `environment.systemPackages`.
 | `--yes` | non-interactive: take the recommended answer everywhere |
 
 Everything it installs is recorded in `~/.local/state/pibble/install-manifest.tsv`,
-and `./uninstall.sh` removes exactly what that file lists. Anything already on
+and `./pibble uninstall` removes exactly what that file lists. Anything already on
 your system when you installed pibble was never recorded, so it is never
 removed - and neither are your settings, thumbnails or clipboard cache.
 
@@ -68,7 +68,7 @@ Necessary - the shell does not load without these:
 | Dependency | Use |
 |---|---|
 | A Wayland compositor with layer-shell, e.g. [Niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland), [Sway](https://github.com/swaywm/sway) | Hosts the shell. GNOME has no layer-shell and cannot |
-| [Quickshell](https://github.com/quickshell-mirror/quickshell) **0.3.0 or newer** | Runs the shell. Older builds lack modules it imports - Fedora's own package is one (0.2.1); `./install.sh` takes the `errornointernet/quickshell` COPR instead |
+| [Quickshell](https://github.com/quickshell-mirror/quickshell) **0.3.0 or newer** | Runs the shell. Older builds lack modules it imports - Fedora's own package is one (0.2.1); `./pibble install` takes the `errornointernet/quickshell` COPR instead |
 | Qt 6's QtQuick Dialogs and Effects modules | Imported by the launcher. Part of Qt's declarative package everywhere except Debian/Ubuntu, where they are `qml6-module-qtquick-dialogs` and `qml6-module-qtquick-effects` |
 | bash, coreutils, util-linux, procps | The `pibble` command and the shell's helper scripts. Already on any desktop install |
 
@@ -94,8 +94,8 @@ Optional - each one is a feature:
 | systemd (`systemctl`) | Power off and reboot | The power menu's buttons do nothing |
 | UPower, PipeWire | Battery readout, volume flyout | Each is hidden |
 
-Installing them yourself instead is fine - `./install.sh` skips anything already
-present, and `./install.sh --no-deps` skips the step entirely.
+Installing them yourself instead is fine - `./pibble install` skips anything already
+present, and `./pibble install --no-deps` skips the step entirely.
 
 ### 3. Toggle the launcher
 

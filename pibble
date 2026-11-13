@@ -11,6 +11,9 @@
 #                    already the one showing)
 #   pibble replay    re-fire one recent notification; repeated presses step
 #                    back through history (see "Replay count" in flyout settings)
+#   pibble install / uninstall [options]
+#                    install pibble's dependencies, or remove exactly what
+#                    install added (scripts/install.sh, scripts/uninstall.sh)
 #   pibble help      show this message (also what a bare `pibble` does)
 repo="$(dirname "$(readlink -f "$0")")"
 
@@ -190,8 +193,13 @@ Commands:
   replay    re-fire one recent notification; repeated presses step back
   env       print the environment a daemon is started with, as shell
             exports - for running \`qs\` against this repo by hand and
-            getting the same fonts and icons the daemon would (see
-            ./layout-probe, which evals it)
+            getting the same fonts and icons the daemon would
+  install [options]
+            install the dependencies the shell needs and pick a language
+            (\`pibble install --help\` for options)
+  uninstall [options]
+            remove exactly what \`pibble install\` added, nothing else
+            (\`pibble uninstall --help\` for options)
   help      show this message (also what a bare \`pibble\` does)
 USAGE
 }
@@ -267,6 +275,12 @@ replay)
     fi
     echo "pibble: daemon not running - run 'pibble start' first" >&2
     exit 1
+    ;;
+install | uninstall)
+    # kept out of this file so the keybind path above never has to parse them
+    script="$repo/scripts/$1.sh"
+    shift
+    exec bash "$script" "$@"
     ;;
 help | "")
     usage

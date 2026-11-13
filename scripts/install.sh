@@ -3,7 +3,7 @@
 # and optionally start the daemons.
 #
 # Everything this script installs is appended to a manifest (see $manifest
-# below) recording *how* it was installed. ./uninstall.sh replays that manifest
+# below) recording *how* it was installed. ./pibble uninstall replays that manifest
 # backwards, so it removes exactly what this script added - anything already
 # present when the installer ran is never recorded, and therefore never
 # removed. That is the whole reason the manifest exists: a blind
@@ -15,7 +15,7 @@ set -euo pipefail
 # shell.qml (and ./pibble resolves it the same way), so a repo reached through
 # a symlink has to hash the real path or the language lands in a directory the
 # shell never reads.
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/pibble"
 manifest="$state_dir/install-manifest.tsv"
 
@@ -34,7 +34,7 @@ usage() {
     cat <<USAGE
 pibble installer
 
-Usage: ./install.sh [options]
+Usage: ./pibble install [options]
 
 Options:
   --language ID     set the shell's language without asking (see --list-languages)
@@ -1254,7 +1254,7 @@ warn_user_bin_dirs
 if [ -f "$manifest" ] && [ "$dry_run" = 0 ]; then
     installed_count=$(grep -c "$(printf '\tdep$')" "$manifest" || true)
     info "$installed_count package(s) recorded in $manifest"
-    info "./uninstall.sh removes exactly those, and nothing that was already here"
+    info "./pibble uninstall removes exactly those, and nothing that was already here"
 fi
 if [ "$required_failed" = 1 ]; then
     fail "a required dependency is missing - pibble will not start until it is installed (see above)"

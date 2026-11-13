@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pibble uninstaller: removes the dependencies ./install.sh installed, and
+# pibble uninstaller: removes the dependencies ./pibble install installed, and
 # nothing else.
 #
 # It works only from the manifest install.sh wrote - so a package that was
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # -P to match ./pibble, which resolves symlinks before it names the daemon
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/pibble"
 manifest="$state_dir/install-manifest.tsv"
 
@@ -23,9 +23,9 @@ keep_toolchains=0
 
 usage() {
     cat <<USAGE
-pibble uninstaller - removes only what ./install.sh installed
+pibble uninstaller - removes only what ./pibble install installed
 
-Usage: ./uninstall.sh [options]
+Usage: ./pibble uninstall [options]
 
 Options:
   --keep-toolchains  don't offer to remove compilers/build deps
@@ -119,7 +119,7 @@ parse_row() {
 if [ ! -f "$manifest" ]; then
     printf '%sNothing to uninstall.%s\n' "$c_bold" "$c_off"
     info "no install manifest at $manifest"
-    info "either install.sh was never run, or it installed nothing (everything was already present)."
+    info "either ./pibble install was never run, or it installed nothing (everything was already present)."
     exit 0
 fi
 
@@ -167,7 +167,7 @@ mapfile -t entries < <(
         case "$line" in '#'* | '') continue ;; esac
         parse_row "$line"
         if ! valid_row; then
-            warn "ignoring a manifest row that install.sh could not have written: $line"
+            warn "ignoring a manifest row that ./pibble install could not have written: $line"
             continue
         fi
         printf '%s|%s|%s|%s\n' "$row_method" "$row_pkg" "$row_bin" "$row_role"
@@ -175,7 +175,7 @@ mapfile -t entries < <(
 )
 if [ "${#entries[@]}" -eq 0 ]; then
     printf '%sNothing to uninstall.%s\n' "$c_bold" "$c_off"
-    info "the manifest is empty - install.sh installed nothing"
+    info "the manifest is empty - ./pibble install installed nothing"
     exit 0
 fi
 
@@ -625,7 +625,7 @@ if [ "$dry_run" = 1 ]; then
 elif [ -f "$manifest" ]; then
     info "some entries were kept; $manifest still lists them"
 else
-    info "everything install.sh added has been removed"
+    info "everything ./pibble install added has been removed"
 fi
 # apt alone leaves behind what a package pulled in with it
 for r in ${removed[@]+"${removed[@]}"}; do
