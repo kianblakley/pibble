@@ -31,6 +31,8 @@ Column {
     SettingRow { key: "toolsHint"; label: "Tools menu labels"; hint: "what shows beside the chosen tool"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "toolsAnim"; label: "Tools menu animation"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "toolsColors"; label: "Tools colors"; hint: "fixed is black and white over anything; theme follows pibble's colors"; valueWidth: Metrics.shortValueWidth }
+    SettingRow { key: "toolsFaceSize"; label: "Tools menu pointer size"; hint: "how big the face in the middle is"; valueWidth: Metrics.shortValueWidth }
+    SettingRow { key: "toolsFaceInvert"; label: "Tools menu pointer inverted"; hint: "a light face with dark eyes"; valueWidth: Metrics.shortValueWidth }
 
     // search and translate
     TextSettingRow { key: "searchUrl"; label: "Search with"; placeholder: "a web address, %s where the words go" }

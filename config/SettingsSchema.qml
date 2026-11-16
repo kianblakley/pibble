@@ -187,8 +187,12 @@ Singleton {
             return Strings.tr(Defaults.toolsFaces.includes(Settings.toolsFace) ? Settings.toolsFace : Defaults.toolsFace);
         case "toolsColors":
             return Strings.tr(Settings.toolsColors === "theme" ? "theme" : "fixed");
+        case "toolsFaceInvert":
+            return root.onOff(Settings.toolsFaceInvert);
         case "toolsSpread":
             return Settings.toolsSpread + " px";
+        case "toolsFaceSize":
+            return Settings.toolsFaceSize + "%";
         case "toolsTrail":
             return Strings.tr(Defaults.toolsTrails.includes(Settings.toolsTrail) ? Settings.toolsTrail : Defaults.toolsTrail);
         case "toolsHint":
@@ -295,6 +299,9 @@ Singleton {
         case "toolsColors":
             Settings.toolsColors = root.cycle(Settings.toolsColors, Defaults.toolsColorModes, dir);
             break;
+        case "toolsFaceInvert":
+            Settings.toolsFaceInvert = !Settings.toolsFaceInvert;
+            break;
         case "toolsHint":
             Settings.toolsHint = root.cycle(Settings.toolsHint, Defaults.toolsHints, dir);
             break;
@@ -303,6 +310,9 @@ Singleton {
             break;
         case "toolsSpread":
             Settings.toolsSpread = Math.max(Defaults.toolsSpreadMin, Math.min(Defaults.toolsSpreadMax, Settings.toolsSpread + dir * 8));
+            break;
+        case "toolsFaceSize":
+            Settings.toolsFaceSize = Math.max(Defaults.toolsFaceSizeMin, Math.min(Defaults.toolsFaceSizeMax, Settings.toolsFaceSize + dir * 10));
             break;
         case "recordAudio":
             Settings.recordAudio = root.cycle(Settings.recordAudio, Defaults.recordAudioChoices, dir);
@@ -490,8 +500,14 @@ Singleton {
         case "toolsColors":
             Settings.toolsColors = Defaults.toolsColors;
             break;
+        case "toolsFaceInvert":
+            Settings.toolsFaceInvert = false;
+            break;
         case "toolsSpread":
             Settings.toolsSpread = Defaults.toolsSpread;
+            break;
+        case "toolsFaceSize":
+            Settings.toolsFaceSize = Defaults.toolsFaceSize;
             break;
         case "toolsHint":
             Settings.toolsHint = Defaults.toolsHint;

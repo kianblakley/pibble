@@ -262,10 +262,16 @@ JsonAdapter {
     property int toolsSpread: Defaults.toolsSpread
     // what comes out beside the chosen tool - one of Defaults.toolsHints
     property string toolsHint: Defaults.toolsHint
+    // how big the pointer face is, as a percentage (Defaults.toolsFaceSizeMin
+    // to toolsFaceSizeMax)
+    property int toolsFaceSize: Defaults.toolsFaceSize
     // whether the eyes leave a streak - one of Defaults.toolsTrails
     property string toolsTrail: Defaults.toolsTrail
     // "fixed" (black and white whatever the theme) or "theme"
     property string toolsColors: Defaults.toolsColors
+    // the pointer face in the middle of the tools menu drawn the other way
+    // round - light with dark eyes - in either color mode (see Theme.toolsFace)
+    property bool toolsFaceInvert: false
     // Where a circled piece of text is searched for; %s is the query, already
     // percent-encoded.
     property string searchUrl: Defaults.searchUrl
@@ -350,6 +356,10 @@ JsonAdapter {
         }
         if (!Defaults.toolsHints.includes(settings.toolsHint)) {
             settings.toolsHint = Defaults.toolsHint;
+            settings.save();
+        }
+        if (settings.toolsFaceSize < Defaults.toolsFaceSizeMin || settings.toolsFaceSize > Defaults.toolsFaceSizeMax) {
+            settings.toolsFaceSize = Math.max(Defaults.toolsFaceSizeMin, Math.min(Defaults.toolsFaceSizeMax, settings.toolsFaceSize));
             settings.save();
         }
         if (settings.toolsSpread < Defaults.toolsSpreadMin || settings.toolsSpread > Defaults.toolsSpreadMax) {

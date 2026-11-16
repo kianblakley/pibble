@@ -23,7 +23,9 @@ import "root:/services"
 // EyePair).
 //
 // Coloured from Theme.tools - black and white unless Settings > Tools hands
-// it to the theme; the eyes stay white either way.
+// it to the theme - and the face from Theme.toolsFace: the same dark with
+// white eyes, or turned round (a light face, dark eyes) by "Tools menu
+// pointer inverted".
 //
 // This item sits on the pie's middle, so everything in it is laid out from
 // (0, 0) outwards.
@@ -37,17 +39,23 @@ Item {
     // where five buttons still clear one another
     readonly property real spread: Math.max(Defaults.toolsSpreadMin, Math.min(Defaults.toolsSpreadMax, Settings.toolsSpread))
     readonly property real size: 54
+    // Settings > Tools: the pointer face as a multiple of its own size. The
+    // recording's arc round it grows with it, and the controls' ring moves
+    // out by as much as the arc does, so a big face never sits on them.
+    readonly property real faceScale: Math.max(Defaults.toolsFaceSizeMin, Math.min(Defaults.toolsFaceSizeMax, Settings.toolsFaceSize)) / 100
+    readonly property real arcRadius: 28 * root.faceScale
     // the recording's controls: their ring, and how big each is
-    readonly property real innerOrbit: 60
+    readonly property real innerOrbit: 60 + Math.max(0, root.arcRadius - 28)
     readonly property real innerSize: 38
     // the tools' ring - out past the controls' while they are there
     readonly property real orbit: root.menu.recording ? Math.max(root.spread, root.innerOrbit + root.innerSize / 2 + 12 + root.size / 2) : root.spread
     // how far the mark can lean out of the middle: most of the way to the
     // chosen button, short of touching it however close the buttons are set,
     // and only a little with the controls (and the arc it wears) close by
-    readonly property real travel: root.menu.recording ? 8 : Math.max(6, Math.min(26, root.orbit - root.size * 0.55 - 26))
+    readonly property real travel: root.menu.recording ? 8 : Math.max(6, Math.min(26, root.orbit - root.size * 0.55 - 26 * root.faceScale))
 
     readonly property var colors: Theme.tools
+    readonly property var face: Theme.toolsFace
 
     // How far the pie reaches from its middle, the chosen one's name
     // included - the room ToolsMenu keeps between the middle and the
@@ -110,10 +118,13 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: Theme.radius(root.size / 2)
-                color: slot.chosen ? root.colors.accent : root.colors.ink
+                // the chosen one keeps its dark and wears a ring in the accent
+                color: root.colors.ink
+                border.color: root.colors.accent
+                border.width: slot.chosen ? 2.5 : 0
                 scale: slot.chosen ? 1.1 : 1
-                Behavior on color {
-                    ColorAnimation { duration: root.menu.ms(110) }
+                Behavior on border.width {
+                    NumberAnimation { duration: root.menu.ms(110) }
                 }
                 Behavior on scale {
                     NumberAnimation { duration: root.menu.ms(220); easing.type: Easing.OutBack; easing.overshoot: 2.4 }
@@ -122,7 +133,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: root.menu.glyph(slot.modelData)
-                    color: slot.chosen ? root.colors.ink : root.colors.glyph
+                    color: root.colors.glyph
                     font.family: Icons.family
                     font.pixelSize: Theme.fontSize(22)
                 }
@@ -131,7 +142,8 @@ Item {
     }
 
     // The recording's controls, coming out after the tools. Stop is the
-    // recording's red, and lights up red rather than in the accent.
+    // recording's red, and its ring when chosen is red rather than the
+    // accent.
     Repeater {
         model: root.menu.recording ? root.menu.controls : []
 
@@ -156,10 +168,12 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: Theme.radius(root.innerSize / 2)
-                color: !control.chosen ? root.colors.ink : control.red ? root.menu.alarm : root.colors.accent
+                color: root.colors.ink
+                border.color: control.red ? root.menu.alarm : root.colors.accent
+                border.width: control.chosen ? 2 : 0
                 scale: control.chosen ? 1.12 : 1
-                Behavior on color {
-                    ColorAnimation { duration: root.menu.ms(110) }
+                Behavior on border.width {
+                    NumberAnimation { duration: root.menu.ms(110) }
                 }
                 Behavior on scale {
                     NumberAnimation { duration: root.menu.ms(220); easing.type: Easing.OutBack; easing.overshoot: 2.4 }
@@ -168,7 +182,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: root.menu.glyph(control.modelData)
-                    color: control.chosen ? root.colors.ink : control.red ? root.menu.alarm : root.colors.glyph
+                    color: control.red ? root.menu.alarm : root.colors.glyph
                     font.family: Icons.family
                     font.pixelSize: Theme.fontSize(17)
                 }
@@ -293,7 +307,7 @@ Item {
                 strokeColor: Qt.alpha(root.menu.alarm, 0.25)
                 strokeWidth: 3
                 fillColor: "transparent"
-                PathAngleArc { radiusX: 28; radiusY: 28; startAngle: 0; sweepAngle: 360 }
+                PathAngleArc { radiusX: root.arcRadius; radiusY: root.arcRadius; startAngle: 0; sweepAngle: 360 }
             }
             ShapePath {
                 strokeColor: root.menu.alarm
@@ -301,7 +315,7 @@ Item {
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap
                 // never quite nothing, so a fresh recording still shows a dot
-                PathAngleArc { radiusX: 28; radiusY: 28; startAngle: -90; sweepAngle: Math.max(4, Recorder.elapsed % 60 * 6) }
+                PathAngleArc { radiusX: root.arcRadius; radiusY: root.arcRadius; startAngle: -90; sweepAngle: Math.max(4, Recorder.elapsed % 60 * 6) }
             }
         }
 
@@ -309,6 +323,8 @@ Item {
             // centred on the mark's own point, whatever its size
             x: -width / 2
             y: -height / 2
+            // Settings > Tools > "Tools menu pointer size", about its middle
+            scale: root.faceScale
             sourceComponent: mark.styles[Settings.toolsFace] ?? faceStyle
         }
 
@@ -331,7 +347,7 @@ Item {
 
     // A pair of eyes (or one, for the visor) that look along the pull, with
     // tracers: a streak behind the part that moves, back along where it was
-    // over the last few frames, tapering to a point. The trail is kept in
+    // over the last few frames, shrinking as it goes. The trail is kept in
     // screen terms - the face's own movement included, through baseX/baseY -
     // so a face swinging across leaves its eyes' streaks where they were.
     // Still, there is no trail and nothing shows.
@@ -349,10 +365,11 @@ Item {
         property real baseY: 0
         property real lid: 1
         property bool trails: true
-        // White in either color mode: the eyes are what the pointer has
-        // become, and have to stand out on the dark face whatever the theme
-        // makes of the rest.
-        property color white: "#ffffff"
+        readonly property bool solid: Settings.toolsTrail === "solid"
+        // White in either color mode (the ink, with the face inverted): the
+        // eyes are what the pointer has become, and have to stand out on the
+        // face whatever the theme makes of the rest.
+        property color white: root.face.eyes
         property real gap: 7
 
         // where the moving part is now: eased after the look rather than
@@ -386,7 +403,7 @@ Item {
             running: pair.trails && pair.visible
             onTriggered: {
                 const kept = pair.trail.slice(0, 19);
-                kept.unshift({ x: pair.baseX + pair.shownX, y: pair.baseY + pair.shownY });
+                kept.unshift({ x: pair.shownX, y: pair.shownY, baseX: pair.baseX, baseY: pair.baseY });
                 pair.trail = kept;
             }
         }
@@ -399,77 +416,203 @@ Item {
             const cy = pair.eyeH / 2;
             const points = [Qt.point(cx + pair.shownX, cy + pair.shownY)];
             for (const at of pair.trail.slice(0, frames)) {
-                const point = Qt.point(cx + at.x - pair.baseX, cy + at.y - pair.baseY);
+                // the face's movement is in the pie's pixels, the eyes' in
+                // the (scaled) face's
+                const point = Qt.point(cx + at.x + (at.baseX - pair.baseX) / root.faceScale, cy + at.y + (at.baseY - pair.baseY) / root.faceScale);
                 const last = points[points.length - 1];
                 if (Math.hypot(point.x - last.x, point.y - last.y) >= 0.75)
                     points.push(point);
             }
-            return points.length < 3 ? [] : points;
+            // Smoothed, all but the head (which is where the eye is): the
+            // face and the eyes each ease after the pointer on their own, and
+            // every report of it starts both again, so the way they have come
+            // kinks from frame to frame - and a streak drawn true to that has
+            // an edge that wobbles in and out.
+            for (let pass = 0; pass < 2; pass++) {
+                const was = points.slice();
+                for (let k = 1; k + 1 < was.length; k++)
+                    points[k] = Qt.point((was[k - 1].x + 2 * was[k].x + was[k + 1].x) / 4, (was[k - 1].y + 2 * was[k].y + was[k + 1].y) / 4);
+            }
+            return points;
         }
 
-        // The streak's outline: the path pushed out to either side by half
-        // of how wide the eye is across the way it is moving - which for the
-        // visor, wide and short, is its height moving sideways and its width
-        // moving up and down - shrinking to nothing at the far end.
+        // The streak, as the eye swept back along where it has been: a copy
+        // of the eye at every point of the path, shrinking towards the far
+        // end, with a bridge from each to the next - all of it one filled
+        // shape. It used to be a single outline drawn down one side of the
+        // path and back up the other, which folded over itself wherever the
+        // eye turned back (any back and forth), and the folds cut holes and
+        // hairline outlines into it; small moves left needle-thin slivers out
+        // of its pointed end. Pieces wound the same way under the winding
+        // rule cannot cancel out wherever they overlap, and a swept eye ends
+        // in a little rounded eye rather than a point.
+        //
+        // Returns the pieces (each a closed polyline), and the head and reach
+        // for the fade.
         function streak(eye: int): var {
-            return pair.ribbon(pair.path(eye, 13), (tx, ty) => Math.abs(ty) * pair.partW / 2 + Math.abs(tx) * pair.partH / 2);
-        }
-        // A line through `points` turned into a filled outline, as wide at
-        // the head as `half` says for the way it runs there and narrowing to
-        // a point at the far end - filled, so that it can fade along its
-        // length, which a stroke here cannot.
-        function ribbon(points: var, half: var): var {
-            if (points.length === 0)
-                return [];
-            const left = [];
-            const right = [];
-            let tx = 0, ty = 0;
-            for (let k = 0; k < points.length; k++) {
-                const before = points[Math.max(0, k - 1)];
-                const after = points[Math.min(points.length - 1, k + 1)];
-                const length = Math.hypot(after.x - before.x, after.y - before.y);
-                if (length > 0.01) {
-                    tx = (after.x - before.x) / length;
-                    ty = (after.y - before.y) / length;
-                }
-                const width = half(tx, ty) * (1 - k / (points.length - 1));
-                left.push(Qt.point(points[k].x - ty * width, points[k].y + tx * width));
-                right.push(Qt.point(points[k].x + ty * width, points[k].y - tx * width));
+            const points = pair.path(eye, 13);
+            if (points.length < 2)
+                return { pieces: [], head: Qt.point(0, 0), reach: 0 };
+            const w = pair.partW;
+            const h = pair.partH;
+            const radius = Theme.radius(Math.min(w, h) / 2);
+            const last = points.length - 1;
+            // how big the eye is at each point: its own size at the head down
+            // to a small dot at the far end
+            const sizes = points.map((_, k) => 1 - 0.8 * k / last);
+            const pieces = [];
+            for (let k = 0; k <= last; k++) {
+                const at = sizes[k];
+                pieces.push(pair.wound(pair.eyeAt(points[k], w * at, h * at, radius * at, 8)));
+                if (k === last)
+                    break;
+                // the bridge to the next one: from the outermost point of
+                // each to either side of the way between them
+                const next = points[k + 1];
+                const length = Math.hypot(next.x - points[k].x, next.y - points[k].y);
+                const nx = -(next.y - points[k].y) / length;
+                const ny = (next.x - points[k].x) / length;
+                const after = sizes[k + 1];
+                const a = pair.outermost(points[k], nx, ny, w * at, h * at, radius * at);
+                const b = pair.outermost(next, nx, ny, w * after, h * after, radius * after);
+                const c = pair.outermost(next, -nx, -ny, w * after, h * after, radius * after);
+                const d = pair.outermost(points[k], -nx, -ny, w * at, h * at, radius * at);
+                pieces.push(pair.wound([a, b, c, d, a]));
             }
-            return left.concat(right.reverse(), [left[0]]);
+            const head = points[0];
+            const reach = Math.max(...points.map(point => Math.hypot(point.x - head.x, point.y - head.y)));
+            return { pieces: pieces, head: head, reach: reach };
+        }
+        // The point of an eye w by h with corners of `radius`, round its
+        // middle at `center`, that is furthest out along (nx, ny) - on its
+        // outline, so that a bridge from it meets the eye without a corner
+        // standing out past it: the middle of the corner that way, out by
+        // the corner's round.
+        function outermost(center: point, nx: real, ny: real, w: real, h: real, radius: real): point {
+            return Qt.point(center.x + Math.sign(nx) * (w / 2 - radius) + nx * radius, center.y + Math.sign(ny) * (h / 2 - radius) + ny * radius);
+        }
+        // The outline of an eye w by h with corners of `radius`, round its
+        // middle at `center`, each corner in `steps` straight pieces.
+        function eyeAt(center: point, w: real, h: real, radius: real, steps: int): var {
+            const outline = [];
+            steps = radius > 0.5 ? steps : 0;
+            const corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
+            for (let q = 0; q < 4; q++) {
+                const ox = center.x + corners[q][0] * (w / 2 - radius);
+                const oy = center.y + corners[q][1] * (h / 2 - radius);
+                for (let step = 0; step <= steps; step++) {
+                    const angle = (q + (steps > 0 ? step / steps : 0.5)) * Math.PI / 2;
+                    outline.push(Qt.point(ox + Math.cos(angle) * radius, oy + Math.sin(angle) * radius));
+                }
+            }
+            outline.push(outline[0]);
+            return outline;
+        }
+        // `outline` turned, if it has to be, to run the same way round as
+        // every other piece - which is what keeps the winding rule from
+        // reading an overlap of two pieces as a hole
+        function wound(outline: var): var {
+            let area = 0;
+            for (let k = 0; k + 1 < outline.length; k++)
+                area += outline[k].x * outline[k + 1].y - outline[k + 1].x * outline[k].y;
+            return area < 0 ? outline.reverse() : outline;
         }
 
-        // one streak per eye back along where it has been, tapering from the
-        // eye's own size to a point and fading as it goes
-        Repeater {
-            model: pair.trails ? pair.count : 0
-            Shape {
-                id: tail
-                required property int index
-                readonly property var outline: pair.streak(tail.index)
-                readonly property point head: tail.outline.length > 0 ? tail.outline[0] : Qt.point(0, 0)
-                readonly property point end: tail.outline.length > 0 ? tail.outline[Math.floor(tail.outline.length / 2) - 1] : Qt.point(0, 0)
-                anchors.fill: parent
-                preferredRendererType: Shape.CurveRenderer
-                visible: tail.outline.length > 0
-                ShapePath {
-                    strokeColor: "transparent"
-                    fillGradient: LinearGradient {
-                        x1: tail.head.x
-                        y1: tail.head.y
-                        x2: tail.end.x
-                        y2: tail.end.y
-                        GradientStop { position: 0; color: Qt.alpha(pair.partColor, 0.75) }
-                        GradientStop { position: 1; color: Qt.alpha(pair.partColor, 0) }
+        // one streak per eye back along where it has been, shrinking from
+        // the eye's own size and fading with how far from the eye it is - by
+        // distance rather than along a line from one end to the other,
+        // which a streak that has doubled back has no good line for.
+        //
+        // Drawn by the geometry renderer, which merges the overlapping
+        // pieces into one outline before it fills, and smoothed by drawing
+        // that into a layer at twice the size it is shown at, multisampled,
+        // and shrinking it back down - multisampling alone smooths an edge
+        // in only a few steps, coarse beside everything else on the face,
+        // which Qt smooths finely. The curve renderer smooths each
+        // piece's own edges instead, and with the pieces a fast move makes -
+        // long and thin, a new set every frame - it left those edges showing
+        // inside the streak as pale seams (worst where it leaves the eye) and
+        // the outline unsmoothed.
+        Item {
+            id: streaks
+            // How far round the eyes a streak can reach - the layer stops at
+            // its edges. The eyes look at most 9 either way, and the face
+            // leans at most 26 either way of the pie's middle, which in the
+            // eyes' terms is more the smaller the face is drawn.
+            readonly property real room: 22 + 2 * 26 / root.faceScale
+            x: -streaks.room
+            y: -streaks.room
+            width: pair.width + 2 * streaks.room
+            height: pair.height + 2 * streaks.room
+            visible: pair.trails
+            layer.enabled: pair.trails
+            layer.samples: 8
+            // shrunk back down by plain linear sampling, which at exactly
+            // half size is each pixel the average of its 2x2 - mipmapping
+            // brings in the next size down as well, and blurs the edges
+            layer.smooth: true
+            // twice the size it is shown at, the face's own scale included
+            readonly property real supersample: 2 * root.faceScale * Screen.devicePixelRatio
+            layer.textureSize: Qt.size(Math.ceil(streaks.width * streaks.supersample), Math.ceil(streaks.height * streaks.supersample))
+
+            Repeater {
+                model: pair.trails ? pair.count : 0
+                Shape {
+                    id: tail
+                    required property int index
+                    readonly property var streak: pair.streak(tail.index)
+                    // back on the eyes' own (0, 0), which the pieces are laid out from
+                    x: streaks.room
+                    y: streaks.room
+                    preferredRendererType: Shape.GeometryRenderer
+                    visible: tail.streak.pieces.length > 0 && tail.streak.reach >= 1
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillRule: ShapePath.WindingFill
+                        fillGradient: RadialGradient {
+                            centerX: tail.streak.head.x
+                            centerY: tail.streak.head.y
+                            centerRadius: Math.max(1, tail.streak.reach)
+                            focalX: tail.streak.head.x
+                            focalY: tail.streak.head.y
+                            // "solid" (Settings > Tools) keeps the taper but not the fade
+                            GradientStop { position: 0; color: Qt.alpha(pair.partColor, pair.solid ? 1 : 0.75) }
+                            GradientStop { position: 1; color: Qt.alpha(pair.partColor, pair.solid ? 1 : 0) }
+                        }
+                        PathMultiline { paths: tail.streak.pieces }
                     }
-                    PathPolyline { path: tail.outline }
+                }
+            }
+
+            // The eyes themselves, while there are streaks: in the same layer
+            // as them rather than over it. Drawn over it, the eye's smoothed
+            // edge and the streak's, on the same line where the streak leaves
+            // the eye, each let half of what is behind them through, and
+            // together showed as a pale seam round the eye; in the layer every
+            // sample is either covered or not, and there is no seam to show.
+            Repeater {
+                model: pair.trails ? pair.count : 0
+                Shape {
+                    id: drawnEye
+                    required property int index
+                    x: streaks.room
+                    y: streaks.room
+                    preferredRendererType: Shape.GeometryRenderer
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: pair.partColor
+                        PathPolyline {
+                            path: pair.eyeAt(Qt.point(drawnEye.index * (pair.eyeW + pair.gap) + pair.eyeW / 2 + pair.shownX, pair.eyeH / 2 + pair.shownY), pair.partW, pair.partH, Theme.radius(Math.min(pair.partW, pair.partH) / 2), 12)
+                        }
+                    }
                 }
             }
         }
 
-        // the eyes themselves
+        // the eyes themselves, while there are no streaks (see above for
+        // while there are)
         Repeater {
-            model: pair.count
+            model: pair.trails ? 0 : pair.count
             Rectangle {
                 required property int index
                 x: index * (pair.eyeW + pair.gap) + pair.shownX
@@ -487,7 +630,7 @@ Item {
         width: 44
         height: 44
         radius: Theme.radius(22)
-        color: root.colors.ink
+        color: root.face.skin
     }
 
     Component {
@@ -537,7 +680,7 @@ Item {
     }
     // a filled outline in the face's dark, for the add-ons
     component Patch: ShapePath {
-        fillColor: root.colors.ink
+        fillColor: root.face.skin
         strokeColor: "transparent"
         joinStyle: ShapePath.RoundJoin
     }
@@ -566,16 +709,19 @@ Item {
     Component {
         id: sproutStyle
         Topped {
-            Rectangle {
-                x: 25
-                y: 5
-                width: 2.5
-                height: 11
-                color: root.colors.ink
-            }
             Shape {
                 anchors.fill: parent
                 preferredRendererType: Shape.CurveRenderer
+                // The stem: a little crooked, thicker where it comes out of
+                // the head and narrowing to a rounded tip, like a twig rather
+                // than a pole. Its foot is hidden behind the face.
+                Patch {
+                    startX: 24.6; startY: 17
+                    PathQuad { x: 26.0; y: 4.6; controlX: 22.4; controlY: 11 }
+                    PathArc { x: 27.8; y: 4.2; radiusX: 1; radiusY: 1; direction: PathArc.Clockwise }
+                    PathQuad { x: 28.2; y: 17; controlX: 25.4; controlY: 11 }
+                    PathLine { x: 24.6; y: 17 }
+                }
                 Patch {
                     startX: 26; startY: 8
                     PathQuad { x: 13; y: 1; controlX: 17; controlY: 10 }

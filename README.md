@@ -154,10 +154,12 @@ A tool used with the launcher up works over the launcher as it stands and leaves
 |---|---|---|
 | Tools menu pointer | face | What the pointer becomes in the middle of the menu: `face`, `visor`, `cat` or `sprout` |
 | Tools menu size | 84 px | How far the tools sit from the pointer (64-160) |
-| Tools menu trails | streak | Whether the eyes leave a streak behind them: `streak` or `off` |
+| Tools menu trails | streak | Whether the eyes leave a streak behind them: `streak` (fades out), `solid` (no fade) or `off` |
 | Tools menu labels | name and key | What shows beside the chosen tool: its name and key, the name alone, or nothing |
 | Tools menu animation | pop | pop, fade, slide or off |
 | Tools colors | fixed | `fixed` is black and white over anything; `theme` follows pibble's colors |
+| Tools menu pointer size | 100% | How big the pointer face is (50-150%) |
+| Tools menu pointer inverted | off | Draws the pointer face light with dark eyes (white with black eyes, in `fixed`) |
 | Search with | `https://www.google.com/search?q=%s` | Where text you dragged over is searched for |
 | Reading languages | every installed pack | tesseract codes to read with, e.g. `eng+jpn` |
 | Translate into | the shell's language | Language to translate into, e.g. `en`, `ja` |

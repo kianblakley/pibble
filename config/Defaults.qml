@@ -102,12 +102,19 @@ QtObject {
     // the name alone, "off" nothing.
     readonly property var toolsHints: ["full", "name", "off"]
     // Whether the eyes leave a streak behind them as they move (see
-    // ui/ToolsPie.qml).
-    readonly property var toolsTrails: ["streak", "off"]
+    // ui/ToolsPie.qml): "streak" fades out along its length, "solid" is the
+    // eyes' own colour all the way to its point, "off" leaves none.
+    readonly property var toolsTrails: ["streak", "solid", "off"]
     readonly property string toolsTrail: "streak"
     readonly property string toolsHint: "full"
     readonly property int toolsSpreadMin: 64
     readonly property int toolsSpreadMax: 160
+    // How big the pointer face in the middle of the tools menu is, as a
+    // percentage of its own size, and how far either way it can go - past
+    // these it is either a speck or crowding the buttons.
+    readonly property int toolsFaceSize: 100
+    readonly property int toolsFaceSizeMin: 50
+    readonly property int toolsFaceSizeMax: 150
     // "fixed" black and white, or "theme" - the palette the rest of pibble
     // is drawn in (see Theme.tools)
     readonly property var toolsColorModes: ["fixed", "theme"]

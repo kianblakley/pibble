@@ -113,7 +113,7 @@ Singleton {
     //
     //   ink    the dark shapes - the menu's buttons and face
     //   glyph  an icon on ink
-    //   accent the chosen button, the drawn line (the pointer's eyes, halo and
+    //   accent the chosen button's ring, the drawn line (the pointer's eyes, halo and
     //          sail are always white)
     //   fg     text on the dark card
     //   muted  quieter text on it
@@ -130,6 +130,19 @@ Singleton {
             accent: "#ffffff",
             fg: "#f2f0ee",
             muted: "#908c87"
+        })
+
+    // The pointer face in the middle of the tools menu: `skin` the face and
+    // what it wears, `eyes` its eyes and their streak - the tools' ink with
+    // white eyes. Settings > Tools > "Tools menu pointer inverted" turns the
+    // face alone round, light with eyes in the ink; the buttons and the
+    // label beside them stay as Theme.tools has them.
+    readonly property var toolsFace: Settings.toolsFaceInvert ? ({
+            skin: root.toolsFollowTheme ? root.fg : "#ffffff",
+            eyes: root.tools.ink
+        }) : ({
+            skin: root.tools.ink,
+            eyes: "#ffffff"
         })
 
     // "matugen" ("Dynamic"): near-black card, bubble tinted from the app icon;
