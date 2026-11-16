@@ -98,7 +98,21 @@ Singleton {
             root.bank();
             root.paused = true;
             recorder.signal(2);
+            root.announce("paused");
         }
+    }
+
+    // Started, paused and resumed, each with the way to its controls: once
+    // it is going nothing of the recording is on the screen (see the
+    // header), so this is the one reminder that it is, and of where it
+    // stops. They are pibble's own and so replace one another in the
+    // flyout rather than piling up, "Recording saved" included.
+    function announce(what: string): void {
+        const how = Strings.tr("Open the pibble tools menu to pause or stop it.");
+        if (what === "paused")
+            Notifier.action("media-playback-pause", Strings.trf("Recording paused at %1", root.clock(root.elapsed)), Strings.tr("Open the pibble tools menu to resume or stop it."), "");
+        else
+            Notifier.action("media-record", what === "resumed" ? Strings.tr("Recording resumed") : Strings.tr("Recording started"), how, "");
     }
 
     Connections {
@@ -246,6 +260,10 @@ Singleton {
         stdout: SplitParser {
             onRead: line => {
                 if (line.startsWith("FILE ")) {
+                    // the segment really is under way - said here rather
+                    // than on asking, so a recorder that is missing or has
+                    // nowhere to write says only that
+                    root.announce(root.segments.length > 1 ? "resumed" : "started");
                     return;
                 } else if (line === "MISSING") {
                     recorder.refused = true;
