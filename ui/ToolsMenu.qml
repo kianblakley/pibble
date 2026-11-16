@@ -152,10 +152,6 @@ Item {
     // The pie's middle, in this item. Kept far enough from the edges that
     // the buttons and the name beside the chosen one are on the screen.
     property point center: Qt.point(root.width / 2, root.height / 2)
-    // Where the pointer was, from the middle - the face sets out from there
-    // and settles into the middle as the pie opens, so a pie that had to be
-    // put elsewhere to fit still visibly comes from the pointer.
-    property point setOut: Qt.point(0, 0)
     // the pie has been put somewhere and may start coming out
     property bool placed: false
 
@@ -194,7 +190,6 @@ Item {
     function place(at: var): void {
         const spot = at ?? Qt.point(root.width / 2, root.height / 2);
         root.center = Qt.point(Math.max(pie.roomX, Math.min(root.width - pie.roomX, spot.x)), Math.max(pie.roomY, Math.min(root.height - pie.roomY, spot.y)));
-        root.setOut = Qt.point(spot.x - root.center.x, spot.y - root.center.y);
         root.fromKnown = at !== null;
         if (at !== null) {
             root.fromX = at.x;

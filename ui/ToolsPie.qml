@@ -253,20 +253,22 @@ Item {
         // the pull as a fraction of its longest, each way
         readonly property real leanX: root.menu.pullX / root.menu.tether
         readonly property real leanY: root.menu.pullY / root.menu.tether
-        // still on its way in from where the pointer was: 1 at the start of
-        // the entrance, 0 once it has arrived
-        readonly property real away: 1 - root.menu.cubic(root.menu.span(root.menu.reveal, 0, 0.6))
         // 1 open, near 0 shut - the blink, for the styles with eyes
         property real lid: 1
         // eyes leave a fading streak behind them as they move
         readonly property bool trails: !root.menu.still && Settings.toolsTrail !== "off"
 
-        x: mark.leanX * root.travel + root.menu.setOut.x * mark.away
-        y: mark.leanY * root.travel + root.menu.setOut.y * mark.away
+        // Eased while the pie is out, but not while it is shut: opening
+        // resets the lean with `reveal` at 0, and easing that would slide
+        // the face in from wherever it leaned last time.
+        x: mark.leanX * root.travel
+        y: mark.leanY * root.travel
         Behavior on x {
+            enabled: root.menu.reveal > 0
             NumberAnimation { duration: root.menu.ms(90); easing.type: Easing.OutCubic }
         }
         Behavior on y {
+            enabled: root.menu.reveal > 0
             NumberAnimation { duration: root.menu.ms(90); easing.type: Easing.OutCubic }
         }
         scale: root.menu.grow(root.menu.span(root.menu.reveal, 0, 0.55))
