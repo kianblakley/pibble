@@ -129,6 +129,12 @@ Singleton {
             return Icons.wallpaperSlideshow;
         case "system-software-install":
             return Icons.deployedCodeAlert;
+        case "preferences-desktop-locale":
+            return Icons.translate;
+        case "media-record":
+            return Icons.videocam;
+        case "media-playback-pause":
+            return Icons.pause;
         }
         const lower = summary.toLowerCase();
         if (urgency === NotificationUrgency.Critical || lower.includes("fail") || lower.includes("not found"))

@@ -248,6 +248,53 @@ JsonAdapter {
     // itself is fixed (see ClockPage.visibleGroups)
     property var clockShow: Defaults.clockShow
 
+    // ---------- the screen tools: search, translate and record the screen ----------
+    // (see services/ScreenTools.qml and services/Recorder.qml)
+
+    // How the tools menu arrives and leaves - "pop", "fade", "slide" or
+    // "none", the volume OSD's four - and so a switch of its own, like every
+    // flyout's: turning the tile animations off does not flatten it.
+    property string toolsAnim: Defaults.toolsAnim
+    // what the pointer turns into in the middle of the tools menu - one of
+    // Defaults.toolsFaces
+    property string toolsFace: Defaults.toolsFace
+    // how far the menu's buttons sit from the mark in its middle, in pixels
+    property int toolsSpread: Defaults.toolsSpread
+    // what comes out beside the chosen tool - one of Defaults.toolsHints
+    property string toolsHint: Defaults.toolsHint
+    // whether the eyes leave a streak - one of Defaults.toolsTrails
+    property string toolsTrail: Defaults.toolsTrail
+    // "fixed" (black and white whatever the theme) or "theme"
+    property string toolsColors: Defaults.toolsColors
+    // Where a circled piece of text is searched for; %s is the query, already
+    // percent-encoded.
+    property string searchUrl: Defaults.searchUrl
+    // tesseract language codes to read the screen with, joined the way
+    // tesseract takes them ("eng+jpn"). Empty reads with every language pack
+    // that is installed, which is the right answer for one or two and a slow
+    // one for ten - name the ones on screen once there are that many.
+    property string ocrLanguages: ""
+    // Language the screen is translated into, as the translator spells it
+    // ("en", "ja", "zh-CN"). Empty follows the shell's own language.
+    property string translateTo: ""
+    // Empty sends the text that was read to Google's keyless translate
+    // endpoint. Anything else is a command run in its place: the text arrives
+    // on stdin, one paragraph per line, $PIBBLE_TRANSLATE_TO holds the target
+    // language, and it must print the translation with the same line count -
+    // which is what lets an offline translator (argos-translate, a local
+    // model) or a keyed one (DeepL through curl) stand in without pibble
+    // knowing either.
+    property string translateCommand: ""
+
+    // where `pibble record` writes its files
+    property string recordDir: Defaults.recordDir
+    // "desktop" (what the speakers play), "mic", or "off"
+    property string recordAudio: "desktop"
+    // Appended to the wf-recorder command line as-is, split on spaces - the
+    // place for an encoder choice, since the right one is a question about
+    // the GPU: "-c hevc_vaapi -d /dev/dri/renderD128" hands the encode to it.
+    property string recordArgs: ""
+
     // Heal out-of-range / retired values. Hooked to the store's loaded signal
     // (not Component.onCompleted) so it also covers hot reloads and hand edits
     // picked up by the file watcher - which means every branch below must be a
@@ -289,6 +336,32 @@ JsonAdapter {
         // contain.
         if (settings.theme === "dynamic") {
             settings.theme = "matugen"; // renamed
+            settings.save();
+        }
+        // a pointer style that has since been retired, or a hand-edited one
+        // that never was, goes back to the face
+        if (!Defaults.toolsFaces.includes(settings.toolsFace)) {
+            settings.toolsFace = Defaults.toolsFace;
+            settings.save();
+        }
+        if (!Defaults.toolsTrails.includes(settings.toolsTrail)) {
+            settings.toolsTrail = Defaults.toolsTrail;
+            settings.save();
+        }
+        if (!Defaults.toolsHints.includes(settings.toolsHint)) {
+            settings.toolsHint = Defaults.toolsHint;
+            settings.save();
+        }
+        if (settings.toolsSpread < Defaults.toolsSpreadMin || settings.toolsSpread > Defaults.toolsSpreadMax) {
+            settings.toolsSpread = Math.max(Defaults.toolsSpreadMin, Math.min(Defaults.toolsSpreadMax, settings.toolsSpread));
+            settings.save();
+        }
+        // the tools menu had a launcher keybind of its own; it is opened by
+        // the compositor's binding for `pibble toggle tools` now
+        if (settings.keybinds && settings.keybinds.tools !== undefined) {
+            const binds = Object.assign({}, settings.keybinds);
+            delete binds.tools;
+            settings.keybinds = binds;
             settings.save();
         }
         // the "wave" tile animation was renamed "bloom"

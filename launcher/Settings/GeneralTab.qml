@@ -52,6 +52,9 @@ Column {
             // animation, so its capture starts the instant the launcher is
             // gone rather than a settling-beat after
             ScreenColor.prepare();
+            // marked now, not when the pick starts: an Esc during the exit
+            // animation cancels before then, and must still bring it back
+            LauncherState.awayFor = "color";
             LauncherState.dialogPending = "color";
             LauncherState.exit();
         }

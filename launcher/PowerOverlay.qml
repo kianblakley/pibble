@@ -4,7 +4,8 @@ import "root:/ui"
 
 // Everything that floats above the panes: the swipe-to-power and
 // swipe-to-reboot pull indicators and their confirmation prompts, the
-// swipe-to-go-back pill, and the corner settings button.
+// swipe-to-go-back pill, the corner settings button, and the tools menu
+// `pibble toggle tools` opens over the launcher.
 //
 // The gestures themselves are tracked in LauncherWindow's background
 // MouseArea and live in LauncherState; this is only their read-out.
@@ -321,5 +322,21 @@ Item {
                 font { family: Icons.family; pixelSize: Theme.fontSize(22) }
             }
         }
+    }
+
+    // The menu itself, standing on the launcher's backdrop. A tool picked
+    // off it waits for the launcher to leave before it starts
+    // (LauncherState.pickTool).
+    ToolsMenu {
+        id: toolsMenu
+        anchors.fill: parent
+        open: LauncherState.toolsOpen
+        onDismissed: LauncherState.toolsOpen = false
+        onPicked: action => LauncherState.pickTool(action)
+    }
+
+    // LauncherWindow hands every key here while the menu is out.
+    function toolsKey(event: var): void {
+        toolsMenu.key(event);
     }
 }

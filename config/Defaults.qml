@@ -52,7 +52,7 @@ QtObject {
     // the loudest thing the shell does, so it is opt-in. A custom page has no
     // key here and needs none - an unknown one reads as off too (see
     // Settings.scrambleEnabled).
-    readonly property var scrambleSections: ({ clock: false, apps: false, walls: false, clips: false, volume: false, notifs: false, settings: false, power: false })
+    readonly property var scrambleSections: ({ clock: false, apps: false, walls: false, clips: false, volume: false, notifs: false, settings: false, power: false, tools: false })
     readonly property var pibbleAlerts: ({ errors: true, missingDeps: true, actions: true, battery: true })
     readonly property var keybinds: ({
         cycle: "Tab",
@@ -83,6 +83,38 @@ QtObject {
     readonly property int clipsCols: 4
     readonly property int clipsRows: 3
     readonly property int clipsMax: 120
+
+    // the screen tools (see Settings for what each means)
+    // How the tools menu can arrive and leave, the volume OSD's four. Here for
+    // the same reason the languages are: the schema steps through the list
+    // and the menu checks a name against it, and this is the file both read.
+    readonly property var toolsAnims: ["pop", "fade", "slide", "none"]
+    readonly property string toolsAnim: "pop"
+    // What stands in for the pointer in the middle of the tools menu (see
+    // ui/ToolsPie.qml for each).
+    readonly property var toolsFaces: ["face", "visor", "cat", "sprout"]
+    readonly property string toolsFace: "face"
+    // How far the tools menu's buttons sit from the mark in its middle, in
+    // pixels, and the steps the setting moves in - from where five buttons
+    // just clear one another to where a flick has a long way to go.
+    readonly property int toolsSpread: 84
+    // What comes out beside the chosen tool: "full" its name and key, "name"
+    // the name alone, "off" nothing.
+    readonly property var toolsHints: ["full", "name", "off"]
+    // Whether the eyes leave a streak behind them as they move (see
+    // ui/ToolsPie.qml).
+    readonly property var toolsTrails: ["streak", "off"]
+    readonly property string toolsTrail: "streak"
+    readonly property string toolsHint: "full"
+    readonly property int toolsSpreadMin: 64
+    readonly property int toolsSpreadMax: 160
+    // "fixed" black and white, or "theme" - the palette the rest of pibble
+    // is drawn in (see Theme.tools)
+    readonly property var toolsColorModes: ["fixed", "theme"]
+    readonly property string toolsColors: "fixed"
+    readonly property string searchUrl: "https://www.google.com/search?q=%s"
+    readonly property string recordDir: "~/Videos"
+    readonly property var recordAudioChoices: ["desktop", "mic", "off"]
 
     // battery % the low-battery alert fires at (see Battery.checkLevel)
     readonly property int batteryAlertLevel: 5

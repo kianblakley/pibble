@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import "root:/config"
 import "root:/launcher/Settings"
 import "root:/services"
+import "root:/ui"
 
 // The launcher surface itself: the wlr-layer-shell window, the open/close
 // reveal, the hidden field that captures all typing, and the handful of actions
@@ -1247,7 +1248,9 @@ PanelWindow {
             id: settingsPane
         }
 
-        PowerOverlay {}
+        PowerOverlay {
+            id: powerOverlay
+        }
     }
 
     // LauncherState raises these for anything needing this window's item tree
@@ -1337,6 +1340,12 @@ PanelWindow {
             }
             const ks = LauncherState.keyName(event);
             const kb = Settings.keybinds;
+            // the tools menu is out: its keys are its own
+            if (LauncherState.toolsOpen) {
+                event.accepted = true;
+                powerOverlay.toolsKey(event);
+                return;
+            }
             // armed power prompt: Enter powers off, anything else lets go
             if (LauncherState.powerArmed) {
                 event.accepted = true;
@@ -1568,6 +1577,21 @@ PanelWindow {
                 source: "file://" + modelData.thumb
             }
         }
+    }
+
+    // A color picked from the tools menu, over the launcher itself (see
+    // ScreenColor.host) - above everything else here, the whole screen's.
+    ColorPickView {
+        anchors.fill: parent
+        active: ScreenColor.overlayActive && ScreenColor.host === "launcher"
+    }
+
+    // A screen tool started with the launcher up, over the launcher itself
+    // (see ScreenTools.host) - so it reads, or records, the page it was
+    // started on, and the page is still there when it is done.
+    ToolsView {
+        anchors.fill: parent
+        active: ScreenTools.active && ScreenTools.host === "launcher"
     }
 
     Component.onCompleted: {

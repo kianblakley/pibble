@@ -48,7 +48,7 @@ Item {
     // built-ins first, then one slot per custom page that opts
     // into a settings tab (see LauncherState.customSettingsTabs) - in
     // whatever order those pages themselves loaded in
-    readonly property var tabOrder: ["general", "pages", "animations", "keybindings", "flyouts"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
+    readonly property var tabOrder: ["general", "pages", "animations", "keybindings", "flyouts", "tools"].concat(LauncherState.customSettingsTabs.map(t => t.pageId))
     // LauncherWindow's customPages Repeater's model is Settings.uploadedPages itself,
     // reassigned wholesale (a fresh array) on every toggle/
     // upload/trash/rescan - since it's a plain JS-array model,
@@ -113,7 +113,8 @@ Item {
             { id: "pages", label: "Pages", custom: false, phase: "in" },
             { id: "animations", label: "Animations", custom: false, phase: "in" },
             { id: "keybindings", label: "Navigation", custom: false, phase: "in" },
-            { id: "flyouts", label: "Flyouts", custom: false, phase: "in" }
+            { id: "flyouts", label: "Flyouts", custom: false, phase: "in" },
+            { id: "tools", label: "Tools", custom: false, phase: "in" }
         ]
         function reconcileTabs() {
             const desired = LauncherState.customSettingsTabs;
@@ -433,7 +434,7 @@ Item {
         anchors.topMargin: 18
         // constant content height (tallest page): switching tabs never
         // moves the pane, shorter pages stay top-aligned
-        readonly property real tallHeight: Math.max(generalTab.height, pagesTab.height, animationsTab.height, navigationTab.height, flyoutsTab.height, customTabsMaxHeight)
+        readonly property real tallHeight: Math.max(generalTab.height, pagesTab.height, animationsTab.height, navigationTab.height, flyoutsTab.height, toolsTab.height, customTabsMaxHeight)
         // ...but the viewport itself is capped at what the output can show.
         // The General tab tops 1000px, so on a short display (~770px usable
         // at 1440x900) the centered pane overshot both edges, putting the
@@ -460,7 +461,7 @@ Item {
         // space under its last row - and on the Pages tab the wheel overlay
         // below took the wheel away from the page list for it.
         readonly property real activeHeight: {
-            const builtIn = [generalTab, pagesTab, animationsTab, navigationTab, flyoutsTab][root.tabIndex];
+            const builtIn = [generalTab, pagesTab, animationsTab, navigationTab, flyoutsTab, toolsTab][root.tabIndex];
             if (builtIn)
                 return builtIn.height;
             for (let i = 0; i < customTabs.count; i++) {
@@ -540,6 +541,11 @@ Item {
         FlyoutsTab {
             id: flyoutsTab
             slideIndex: 4
+            activeIndex: root.tabIndex
+        }
+        ToolsTab {
+            id: toolsTab
+            slideIndex: 5
             activeIndex: root.tabIndex
         }
 

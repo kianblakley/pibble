@@ -75,7 +75,8 @@ Singleton {
     //
     // Within the second line the two flyouts bracket the two menus rather than
     // sitting together, which is not the order the ids fall in - chosen by
-    // hand for the pairing.
+    // hand for the pairing. The tools menu, the one surface that is both
+    // the launcher's and not, has the third line to itself.
     readonly property var scrambleSectionChips: [
         { id: "clock", label: "clock" },
         { id: "apps", label: "apps" },
@@ -84,7 +85,8 @@ Singleton {
         { id: "volume", label: "volume" },
         { id: "power", label: "power" },
         { id: "notifs", label: "notifications" },
-        { id: "settings", label: "settings" }
+        { id: "settings", label: "settings" },
+        { id: "tools", label: "tools" }
     ]
     readonly property int scrambleChipColumns: 4
 
@@ -95,7 +97,7 @@ Singleton {
     // return for a key that uses Metrics.shortValueWidth, already translated.
     // Metrics measures these and nothing else, which is why a value that isn't
     // listed here is a value that can overhang its arrows.
-    readonly property var shortValueChoices: [Strings.tr("on"), Strings.tr("off"), Strings.tr("pill"), Strings.tr("sine wave"), Strings.tr("bubble"), "560 px", "10 s", "50%"]
+    readonly property var shortValueChoices: [Strings.tr("on"), Strings.tr("off"), Strings.tr("pill"), Strings.tr("sine wave"), Strings.tr("bubble"), "560 px", "10 s", "50%"].concat(Defaults.toolsAnims.map(anim => root.styleName(anim))).concat(Defaults.toolsFaces.concat(Defaults.toolsColorModes, Defaults.recordAudioChoices).map(choice => Strings.tr(choice))).concat([Strings.tr("name and key"), Strings.tr("name")]).concat(Defaults.toolsTrails.map(choice => Strings.tr(choice)))
 
     // The user-facing spelling of a motion style. Only "none" differs, and only
     // here: the stored id stays "none" everywhere (Settings.heal, and every
@@ -179,6 +181,20 @@ Singleton {
             return Strings.tr(Settings.notifStyle);
         case "notifAnim":
             return root.styleName(Settings.notifAnim);
+        case "toolsAnim":
+            return root.styleName(Defaults.toolsAnims.includes(Settings.toolsAnim) ? Settings.toolsAnim : Defaults.toolsAnim);
+        case "toolsFace":
+            return Strings.tr(Defaults.toolsFaces.includes(Settings.toolsFace) ? Settings.toolsFace : Defaults.toolsFace);
+        case "toolsColors":
+            return Strings.tr(Settings.toolsColors === "theme" ? "theme" : "fixed");
+        case "toolsSpread":
+            return Settings.toolsSpread + " px";
+        case "toolsTrail":
+            return Strings.tr(Defaults.toolsTrails.includes(Settings.toolsTrail) ? Settings.toolsTrail : Defaults.toolsTrail);
+        case "toolsHint":
+            return Strings.tr(Settings.toolsHint === "name" ? "name" : Settings.toolsHint === "off" ? "off" : "name and key");
+        case "recordAudio":
+            return Strings.tr(Defaults.recordAudioChoices.includes(Settings.recordAudio) ? Settings.recordAudio : "desktop");
         case "wallpaperStyle":
             // the internal ids are historical (see Settings.wallpaperStyle);
             // these are what the user is actually shown
@@ -269,6 +285,27 @@ Singleton {
             break;
         case "notifAnim":
             Settings.notifAnim = root.cycle(Settings.notifAnim, ["pop", "none"], dir);
+            break;
+        case "toolsAnim":
+            Settings.toolsAnim = root.cycle(Settings.toolsAnim, Defaults.toolsAnims, dir);
+            break;
+        case "toolsFace":
+            Settings.toolsFace = root.cycle(Settings.toolsFace, Defaults.toolsFaces, dir);
+            break;
+        case "toolsColors":
+            Settings.toolsColors = root.cycle(Settings.toolsColors, Defaults.toolsColorModes, dir);
+            break;
+        case "toolsHint":
+            Settings.toolsHint = root.cycle(Settings.toolsHint, Defaults.toolsHints, dir);
+            break;
+        case "toolsTrail":
+            Settings.toolsTrail = root.cycle(Settings.toolsTrail, Defaults.toolsTrails, dir);
+            break;
+        case "toolsSpread":
+            Settings.toolsSpread = Math.max(Defaults.toolsSpreadMin, Math.min(Defaults.toolsSpreadMax, Settings.toolsSpread + dir * 8));
+            break;
+        case "recordAudio":
+            Settings.recordAudio = root.cycle(Settings.recordAudio, Defaults.recordAudioChoices, dir);
             break;
         case "wallpaperStyle":
             Settings.wallpaperStyle = root.cycle(Settings.wallpaperStyle, ["grid", "carousel-flat", "carousel"], dir);
@@ -443,6 +480,45 @@ Singleton {
             break;
         case "notifAnim":
             Settings.notifAnim = "pop";
+            break;
+        case "toolsAnim":
+            Settings.toolsAnim = Defaults.toolsAnim;
+            break;
+        case "toolsFace":
+            Settings.toolsFace = Defaults.toolsFace;
+            break;
+        case "toolsColors":
+            Settings.toolsColors = Defaults.toolsColors;
+            break;
+        case "toolsSpread":
+            Settings.toolsSpread = Defaults.toolsSpread;
+            break;
+        case "toolsHint":
+            Settings.toolsHint = Defaults.toolsHint;
+            break;
+        case "toolsTrail":
+            Settings.toolsTrail = Defaults.toolsTrail;
+            break;
+        case "searchUrl":
+            Settings.searchUrl = Defaults.searchUrl;
+            break;
+        case "ocrLanguages":
+            Settings.ocrLanguages = "";
+            break;
+        case "translateTo":
+            Settings.translateTo = "";
+            break;
+        case "translateCommand":
+            Settings.translateCommand = "";
+            break;
+        case "recordDir":
+            Settings.recordDir = Defaults.recordDir;
+            break;
+        case "recordAudio":
+            Settings.recordAudio = "desktop";
+            break;
+        case "recordArgs":
+            Settings.recordArgs = "";
             break;
         case "wallpaperStyle":
             Settings.wallpaperStyle = "grid";

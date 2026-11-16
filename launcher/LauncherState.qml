@@ -93,7 +93,7 @@ Singleton {
     }
 
     // Set right before exit() when the close is a hand-off to something that
-    // needs the screen - the Pages tab's upload picker ("folder"), or the
+    // needs the screen - the Pages tab's upload picker ("folder") or the
     // palette editor's eyedropper ("color") - rather than a real dismiss.
     // LauncherWindow calls openPendingDialog() once the exit animation has
     // fully played, instead of racing it, and whatever owns the hand-off takes
@@ -113,8 +113,115 @@ Singleton {
         root.dialogPending = "";
         if (pending === "folder")
             root.uploadDialogRequested();
-        else if (pending === "color")
+        else if (pending === "color") {
+            root.awayFor = "color";
             ScreenColor.pick();
+        }
+    }
+
+    // What the launcher has stepped aside for and will come back after:
+    // "color" (the palette editor's eyedropper), or "" when nothing is
+    // holding it. Only a hand-off sets it, so a pick made with no launcher
+    // up never brings one back, and the launcher opened by hand in the
+    // meantime forgets the trip.
+    property string awayFor: ""
+    function comeBack(): void {
+        if (root.awayFor === "")
+            return;
+        root.awayFor = "";
+        root.reopenAfterDialog();
+    }
+
+    // ---------- the tools menu ----------
+
+    // The launcher's own tools menu is out (`pibble toggle tools` with the
+    // launcher up; see PowerOverlay). State of the launcher's and not of
+    // ScreenTools', whose menuOpen is the menu drawn on the desktop instead.
+    property bool toolsOpen: false
+    function toggleTools(): void {
+        root.toolsOpen = !root.toolsOpen;
+    }
+    // Every tool is used over the launcher as it stands, and leaves it open
+    // when it is done: what a tool reads or records is whatever is on the
+    // screen, the launcher included. Each starts once the menu has played
+    // its exit, so the menu is not in the frame.
+    function pickTool(action: string): void {
+        root.toolsOpen = false;
+        // pausing or stopping a recording looks at nothing
+        if (action === "pause" || action === "stop") {
+            ScreenTools.run(action);
+            return;
+        }
+        // the eyedropper's view is the launcher's too (see ScreenColor.host)
+        if (action === "color") {
+            root.pickingHere = true;
+            ScreenColor.host = "launcher";
+        }
+        toolStart.action = action;
+        toolStart.interval = ScreenTools.menuExit + 80;
+        toolStart.restart();
+    }
+    Timer {
+        id: toolStart
+        property string action: ""
+        onTriggered: ScreenTools.run(toolStart.action)
+    }
+
+    property bool pickingHere: false
+    // A pick over the launcher has ended, either way: the keys go back to the
+    // launcher, and a check that said no leaves the picker on its own surface
+    // for next time.
+    function pickedHere(): void {
+        if (!root.pickingHere)
+            return;
+        root.pickingHere = false;
+        ScreenColor.host = "overlay";
+        root.focusInput();
+    }
+
+    // A screen tool let through while the launcher is up - picked off its
+    // menu, or started from outside (`pibble search`, a keybind) - is drawn
+    // by the launcher, over itself (see ScreenTools.host): the frame is taken
+    // with the launcher in it, and the launcher is still there after. With
+    // nothing up the tools' own surface has it.
+    Connections {
+        target: ScreenTools
+        function onGranted(): void {
+            if (root.shown && !root.exiting)
+                ScreenTools.host = "launcher";
+            ScreenTools.capture();
+        }
+        // a gesture over the launcher has ended: the keys come back to it
+        function onActiveChanged(): void {
+            if (!ScreenTools.active && root.shown)
+                root.focusInput();
+        }
+        // The desktop's menu and the launcher are two answers to the same
+        // keypress and never share the screen: whichever is asked for second
+        // sends the first away.
+        function onMenuOpenChanged(): void {
+            if (ScreenTools.menuOpen && root.shown && !root.exiting)
+                root.exit();
+        }
+    }
+    onExitingChanged: {
+        if (root.exiting)
+            root.toolsOpen = false;
+    }
+    onShownChanged: {
+        root.toolsOpen = false;
+        // a pick drawn by the launcher cannot outlive it
+        if (!root.shown && root.pickingHere)
+            ScreenColor.cancelOverlay();
+        // a gesture drawn by the launcher cannot outlive it either
+        if (!root.shown && ScreenTools.host === "launcher")
+            ScreenTools.close();
+        if (root.shown) {
+            ScreenTools.menuOpen = false;
+            // opened by hand while the eyedropper held the screen: that trip
+            // is over
+            root.awayFor = "";
+        }
     }
 
     // The eyedropper borrows the screen the same way the upload picker does, so
@@ -124,10 +231,19 @@ Singleton {
     Connections {
         target: ScreenColor
         function onPicked(hex: string): void {
-            root.reopenAfterDialog();
+            root.pickedHere();
+            if (root.awayFor === "color")
+                root.comeBack();
         }
         function onFailed(): void {
-            root.reopenAfterDialog();
+            root.pickedHere();
+            if (root.awayFor === "color")
+                root.comeBack();
+        }
+        // a no from the check never reaches picked or failed
+        function onChecked(found: bool): void {
+            if (!found)
+                root.pickedHere();
         }
     }
 
@@ -421,7 +537,7 @@ Singleton {
     function cyclePane(dir: int) {
         // inside settings the cycle keybinds walk the settings tabs
         if (pane === "settings") {
-            const tabs = ["general", "pages", "animations", "keybindings", "flyouts"].concat(customSettingsTabs.map(t => t.pageId));
+            const tabs = ["general", "pages", "animations", "keybindings", "flyouts", "tools"].concat(customSettingsTabs.map(t => t.pageId));
             settingsTab = tabs[((tabs.indexOf(settingsTab) + dir) % tabs.length + tabs.length) % tabs.length];
             return;
         }
@@ -587,7 +703,9 @@ Singleton {
     // gesture calls this directly and has no such earlier interception,
     // so the prompt check has to live here too.
     function goBack() {
-        if (root.powerArmed)
+        if (root.toolsOpen)
+            root.toolsOpen = false;
+        else if (root.powerArmed)
             root.disarmPower();
         else if (root.rebootArmed)
             root.disarmReboot();

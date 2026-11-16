@@ -81,6 +81,13 @@ Singleton {
     // While true the overlay owns the screen. `shotPath` is the frozen frame
     // it samples, deleted the moment the pick ends.
     property bool overlayActive: false
+    // Which surface draws the pick (ui/ColorPickView.qml): "overlay", the
+    // picker's own fullscreen window, or "launcher", which picks over itself
+    // when the pick was asked for from its tools menu - the launcher maps
+    // above the overlay, so it could not be seen there, and picking a color
+    // has no reason to send the launcher away. Set before prepare(), and back
+    // to "overlay" when the pick ends.
+    property string host: "overlay"
     property string shotPath: ""
     // tmpfs, not the cache dir: the frame is 33MB of throwaway written and
     // read back within a second - the runtime dir keeps that off the disk
@@ -169,6 +176,7 @@ Singleton {
             } else {
                 root.overlayActive = false;
                 root.picking = false;
+                root.host = "overlay";
                 root.failed();
             }
         }
@@ -188,6 +196,7 @@ Singleton {
     function closeOverlay(): void {
         root.overlayActive = false;
         root.picking = false;
+        root.host = "overlay";
         if (root.shotPath) {
             Quickshell.execDetached(["rm", "-f", "--", root.shotPath]);
             root.shotPath = "";
@@ -198,6 +207,7 @@ Singleton {
     function magnifyFailed(): void {
         root.overlayActive = false;
         root.picking = false;
+        root.host = "overlay";
         root.failed();
     }
 

@@ -18,6 +18,9 @@ https://github.com/user-attachments/assets/1d81fa01-aa78-49b8-88ce-58bb02543fe0
 - **Dynamic theming** - matugen-driven color extraction from your current wallpaper, or a custom palette
 - **Notification replay** - re-fire recent notifications, stepping further back in history on each repeated call
 - **Live wallpaper support** - live wallpaper previews, with auto-generated blurred variants
+- **Screen search** - freeze the screen, drag over anything on it, and search for the text inside, copy it, translate it, or look the picture up
+- **Translate the screen** - every paragraph on screen that isn't in your language is repainted in it, in place
+- **Screen recorder** - record the whole screen or a rectangle of it; pause and stop are in the tools menu while it runs
 - **Multi-monitor support** - the launcher and flyouts follow whichever output is focused
 - **Gesture and keyboard support** - entirely navigateable with either keyboard or gestures alone
   
@@ -89,7 +92,10 @@ Optional - each one is a feature:
 | [cliphist](https://github.com/sentriz/cliphist) + [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard history, and copying an entry back | Empty clipboard page |
 | [matugen](https://github.com/InioX/matugen) **4.1.0 or newer** | Wallpaper-derived color theme | "Dynamic" keeps its last palette. Older releases reject the options pibble passes |
 | [curl](https://curl.se/) | Fetches the weather shown on the clock page | The weather is silently blank |
-| [grim](https://sr.ht/~emersion/grim) | Freezes the screen so the color picker's eyedropper has something to sample | Clicking the eyedropper only reports that grim is missing |
+| [grim](https://sr.ht/~emersion/grim) | Freezes the screen so the color picker's eyedropper has something to sample, and so `search`, `copy`, `scan` and `translate` have something to read | Each only reports that grim is missing |
+| [tesseract](https://github.com/tesseract-ocr/tesseract) + a language pack for each language you read | Reads the text on screen for `search`, `copy` and `translate` (which also cut the screen up with ffmpeg, and reach the translator with curl) | Each only reports that tesseract is missing |
+| [zbar](https://github.com/mchehab/zbar) (`zbar-tools` on Debian/Ubuntu) | Reads QR codes and barcodes for `scan` | `scan` only reports that zbarimg is missing |
+| [wf-recorder](https://github.com/ammen99/wf-recorder) | `record` | It only reports that wf-recorder is missing |
 | `gtk-launch` (GTK 3) | Launches apps the way a desktop would | Apps with a quoted `Exec=` line or D-Bus activation may not start |
 | systemd (`systemctl`) | Power off and reboot | The power menu's buttons do nothing |
 | UPower, PipeWire | Battery readout, volume flyout | Each is hidden |
@@ -127,8 +133,41 @@ present, and `./pibble install --no-deps` skips the step entirely.
 | `stop` | Stop the daemon |
 | `restart` | Restart the daemon |
 | `toggle [page]` | Show/hide the launcher, starting the daemon first if needed; with a page id, opens/switches straight to that page |
+| `toggle tools` | Show or hide the tools menu for the commands below - the launcher's own if it is open, on its own on the desktop if not |
+| `search` | Freeze the screen and drag a rectangle over anything on it. A card offers what was read: `Enter` searches for it, `C` copies it, `T` translates it, `I` looks the selection up as an image. `Esc` or a right click closes |
+| `copy` | Freeze the screen and drag over some text on it; what was read goes straight to the clipboard. If nothing was found the screen stays frozen to drag again |
+| `scan` | Freeze the screen and drag over a QR code or barcode. A card shows what it holds: `Enter` opens a link (or searches for anything else), `C` copies it |
+| `translate` | Freeze the screen and drag over some text; it is translated into your language, in place. Hold `Space` to see the original, `C` copies the translation, `Esc` closes |
+| `record [region\|pause]` | Start recording the screen - or, with `region`, a rectangle you drag on it - into `~/Videos`. Run it again, or pick stop in the tools menu, to stop; `record pause` (or the menu's pause) pauses and resumes |
 | `replay` | Re-fire one recent notification; repeated presses step back through history |
 | `env` | Print the environment a daemon starts with (resolved font, icon theme), as shell exports |
+
+### Search, copy text, scan a code, translate, record and pick a color
+
+The commands above, and the screen color picker, are also a menu, opened with `./pibble toggle tools` - bind that in your compositor's config. With the launcher up it opens over the launcher, otherwise on the desktop. Either way it opens where the pointer is, and the pointer turns into a small mark in its middle. Move toward a tool and click (or press, flick and let go), or go round with the arrows (`Right`/`Down` to the next tool, `Left`/`Up` back), `Tab`/`Shift+Tab` or the scroll wheel; `Enter` picks, `S`, `X` (copy text), `Q` (scan a code), `T`, `R`, `A` and `C` pick directly, and `Esc`, a right click or a click without moving closes it. While a recording runs, the menu shows how long it has run and its pause and stop sit on a small ring of their own round the mark - a short move picks one of them, a longer one a tool - and `R` pauses and resumes, `A` stops. Picking a color puts its hex on the clipboard.
+
+A tool used with the launcher up works over the launcher as it stands and leaves it open, so it can read whatever page you are on. Nothing reads more of the screen than the rectangle you drag.
+
+*Settings > Tools* holds the rest:
+
+| Setting | Default | |
+|---|---|---|
+| Tools menu pointer | face | What the pointer becomes in the middle of the menu: `face`, `visor`, `cat` or `sprout` |
+| Tools menu size | 84 px | How far the tools sit from the pointer (64-160) |
+| Tools menu trails | streak | Whether the eyes leave a streak behind them: `streak` or `off` |
+| Tools menu labels | name and key | What shows beside the chosen tool: its name and key, the name alone, or nothing |
+| Tools menu animation | pop | pop, fade, slide or off |
+| Tools colors | fixed | `fixed` is black and white over anything; `theme` follows pibble's colors |
+| Search with | `https://www.google.com/search?q=%s` | Where text you dragged over is searched for |
+| Reading languages | every installed pack | tesseract codes to read with, e.g. `eng+jpn` |
+| Translate into | the shell's language | Language to translate into, e.g. `en`, `ja` |
+| Translate command | Google's keyless endpoint | A command to translate with instead: text on stdin, one paragraph per line; `$PIBBLE_TRANSLATE_TO` is the target; print the same number of lines |
+| Recordings folder | `~/Videos` | Where recordings are written |
+| Recording sound | desktop | `desktop`, `mic` or `off` |
+| Recorder options | | Extra `wf-recorder` arguments, e.g. `-c hevc_vaapi -d /dev/dri/renderD128` |
+
+
+Nothing leaves the machine until you ask for it: `translate`, and the card's translate and image chips, send what was read (or the selected image) to Google unless `translateCommand` says otherwise.
 
 ## Configuring
 
@@ -164,6 +203,7 @@ Each window has a layer-shell namespace which can be used to apply background ef
 | `pibble-notifications` | Notification flyout |
 | `pibble-volume` | Volume flyout |
 | `pibble-colorpicker` | Screen color picker |
+| `pibble-tools` | Search / copy / scan / translate / record-region overlay, and the tools menu when it opens without the launcher |
 
 ### Custom pages
 

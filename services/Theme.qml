@@ -104,6 +104,34 @@ Singleton {
         return Settings.roundedCorners ? px : 0;
     }
 
+    // The screen tools - the menu, the circle being drawn, the frame round
+    // what was marked, the result card, the recording pill. By default fixed
+    // black and white rather than the theme's: they are drawn over whatever
+    // is on the screen, and a line in the palette's accent can vanish into a
+    // page of the same colour where white stays readable on anything.
+    // Settings > Tools can hand them to the theme instead.
+    //
+    //   ink    the dark shapes - the menu's buttons and face
+    //   glyph  an icon on ink
+    //   accent the chosen button, the drawn line (the pointer's eyes, halo and
+    //          sail are always white)
+    //   fg     text on the dark card
+    //   muted  quieter text on it
+    readonly property bool toolsFollowTheme: Settings.toolsColors === "theme"
+    readonly property var tools: root.toolsFollowTheme ? ({
+            ink: root.flyoutSurface,
+            glyph: root.fg,
+            accent: root.accent,
+            fg: root.fg,
+            muted: root.muted
+        }) : ({
+            ink: "#000000",
+            glyph: "#ffffff",
+            accent: "#ffffff",
+            fg: "#f2f0ee",
+            muted: "#908c87"
+        })
+
     // "matugen" ("Dynamic"): near-black card, bubble tinted from the app icon;
     // the volume level bar still follows the wallpaper palette
     readonly property bool tintNotificationsFromIcon: Settings.theme === "matugen"

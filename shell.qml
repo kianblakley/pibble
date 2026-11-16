@@ -25,14 +25,15 @@ import "root:/services"
 import "root:/startup"
 
 // This file is only the wiring: it binds the three persisted stores to disk,
-// puts up the four windows, and exposes the IPC the `pibble` script talks to.
+// puts up the six windows, and exposes the IPC the `pibble` script talks to.
 // Everything else lives under:
 //
 //   config/    persisted settings and what the settings UI knows about them
 //   services/  the shell's data sources - theme, wallpapers, clipboard, apps…
 //   ui/        reusable settings controls, and the custom-page contract
 //   launcher/  the launcher window, its state, and one file per pane
-//   flyouts/   transient overlay surfaces - the OSDs and the color picker
+//   flyouts/   transient overlay surfaces - the OSDs, the color picker, and
+//              the screen tools' overlay
 //   startup/   invisible surfaces that only exist to measure the output
 //
 // Those layers only ever point one way - launcher/flyouts → ui → services →
@@ -56,6 +57,7 @@ ShellRoot {
     VolumeOsd {}
     NotificationFlyout {}
     ColorPickerOverlay {}
+    ToolsOverlay {}
 
     XrayScaleProbe {}
 
@@ -98,6 +100,46 @@ ShellRoot {
         // whether the launcher window itself is open.
         function replay(): void {
             Notifier.replay();
+        }
+        // `pibble search` / `pibble translate`: freeze the screen and drag a
+        // rectangle over something on it, to search for it or translate it
+        // in place. Asking again while
+        // either is up closes it, so one keybind does both (see
+        // ScreenTools.request; getting the launcher out of the way first is
+        // LauncherState's).
+        function search(): void {
+            ScreenTools.request("search");
+        }
+        function translate(): void {
+            ScreenTools.request("translate");
+        }
+        // `pibble copy` / `pibble scan`: drag over some text and it goes to
+        // the clipboard; drag over a QR code or barcode to read it
+        function copy(): void {
+            ScreenTools.request("copy");
+        }
+        function scan(): void {
+            ScreenTools.request("code");
+        }
+        // `pibble toggle tools`: the menu these and the recorder share.
+        // With the launcher up it is the launcher's own menu; with nothing up
+        // it opens at the pointer on the tools overlay.
+        function tools(): void {
+            if (launcher.shown && !LauncherState.exiting)
+                LauncherState.toggleTools();
+            else
+                ScreenTools.toggleMenu();
+        }
+        // `pibble record [region|pause]`: starts a recording of the output in
+        // use - or, with "region", of a rectangle dragged on it - and stops
+        // the one that is running; "pause" holds it and carries it on.
+        function record(what: string): void {
+            if (what === "pause")
+                Recorder.togglePause();
+            else if (what === "region")
+                Recorder.toggleRegion();
+            else
+                Recorder.toggle();
         }
     }
 }
