@@ -28,9 +28,10 @@ import "root:/config"
 // stitched into the one file at the end (see finish) - without re-encoding,
 // since every segment was made with the same settings.
 //
-// What is recorded is either the output in use when the recording starts, or a
-// rectangle of it dragged on the tools overlay (ScreenTools' "region" mode,
-// whose answer arrives here as regionChosen). A resume records the same.
+// What is recorded is always picked first on the tools overlay (ScreenTools'
+// "region" mode, whose answer arrives here as regionChosen): a rectangle
+// dragged on the output in use, or that whole output for a click with no drag
+// in it. A resume records the same.
 Singleton {
     id: root
 
@@ -61,22 +62,8 @@ Singleton {
     // what the segment ending now is ending for: "pause" or "stop"
     property string ending: ""
 
-    // `pibble record`: stop if recording, else record the whole output.
-    function toggle(): void {
-        if (root.recording) {
-            root.stop();
-            return;
-        }
-        // asked for the whole screen while a region was being picked: the
-        // picker goes first, or its dim is what gets recorded
-        if (ScreenTools.mode === "region")
-            ScreenTools.close();
-        // and so does the menu, if that is where this was asked from
-        const output = ActiveOutput.screen ? ActiveOutput.screen.name : "";
-        ScreenTools.afterMenu(() => root.start(output, ""));
-    }
-
-    // `pibble record region`: stop if recording, else ask for a rectangle.
+    // `pibble record`, and the menu's record: stop if recording, else ask for
+    // a rectangle (or a click for the whole output).
     function toggleRegion(): void {
         if (root.recording)
             root.stop();

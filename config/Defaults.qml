@@ -105,6 +105,10 @@ QtObject {
     // ui/ToolsPie.qml): "streak" fades out along its length, "solid" is the
     // eyes' own colour all the way to its point, "off" leaves none.
     readonly property var toolsTrails: ["streak", "solid", "off"]
+    // What shape the pointer face's eyes are (see ui/ToolsPie.qml): upright
+    // pills, or apostrophes.
+    readonly property var toolsEyesChoices: ["pill", "apostrophe"]
+    readonly property string toolsEyes: "pill"
     readonly property string toolsTrail: "streak"
     readonly property string toolsHint: "full"
     readonly property int toolsSpreadMin: 64

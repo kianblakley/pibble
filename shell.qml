@@ -101,10 +101,11 @@ ShellRoot {
         function replay(): void {
             Notifier.replay();
         }
-        // `pibble search` / `pibble translate`: freeze the screen and drag a
-        // rectangle over something on it, to search for it or translate it
-        // in place. Asking again while
-        // either is up closes it, so one keybind does both (see
+        // `pibble search`: freeze the screen and drag a rectangle over
+        // something on it - to select and copy its words, search for it, open
+        // a code in it or translate it in place. `pibble translate` is the
+        // same, translating the moment the rectangle has been read. Asking
+        // again while either is up closes it, so one keybind does both (see
         // ScreenTools.request; getting the launcher out of the way first is
         // LauncherState's).
         function search(): void {
@@ -112,14 +113,6 @@ ShellRoot {
         }
         function translate(): void {
             ScreenTools.request("translate");
-        }
-        // `pibble copy` / `pibble scan`: drag over some text and it goes to
-        // the clipboard; drag over a QR code or barcode to read it
-        function copy(): void {
-            ScreenTools.request("copy");
-        }
-        function scan(): void {
-            ScreenTools.request("code");
         }
         // `pibble toggle tools`: the menu these and the recorder share.
         // With the launcher up it is the launcher's own menu; with nothing up
@@ -130,16 +123,15 @@ ShellRoot {
             else
                 ScreenTools.toggleMenu();
         }
-        // `pibble record [region|pause]`: starts a recording of the output in
-        // use - or, with "region", of a rectangle dragged on it - and stops
-        // the one that is running; "pause" holds it and carries it on.
+        // `pibble record [pause]`: asks for a rectangle to record (a click
+        // for the whole output) and stops the recording that is running;
+        // "pause" holds it and carries it on. "region" is still taken, from
+        // when the whole output was recorded without asking.
         function record(what: string): void {
             if (what === "pause")
                 Recorder.togglePause();
-            else if (what === "region")
-                Recorder.toggleRegion();
             else
-                Recorder.toggle();
+                Recorder.toggleRegion();
         }
     }
 }

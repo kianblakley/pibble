@@ -2,10 +2,10 @@ import QtQuick
 import "root:/config"
 import "root:/services"
 
-// The tools menu with nothing drawn: what the actions are (search, copy text,
-// scan a code, translate, record, record an area, pick a color - see
-// services/ScreenTools.qml - and, while a recording runs, its pause and stop
-// on an inner ring), which one is chosen,
+// The tools menu with nothing drawn: what the actions are (search - which
+// also selects and copies text, reads codes and translates - record, and pick
+// a color; see services/ScreenTools.qml - and, while a recording runs, its
+// pause and stop on an inner ring), which one is chosen,
 // how the pointer and the keys choose, and the one clock (`reveal`) every part
 // of it animates off. What it looks like is ToolsPie.
 //
@@ -36,18 +36,13 @@ Item {
 
     // In the order they sit round the pie, clockwise from the top.
     readonly property var actions: [
-        { id: "search", glyph: Icons.search, label: "search", hint: "drag over anything", key: "s" },
-        { id: "copy", glyph: Icons.textFields, label: "copy text", hint: "drag over the words", key: "x" },
-        { id: "code", glyph: Icons.qrScanner, label: "scan code", hint: "drag over the code", key: "q" },
-        { id: "translate", glyph: Icons.translate, label: "translate", hint: "drag over the text", key: "t" },
-        { id: "record", glyph: Icons.videocam, label: "record", hint: "the whole screen", key: "r" },
-        { id: "area", glyph: Icons.screenshotRegion, label: "record area", hint: "drag a rectangle", key: "a" },
+        { id: "search", glyph: Icons.search, label: "search", hint: "copy, search, translate", key: "s" },
+        { id: "record", glyph: Icons.videocam, label: "record", hint: "drag an area, or click", key: "r" },
         { id: "color", glyph: Icons.eyedropper, label: "pick color", hint: "copies its hex", key: "c" }
     ]
     // While a recording runs, its two controls, on a small ring of their own
     // between the face and the tools: pause at the top, stop at the bottom.
-    // They take the record keys, the two record tools being out of use
-    // until it ends.
+    // Pause takes record's key, record being out of use until it ends.
     readonly property bool recording: Recorder.recording
     readonly property var controls: [
         { id: "pause", glyph: Icons.pause, label: "pause", key: "r", inner: true },
@@ -85,13 +80,12 @@ Item {
 
     // ---------- what the menu asks about an action ----------
 
-    // Out of use, and so not choosable: the two record tools while a
-    // recording runs (there is one recorder), and its controls once it is
-    // saving.
+    // Out of use, and so not choosable: record while a recording runs
+    // (there is one recorder), and its controls once it is saving.
     function off(entry: var): bool {
         if (entry.inner)
             return Recorder.stopping;
-        return root.recording && (entry.id === "record" || entry.id === "area");
+        return root.recording && entry.id === "record";
     }
     function glyph(entry: var): string {
         if (entry.id === "pause" && Recorder.paused)

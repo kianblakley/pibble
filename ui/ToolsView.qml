@@ -5,8 +5,10 @@ import "root:/services"
 
 // Where the screen tools' gestures happen (see services/ScreenTools.qml for
 // what they are): a frozen frame of the screen with a rectangle dragged over
-// it, and whatever came of that - the card of things to do with what was
-// read, or the translated paragraphs laid over the ones they replace.
+// it, and whatever came of that - the words read, lit where they sit and
+// selectable like a document's, a bar of things to do with them on the
+// rectangle's corner, and the translated paragraphs laid over the ones they
+// replace.
 //
 // It is drawn in two places, like the color picker's view. With nothing
 // else up it fills the tools overlay (flyouts/ToolsOverlay.qml); started
@@ -22,33 +24,31 @@ Item {
 
     property bool active: false
 
-    // One of the result card's actions: glyph, word, and the key that does the
-    // same thing.
-    component Chip: Rectangle {
+    // One of the bar's actions: a word, and the key that does the same
+    // thing. The one Enter does is ringed, and says so on its key.
+    component BarChip: Item {
         id: chip
-        property string glyph: ""
         property string label: ""
         property string key: ""
+        property bool primary: false
+        property bool enabled: true
         signal triggered
 
-        implicitWidth: chipRow.implicitWidth + 22
-        implicitHeight: 34
-        radius: Theme.radius(10)
-        color: Qt.alpha(Theme.tools.accent, chipHover.containsMouse ? 0.24 : 0.11)
-        border.width: 1
-        border.color: Qt.alpha(Theme.tools.accent, chipHover.containsMouse ? 0.6 : 0.33)
+        implicitWidth: chipRow.implicitWidth + 24
+        implicitHeight: 28
+        opacity: chip.enabled ? 1 : 0.5
 
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radius(14)
+            color: chipHover.containsMouse && chip.enabled ? Qt.alpha(Theme.tools.accent, 0.14) : "transparent"
+            border.width: chip.primary ? 2 : 0
+            border.color: Theme.tools.accent
+        }
         Row {
             id: chipRow
             anchors.centerIn: parent
             spacing: 7
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: chip.glyph
-                color: Theme.tools.accent
-                font.family: Icons.family
-                font.pixelSize: Theme.fontSize(17)
-            }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.label
@@ -56,13 +56,25 @@ Item {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize(13)
             }
-            Text {
+            Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: chip.key !== ""
-                text: chip.key
-                color: Theme.tools.muted
-                font.family: chip.key === Icons.cornerDownLeft ? Icons.family : Theme.fontFamily
-                font.pixelSize: Theme.fontSize(chip.key === Icons.cornerDownLeft ? 14 : 11)
+                implicitWidth: Math.max(18, capText.implicitWidth + 8)
+                implicitHeight: 18
+                width: implicitWidth
+                height: implicitHeight
+                radius: Theme.radius(4)
+                color: Qt.alpha(Theme.tools.fg, 0.07)
+                border.width: 1
+                border.color: Qt.alpha(Theme.tools.fg, 0.16)
+                Text {
+                    id: capText
+                    anchors.centerIn: parent
+                    text: chip.primary ? Icons.cornerDownLeft : chip.key
+                    color: Theme.tools.muted
+                    font.family: chip.primary ? Icons.family : Theme.fontFamily
+                    font.pixelSize: Theme.fontSize(chip.primary ? 12 : 10)
+                }
             }
         }
         MouseArea {
@@ -70,7 +82,10 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: chip.triggered()
+            onClicked: {
+                if (chip.enabled)
+                    chip.triggered();
+            }
         }
     }
 
@@ -111,11 +126,74 @@ Item {
     }
     readonly property bool hasMark: view.marked.width > 0 && view.marked.height > 0
 
+    // ---------- the words read ----------
+
+    // what was read is up, with words in it, and not covered by its own
+    // translation - so they can be selected
+    readonly property bool selectable: view.active && ScreenTools.phase === "result" && ScreenTools.words.length > 0 && ScreenTools.translate !== "shown"
+
+    // Every line of words, as a band across this view's pixels: the first
+    // and last of its words (indices into ScreenTools.words) and its box.
+    readonly property var lines: {
+        const out = [];
+        const words = ScreenTools.words;
+        for (let i = 0; i < words.length; i++) {
+            const word = words[i];
+            const last = out.length > 0 ? out[out.length - 1] : null;
+            if (!last || last.line !== word.line) {
+                out.push({ line: word.line, first: i, last: i, x0: word.x / view.ratio, x1: (word.x + word.w) / view.ratio, y0: word.y / view.ratio, y1: (word.y + word.h) / view.ratio });
+                continue;
+            }
+            last.last = i;
+            last.x0 = Math.min(last.x0, word.x / view.ratio);
+            last.x1 = Math.max(last.x1, (word.x + word.w) / view.ratio);
+            last.y0 = Math.min(last.y0, word.y / view.ratio);
+            last.y1 = Math.max(last.y1, (word.y + word.h) / view.ratio);
+        }
+        return out;
+    }
+
+    // The line under a point in this view's pixels, or failing that the
+    // nearest one: nearest up and down first, then across - two columns'
+    // lines at one height are told apart by which the point is nearer.
+    function lineAt(x: real, y: real): var {
+        let best = null;
+        let bestDy = 1e9;
+        let bestDx = 1e9;
+        for (const line of view.lines) {
+            const dy = y < line.y0 ? line.y0 - y : y > line.y1 ? y - line.y1 : 0;
+            const dx = x < line.x0 ? line.x0 - x : x > line.x1 ? x - line.x1 : 0;
+            if (dy < bestDy - 0.5 || (Math.abs(dy - bestDy) <= 0.5 && dx < bestDx)) {
+                best = line;
+                bestDy = dy;
+                bestDx = dx;
+            }
+        }
+        return best;
+    }
+    // The word a point picks: the one on its line it is over, or in the
+    // space after; before a line's first word, that one. -1 with no words.
+    function wordAt(x: real, y: real): int {
+        const line = view.lineAt(x, y);
+        if (!line)
+            return -1;
+        let picked = line.first;
+        for (let i = line.first; i <= line.last; i++) {
+            if (ScreenTools.words[i].x / view.ratio <= x)
+                picked = i;
+        }
+        return picked;
+    }
+    function inMark(x: real, y: real): bool {
+        return view.hasMark && x >= view.marked.x && x <= view.marked.x + view.marked.width && y >= view.marked.y && y <= view.marked.y + view.marked.height;
+    }
+
     // Focus is taken as the gesture starts rather than declared: whoever
     // hosts this has keys of its own the rest of the time.
     onActiveChanged: {
         view.drawing = false;
         view.peek = false;
+        pointer.picking = false;
         if (view.active)
             keys.forceActiveFocus();
     }
@@ -164,7 +242,10 @@ Item {
     // ---------- marking ----------
 
     // Every gesture is a rectangle dragged over the frame. A right click
-    // or Escape (see keys) gives the screen back.
+    // or Escape (see keys) gives the screen back. Once what a rectangle held
+    // has been read, a drag inside it selects words instead, the way it would
+    // in a document - a double click a word, a triple click its line, and a
+    // click on its own nothing - and a drag outside it starts another.
     MouseArea {
         id: pointer
         anchors.fill: parent
@@ -174,7 +255,18 @@ Item {
         visible: view.active
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        cursorShape: Qt.CrossCursor
+        cursorShape: view.selectable && view.inMark(pointer.mouseX, pointer.mouseY) ? Qt.IBeamCursor : Qt.CrossCursor
+
+        // selecting words: the word the press came down on, and whether
+        // the pointer has gone anywhere since
+        property bool picking: false
+        property int anchor: -1
+        property point pressedAt: Qt.point(0, 0)
+        property bool moved: false
+        // clicks in a row, close together in time and place
+        property int clicks: 0
+        property double lastClick: 0
+        property point lastClickAt: Qt.point(0, 0)
 
         onPressed: mouse => {
             if (mouse.button === Qt.RightButton) {
@@ -183,8 +275,20 @@ Item {
             }
             if (!view.markable)
                 return;
+            if (view.selectable && view.inMark(mouse.x, mouse.y)) {
+                pointer.picking = true;
+                pointer.moved = false;
+                pointer.pressedAt = Qt.point(mouse.x, mouse.y);
+                pointer.anchor = view.wordAt(mouse.x, mouse.y);
+                return;
+            }
+            // a press inside a rectangle with nothing to select in it is not
+            // the start of another, which would throw this one away for a
+            // stray click
+            if (ScreenTools.phase === "result" && view.inMark(mouse.x, mouse.y))
+                return;
             // a second rectangle starts from a clean frame: the first one's
-            // card, selection and word on what it held go the moment the
+            // bar, selection and word on what it held go the moment the
             // pointer comes down
             if (ScreenTools.reading && (ScreenTools.phase !== "select" || ScreenTools.selection.width > 0 || ScreenTools.notice !== ""))
                 ScreenTools.reselect();
@@ -193,10 +297,39 @@ Item {
             view.drawing = true;
         }
         onPositionChanged: mouse => {
+            if (pointer.picking) {
+                if (!pointer.moved && Math.hypot(mouse.x - pointer.pressedAt.x, mouse.y - pointer.pressedAt.y) < 4)
+                    return;
+                pointer.moved = true;
+                ScreenTools.pick(pointer.anchor, view.wordAt(mouse.x, mouse.y));
+                return;
+            }
             if (view.drawing)
                 view.to = Qt.point(Math.max(0, Math.min(view.width, mouse.x)), Math.max(0, Math.min(view.height, mouse.y)));
         }
         onReleased: mouse => {
+            if (pointer.picking && mouse.button === Qt.LeftButton) {
+                pointer.picking = false;
+                if (pointer.moved) {
+                    pointer.clicks = 0;
+                    return;
+                }
+                const now = Date.now();
+                const near = Math.hypot(mouse.x - pointer.lastClickAt.x, mouse.y - pointer.lastClickAt.y) < 6;
+                pointer.clicks = now - pointer.lastClick < 400 && near ? pointer.clicks + 1 : 1;
+                pointer.lastClick = now;
+                pointer.lastClickAt = Qt.point(mouse.x, mouse.y);
+                if (pointer.clicks === 2) {
+                    ScreenTools.pick(pointer.anchor, pointer.anchor);
+                } else if (pointer.clicks >= 3) {
+                    const line = view.lineAt(mouse.x, mouse.y);
+                    if (line)
+                        ScreenTools.pick(line.first, line.last);
+                } else {
+                    ScreenTools.pick(-1, -1);
+                }
+                return;
+            }
             if (!view.drawing || mouse.button !== Qt.LeftButton)
                 return;
             view.drawing = false;
@@ -219,18 +352,79 @@ Item {
         }
     }
 
-    // What was marked, framed.
+    // What was marked, framed - while it is being dragged, and for the
+    // recorder. A rectangle being read, or read, has only its corners
+    // marked instead, so nothing is drawn across the words at its edges.
+    readonly property bool cornered: ScreenTools.reading && !view.drawing
     Rectangle {
         id: frame
         x: view.marked.x
         y: view.marked.y
         width: view.marked.width
         height: view.marked.height
-        visible: view.hasMark
+        visible: view.hasMark && !view.cornered
         color: "transparent"
         radius: 0
         border.width: 2
         border.color: Theme.tools.accent
+    }
+    Repeater {
+        model: view.hasMark && view.cornered ? 4 : 0
+        Item {
+            id: corner
+            required property int index
+            readonly property bool atRight: index % 2 === 1
+            readonly property bool low: index > 1
+            readonly property real arm: Math.min(18, view.marked.width / 2, view.marked.height / 2)
+            x: corner.atRight ? view.marked.x + view.marked.width - corner.arm : view.marked.x
+            y: corner.low ? view.marked.y + view.marked.height - corner.arm : view.marked.y
+            width: corner.arm
+            height: corner.arm
+            Rectangle { x: 0; y: corner.low ? corner.arm - 3 : 0; width: corner.arm; height: 3; radius: 1.5; color: Theme.tools.accent }
+            Rectangle { x: corner.atRight ? corner.arm - 3 : 0; y: 0; width: 3; height: corner.arm; radius: 1.5; color: Theme.tools.accent }
+        }
+    }
+
+    // Every line read, faintly lit: this is text, and it can be picked up.
+    Repeater {
+        model: view.selectable ? view.lines : []
+        Rectangle {
+            required property var modelData
+            x: modelData.x0 - 3
+            y: modelData.y0 - 1
+            width: modelData.x1 - modelData.x0 + 6
+            height: modelData.y1 - modelData.y0 + 2
+            radius: Theme.radius(4)
+            color: Qt.alpha(Theme.tools.accent, 0.14)
+        }
+    }
+    // The words selected: along each line they cross, one band from the
+    // first to the last, the spaces between them included.
+    Repeater {
+        model: {
+            if (!view.selectable || !ScreenTools.picked)
+                return [];
+            const out = [];
+            for (const line of view.lines) {
+                const first = Math.max(line.first, ScreenTools.pickFirst);
+                const last = Math.min(line.last, ScreenTools.pickLast);
+                if (first > last)
+                    continue;
+                const a = ScreenTools.words[first];
+                const b = ScreenTools.words[last];
+                out.push({ x0: a.x / view.ratio, x1: (b.x + b.w) / view.ratio, y0: line.y0, y1: line.y1 });
+            }
+            return out;
+        }
+        Rectangle {
+            required property var modelData
+            x: modelData.x0 - 3
+            y: modelData.y0 - 1
+            width: modelData.x1 - modelData.x0 + 6
+            height: modelData.y1 - modelData.y0 + 2
+            radius: Theme.radius(4)
+            color: Qt.alpha(Theme.tools.accent, 0.45)
+        }
     }
 
     // a rectangle says how big it is while it is being dragged
@@ -252,29 +446,16 @@ Item {
         }
     }
 
-    // ---------- translate: the page, repainted ----------
+    // ---------- reading ----------
 
-    // Something is being read, or translated: a small pill that says
-    // which, with a spinner. Over the middle of the selection - or, for a
-    // translation, just above it, out of the way of the boxes that start
-    // landing in it while it is still at it. The same pill, without the
-    // spinner, says what a rectangle came back without, and stays until the
-    // next one is begun.
+    // Something is being read: a small pill that says so, with a spinner,
+    // over the middle of the selection.
     Rectangle {
         id: loading
         readonly property bool working: ScreenTools.phase === "working"
-        readonly property bool atMark: view.hasMark && ScreenTools.reading
-        readonly property bool beside: ScreenTools.mode === "translate"
-        visible: view.up && (loading.working || (ScreenTools.phase === "select" && ScreenTools.notice !== "" && !view.drawing))
-        x: loading.atMark ? Math.max(8, Math.min(view.width - width - 8, view.marked.x + (view.marked.width - width) / 2)) : (view.width - width) / 2
-        y: {
-            if (!loading.atMark)
-                return 24;
-            if (!loading.beside)
-                return Math.max(8, Math.min(view.height - height - 8, view.marked.y + (view.marked.height - height) / 2));
-            const above = view.marked.y - height - 10;
-            return above >= 8 ? above : Math.min(view.height - height - 8, view.marked.y + view.marked.height + 10);
-        }
+        visible: view.up && view.hasMark && ScreenTools.reading && loading.working
+        x: Math.max(8, Math.min(view.width - width - 8, view.marked.x + (view.marked.width - width) / 2))
+        y: Math.max(8, Math.min(view.height - height - 8, view.marked.y + (view.marked.height - height) / 2))
         width: loadingRow.implicitWidth + 28
         height: 36
         radius: Theme.radius(18)
@@ -318,15 +499,7 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: {
-                    if (!loading.working)
-                        return ScreenTools.notice;
-                    if (ScreenTools.mode === "code")
-                        return Strings.tr("Looking for a code…");
-                    if (ScreenTools.mode === "translate" && ScreenTools.queue.length > 0)
-                        return Strings.tr("Translating…");
-                    return Strings.tr("Reading…");
-                }
+                text: Strings.tr("Reading…")
                 color: Theme.tools.fg
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize(13)
@@ -341,9 +514,11 @@ Item {
     // rather than the shell's own face - that one is monospaced, and a
     // translation set a third wider than the text it replaces does not fit
     // the space that text left.
+    // ---------- translate: the page, repainted ----------
+
     Item {
         anchors.fill: parent
-        visible: ScreenTools.mode === "translate"
+        visible: ScreenTools.translate === "shown" || ScreenTools.translate === "working"
         opacity: view.peek ? 0 : 1
         Behavior on opacity {
             NumberAnimation { duration: 120 }
@@ -404,34 +579,42 @@ Item {
         }
     }
 
-    // ---------- search and code: what was read, and what to do with it ----------
+    // ---------- what to do with what was read ----------
 
+    // A bar on the rectangle's corner: above its top right where there is
+    // room, else under its bottom right, else just inside its top. Each
+    // action is on a key as well (see keys); the one Enter does is ringed.
     Rectangle {
-        id: card
-        readonly property bool code: ScreenTools.mode === "code"
-        readonly property bool shown: (ScreenTools.mode === "search" || card.code) && ScreenTools.phase === "result"
-        readonly property bool hasText: ScreenTools.text !== ""
-        readonly property real gap: 14
-        width: Math.min(view.width - 32, 520)
-        height: cardColumn.implicitHeight + 32
-        x: Math.max(16, Math.min(view.width - width - 16, view.marked.x + view.marked.width / 2 - width / 2))
-        // under the selection where there is room, over it where there is
-        // not, and failing both inside its bottom edge
+        id: bar
+        readonly property bool shown: view.active && ScreenTools.reading && ScreenTools.phase === "result" && view.hasMark && !view.drawing
+        readonly property string translate: ScreenTools.translate
+        // what the bar says before its actions: how much is selected, or
+        // what the rectangle came back without
+        readonly property string says: {
+            if (ScreenTools.picked) {
+                const count = ScreenTools.pickLast - ScreenTools.pickFirst + 1;
+                return count === 1 ? Strings.tr("1 word") : Strings.trf("%1 words", count);
+            }
+            return ScreenTools.notice;
+        }
+        height: 36
+        width: barRow.implicitWidth + 8
+        x: Math.max(8, Math.min(view.width - width - 8, view.marked.x + view.marked.width - width))
         y: {
-            const below = view.marked.y + view.marked.height + card.gap;
-            if (below + card.height <= view.height - 16)
-                return below;
-            const above = view.marked.y - card.height - card.gap;
-            if (above >= 16)
+            const above = view.marked.y - height - 10;
+            if (above >= 8)
                 return above;
-            return view.height - card.height - 16;
+            const below = view.marked.y + view.marked.height + 10;
+            if (below + height <= view.height - 8)
+                return below;
+            return view.marked.y + 10;
         }
         radius: Theme.radius(18)
-        color: Theme.flyoutSurface
-        opacity: card.shown ? 1 : 0
-        scale: card.shown ? 1 : 0.92
+        color: Theme.tools.ink
+        opacity: bar.shown ? 1 : 0
+        scale: bar.shown ? 1 : 0.92
         visible: opacity > 0
-        transformOrigin: Item.Top
+        transformOrigin: Item.BottomRight
         Behavior on opacity {
             NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
         }
@@ -439,95 +622,68 @@ Item {
             NumberAnimation { duration: 300; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
         }
 
-        // a press on the card is for the card, not the start of a circle
+        // a press on the bar is for the bar, not the start of a rectangle
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.AllButtons
         }
 
-        Column {
-            id: cardColumn
-            x: 18
-            y: 16
-            width: parent.width - 36
-            spacing: 12
-
-            Text {
-                width: parent.width
-                text: card.hasText ? ScreenTools.text : ScreenTools.notice
-                color: card.hasText ? Theme.tools.fg : Theme.tools.muted
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize(14)
-                wrapMode: Text.Wrap
-                maximumLineCount: 6
-                elide: Text.ElideRight
+        Row {
+            id: barRow
+            anchors.centerIn: parent
+            Item {
+                visible: bar.says !== ""
+                width: saysText.implicitWidth + 24
+                height: 28
+                Text {
+                    id: saysText
+                    anchors.centerIn: parent
+                    text: bar.says
+                    color: ScreenTools.picked ? Theme.tools.accent : Theme.tools.muted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize(13)
+                }
             }
-
-            // the translation, once asked for, under a rule
-            Rectangle {
-                visible: translation.visible
-                width: parent.width
-                height: 1
-                color: Qt.alpha(Theme.tools.accent, 0.2)
+            BarChip {
+                visible: ScreenTools.code !== "" && bar.translate !== "shown"
+                label: ScreenTools.isLink ? Strings.tr("open link") : Strings.tr("copy code")
+                key: "O"
+                primary: ScreenTools.primary === "open"
+                onTriggered: ScreenTools.openCode()
             }
-            Text {
-                id: translation
-                visible: card.hasText && (ScreenTools.translating || ScreenTools.translation !== "" || ScreenTools.notice !== "")
-                width: parent.width
-                text: ScreenTools.translating ? Strings.tr("Translating…") : ScreenTools.translation || ScreenTools.notice
-                color: ScreenTools.translation !== "" && !ScreenTools.translating ? Theme.tools.accent : Theme.tools.muted
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize(14)
-                wrapMode: Text.Wrap
-                maximumLineCount: 8
-                elide: Text.ElideRight
+            BarChip {
+                label: {
+                    if (bar.translate === "shown")
+                        return Strings.tr("copy translation");
+                    if (ScreenTools.picked)
+                        return Strings.tr("copy");
+                    return ScreenTools.text ? Strings.tr("copy all") : Strings.tr("copy image");
+                }
+                key: "C"
+                primary: ScreenTools.primary === "copy"
+                onTriggered: ScreenTools.copy()
             }
-
-            Flow {
-                width: parent.width
-                spacing: 8
-                Chip {
-                    visible: ScreenTools.isLink
-                    glyph: Icons.openInNew
-                    label: Strings.tr("open")
-                    key: Icons.cornerDownLeft
-                    onTriggered: ScreenTools.openCode()
+            BarChip {
+                visible: bar.translate !== "shown"
+                label: ScreenTools.picked ? Strings.tr("search") : Strings.tr("image search")
+                key: "S"
+                primary: ScreenTools.primary === "search"
+                onTriggered: ScreenTools.search()
+            }
+            BarChip {
+                visible: ScreenTools.text !== ""
+                label: {
+                    if (bar.translate === "working")
+                        return Strings.tr("translating…");
+                    if (bar.translate === "shown")
+                        return Strings.tr("original");
+                    if (bar.translate === "hidden")
+                        return Strings.tr("translation");
+                    return Strings.tr("translate");
                 }
-                Chip {
-                    visible: card.hasText && !ScreenTools.isLink
-                    glyph: ""
-                    label: Strings.tr("search")
-                    key: Icons.cornerDownLeft
-                    onTriggered: ScreenTools.searchText()
-                }
-                Chip {
-                    visible: card.hasText
-                    glyph: Icons.copy
-                    label: Strings.tr("copy")
-                    key: "C"
-                    onTriggered: ScreenTools.copyText()
-                }
-                Chip {
-                    visible: card.hasText && ScreenTools.translation === "" && !card.code
-                    glyph: ""
-                    label: Strings.tr("translate")
-                    key: "T"
-                    onTriggered: ScreenTools.translateText()
-                }
-                Chip {
-                    visible: !card.code
-                    glyph: ""
-                    label: card.hasText ? Strings.tr("image") : Strings.tr("image search")
-                    key: card.hasText ? "I" : Icons.cornerDownLeft
-                    onTriggered: ScreenTools.searchImage()
-                }
-                Chip {
-                    visible: !card.hasText
-                    glyph: Icons.copy
-                    label: Strings.tr("copy image")
-                    key: "C"
-                    onTriggered: ScreenTools.copyImage()
-                }
+                key: "T"
+                enabled: bar.translate !== "working"
+                onTriggered: ScreenTools.toggleTranslation()
             }
         }
     }
@@ -541,37 +697,31 @@ Item {
             if (!view.active)
                 return;
             event.accepted = true;
+            // Escape lets go of a selection first, and the screen after
             if (event.key === Qt.Key_Escape) {
-                ScreenTools.close();
+                if (ScreenTools.picked)
+                    ScreenTools.pick(-1, -1);
+                else
+                    ScreenTools.close();
                 return;
             }
             if (ScreenTools.phase !== "result")
                 return;
-            const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
-            if (ScreenTools.mode === "translate") {
-                if (event.key === Qt.Key_Space)
-                    view.peek = true;
-                else if (event.key === Qt.Key_C)
-                    ScreenTools.copyTranslation();
-                return;
-            }
-            if (ScreenTools.mode === "code") {
-                if (enter)
-                    ScreenTools.openCode();
-                else if (event.key === Qt.Key_C)
-                    ScreenTools.copyText();
-                return;
-            }
-            if (ScreenTools.mode !== "search")
-                return;
-            if (enter)
-                card.hasText ? ScreenTools.searchText() : ScreenTools.searchImage();
+            const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                ScreenTools.act();
             else if (event.key === Qt.Key_C)
-                card.hasText ? ScreenTools.copyText() : ScreenTools.copyImage();
-            else if (event.key === Qt.Key_T)
-                ScreenTools.translateText();
-            else if (event.key === Qt.Key_I)
-                ScreenTools.searchImage();
+                ScreenTools.copy();
+            else if (event.key === Qt.Key_A && ctrl && view.selectable)
+                ScreenTools.pick(0, ScreenTools.words.length - 1);
+            else if (event.key === Qt.Key_S && !ctrl && ScreenTools.translate !== "shown")
+                ScreenTools.search();
+            else if (event.key === Qt.Key_T && !ctrl)
+                ScreenTools.toggleTranslation();
+            else if (event.key === Qt.Key_O && !ctrl)
+                ScreenTools.openCode();
+            else if (event.key === Qt.Key_Space && ScreenTools.translate === "shown")
+                view.peek = true;
         }
         Keys.onReleased: event => {
             if (event.key === Qt.Key_Space && !event.isAutoRepeat)

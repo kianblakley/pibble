@@ -7,8 +7,9 @@ import "root:/ui"
 // One slide of the settings filmstrip. `root.slideIndex` is where this tab sits in
 // SettingsPane.tabOrder and `root.activeIndex` which slide is showing; the two
 // together are the whole of the horizontal tab transition.
-// Tools: the screen tools (search, translate, record, pick a color - see
-// services/ScreenTools.qml) and the menu `pibble toggle tools` opens them from.
+// Tools: the screen tools (search - which translates too - record, and pick
+// a color; see services/ScreenTools.qml) and the menu `pibble toggle tools`
+// opens them from.
 Column {
     id: root
 
@@ -26,6 +27,7 @@ Column {
 
     // the menu, and how all of the tools look
     SettingRow { key: "toolsFace"; label: "Tools menu pointer"; hint: "what the pointer becomes in the middle of the menu"; valueWidth: Metrics.shortValueWidth }
+    SettingRow { key: "toolsEyes"; label: "Tools menu eyes"; hint: "the shape of the pointer's eyes (the visor keeps its bar)"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "toolsTrail"; label: "Tools menu trails"; hint: "what the eyes leave behind them as they move"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "toolsSpread"; label: "Tools menu size"; hint: "how far the tools sit from the pointer"; valueWidth: Metrics.shortValueWidth }
     SettingRow { key: "toolsHint"; label: "Tools menu labels"; hint: "what shows beside the chosen tool"; valueWidth: Metrics.shortValueWidth }

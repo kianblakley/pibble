@@ -97,7 +97,7 @@ Singleton {
     // return for a key that uses Metrics.shortValueWidth, already translated.
     // Metrics measures these and nothing else, which is why a value that isn't
     // listed here is a value that can overhang its arrows.
-    readonly property var shortValueChoices: [Strings.tr("on"), Strings.tr("off"), Strings.tr("pill"), Strings.tr("sine wave"), Strings.tr("bubble"), "560 px", "10 s", "50%"].concat(Defaults.toolsAnims.map(anim => root.styleName(anim))).concat(Defaults.toolsFaces.concat(Defaults.toolsColorModes, Defaults.recordAudioChoices).map(choice => Strings.tr(choice))).concat([Strings.tr("name and key"), Strings.tr("name")]).concat(Defaults.toolsTrails.map(choice => Strings.tr(choice)))
+    readonly property var shortValueChoices: [Strings.tr("on"), Strings.tr("off"), Strings.tr("pill"), Strings.tr("sine wave"), Strings.tr("bubble"), "560 px", "10 s", "50%"].concat(Defaults.toolsAnims.map(anim => root.styleName(anim))).concat(Defaults.toolsFaces.concat(Defaults.toolsColorModes, Defaults.recordAudioChoices).map(choice => Strings.tr(choice))).concat([Strings.tr("name and key"), Strings.tr("name")]).concat(Defaults.toolsTrails.concat(Defaults.toolsEyesChoices).map(choice => Strings.tr(choice)))
 
     // The user-facing spelling of a motion style. Only "none" differs, and only
     // here: the stored id stays "none" everywhere (Settings.heal, and every
@@ -195,6 +195,8 @@ Singleton {
             return Settings.toolsFaceSize + "%";
         case "toolsTrail":
             return Strings.tr(Defaults.toolsTrails.includes(Settings.toolsTrail) ? Settings.toolsTrail : Defaults.toolsTrail);
+        case "toolsEyes":
+            return Strings.tr(Defaults.toolsEyesChoices.includes(Settings.toolsEyes) ? Settings.toolsEyes : Defaults.toolsEyes);
         case "toolsHint":
             return Strings.tr(Settings.toolsHint === "name" ? "name" : Settings.toolsHint === "off" ? "off" : "name and key");
         case "recordAudio":
@@ -307,6 +309,9 @@ Singleton {
             break;
         case "toolsTrail":
             Settings.toolsTrail = root.cycle(Settings.toolsTrail, Defaults.toolsTrails, dir);
+            break;
+        case "toolsEyes":
+            Settings.toolsEyes = root.cycle(Settings.toolsEyes, Defaults.toolsEyesChoices, dir);
             break;
         case "toolsSpread":
             Settings.toolsSpread = Math.max(Defaults.toolsSpreadMin, Math.min(Defaults.toolsSpreadMax, Settings.toolsSpread + dir * 8));
@@ -514,6 +519,9 @@ Singleton {
             break;
         case "toolsTrail":
             Settings.toolsTrail = Defaults.toolsTrail;
+            break;
+        case "toolsEyes":
+            Settings.toolsEyes = Defaults.toolsEyes;
             break;
         case "searchUrl":
             Settings.searchUrl = Defaults.searchUrl;

@@ -265,6 +265,8 @@ JsonAdapter {
     // how big the pointer face is, as a percentage (Defaults.toolsFaceSizeMin
     // to toolsFaceSizeMax)
     property int toolsFaceSize: Defaults.toolsFaceSize
+    // what shape the pointer face's eyes are - one of Defaults.toolsEyesChoices
+    property string toolsEyes: Defaults.toolsEyes
     // whether the eyes leave a streak - one of Defaults.toolsTrails
     property string toolsTrail: Defaults.toolsTrail
     // "fixed" (black and white whatever the theme) or "theme"
@@ -348,6 +350,10 @@ JsonAdapter {
         // that never was, goes back to the face
         if (!Defaults.toolsFaces.includes(settings.toolsFace)) {
             settings.toolsFace = Defaults.toolsFace;
+            settings.save();
+        }
+        if (!Defaults.toolsEyesChoices.includes(settings.toolsEyes)) {
+            settings.toolsEyes = Defaults.toolsEyes;
             settings.save();
         }
         if (!Defaults.toolsTrails.includes(settings.toolsTrail)) {

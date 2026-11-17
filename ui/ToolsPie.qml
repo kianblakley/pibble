@@ -386,6 +386,10 @@ Item {
             NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
         }
 
+        // Settings > Tools: what shape the eyes are - "pill" (upright
+        // pills) or "apostrophe" (a round head with a tail curling down to
+        // the left, like ’). The visor's one bar of an eye stays a bar.
+        readonly property string shape: pair.kind === "visor" ? "pill" : Settings.toolsEyes
         readonly property int count: pair.kind === "visor" ? 1 : 2
         readonly property real eyeW: pair.kind === "visor" ? 22 : 8
         readonly property real eyeH: pair.kind === "visor" ? 7 : 15
@@ -450,20 +454,33 @@ Item {
         // Returns the pieces (each a closed polyline), and the head and reach
         // for the fade.
         function streak(eye: int): var {
-            const points = pair.path(eye, 13);
+            // A solid streak, with no fade to soften it, is shorter and
+            // thinner: full strength all the way, as long and as wide as a
+            // fading one it reads as a second, heavier eye.
+            const points = pair.path(eye, pair.solid ? 8 : 13);
             if (points.length < 2)
                 return { pieces: [], head: Qt.point(0, 0), reach: 0 };
             const w = pair.partW;
             const h = pair.partH;
-            const radius = Theme.radius(Math.min(w, h) / 2);
             const last = points.length - 1;
             // how big the eye is at each point: its own size at the head down
-            // to a small dot at the far end
-            const sizes = points.map((_, k) => 1 - 0.8 * k / last);
+            // to a small dot at the far end - a solid one dropping straight to
+            // about half the eye's size behind it
+            const sizes = points.map((_, k) => k === 0 ? 1 : pair.solid ? 0.1 + 0.45 * (1 - k / last) : 1 - 0.8 * k / last);
+            // The copies are of the eye's outline with any hollow in it filled
+            // (an apostrophe's, under its head): a bridge between two copies
+            // reaches only from the outermost points of each, so what a hollow
+            // shape's tail swept through between them would be left out, as
+            // slivers through the streak. The eye itself is drawn true over the
+            // head of it (see drawnEye), and the copy there is left out so the
+            // filled shape does not show through a streak you can see through -
+            // but kept in a solid one, which the eye runs into as one shape,
+            // and through which the eye's own hollow would show as a sliver.
+            const outlines = points.map((point, k) => pair.filled(pair.outline(point, w * sizes[k], h * sizes[k], 8)));
             const pieces = [];
             for (let k = 0; k <= last; k++) {
-                const at = sizes[k];
-                pieces.push(pair.wound(pair.eyeAt(points[k], w * at, h * at, radius * at, 8)));
+                if (k > 0 || pair.shape !== "apostrophe" || pair.solid)
+                    pieces.push(pair.wound(outlines[k]));
                 if (k === last)
                     break;
                 // the bridge to the next one: from the outermost point of
@@ -472,24 +489,89 @@ Item {
                 const length = Math.hypot(next.x - points[k].x, next.y - points[k].y);
                 const nx = -(next.y - points[k].y) / length;
                 const ny = (next.x - points[k].x) / length;
-                const after = sizes[k + 1];
-                const a = pair.outermost(points[k], nx, ny, w * at, h * at, radius * at);
-                const b = pair.outermost(next, nx, ny, w * after, h * after, radius * after);
-                const c = pair.outermost(next, -nx, -ny, w * after, h * after, radius * after);
-                const d = pair.outermost(points[k], -nx, -ny, w * at, h * at, radius * at);
+                const a = pair.outermost(points[k], outlines[k], nx, ny, w * sizes[k], h * sizes[k]);
+                const b = pair.outermost(next, outlines[k + 1], nx, ny, w * sizes[k + 1], h * sizes[k + 1]);
+                const c = pair.outermost(next, outlines[k + 1], -nx, -ny, w * sizes[k + 1], h * sizes[k + 1]);
+                const d = pair.outermost(points[k], outlines[k], -nx, -ny, w * sizes[k], h * sizes[k]);
                 pieces.push(pair.wound([a, b, c, d, a]));
             }
             const head = points[0];
             const reach = Math.max(...points.map(point => Math.hypot(point.x - head.x, point.y - head.y)));
             return { pieces: pieces, head: head, reach: reach };
         }
-        // The point of an eye w by h with corners of `radius`, round its
-        // middle at `center`, that is furthest out along (nx, ny) - on its
-        // outline, so that a bridge from it meets the eye without a corner
-        // standing out past it: the middle of the corner that way, out by
-        // the corner's round.
-        function outermost(center: point, nx: real, ny: real, w: real, h: real, radius: real): point {
-            return Qt.point(center.x + Math.sign(nx) * (w / 2 - radius) + nx * radius, center.y + Math.sign(ny) * (h / 2 - radius) + ny * radius);
+        // The outline of an eye w by h round its middle at `center`, in the
+        // eyes' shape, its curves in pieces `steps` to a quarter turn.
+        function outline(center: point, w: real, h: real, steps: int): var {
+            return pair.shape === "apostrophe" ? pair.apostropheAt(center, w, h, steps) : pair.eyeAt(center, w, h, Theme.radius(Math.min(w, h) / 2), steps);
+        }
+        // The point of the eye w by h round `center`, whose outline is
+        // `outline`, that is furthest out along (nx, ny) - on the outline, so
+        // that a bridge from it meets the eye without a corner standing out
+        // past it. For a pill that is the middle of the corner that way, out
+        // by the corner's round: worked out rather than picked from the
+        // outline, whose straight sides would tie. An apostrophe has none, and
+        // its outline's furthest point is the one.
+        function outermost(center: point, outline: var, nx: real, ny: real, w: real, h: real): point {
+            if (pair.shape !== "apostrophe") {
+                const radius = Theme.radius(Math.min(w, h) / 2);
+                return Qt.point(center.x + Math.sign(nx) * (w / 2 - radius) + nx * radius, center.y + Math.sign(ny) * (h / 2 - radius) + ny * radius);
+            }
+            let best = outline[0];
+            for (const point of outline)
+                if ((point.x - best.x) * nx + (point.y - best.y) * ny > 0)
+                    best = point;
+            return best;
+        }
+        // `outline` with any hollow in it filled: the smallest outline round
+        // it with none (its convex hull), running the same way round. A pill
+        // has no hollow and comes back as it was.
+        function filled(outline: var): var {
+            if (pair.shape !== "apostrophe")
+                return outline;
+            const points = outline.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+            const turn = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+            const lower = [];
+            for (const point of points) {
+                while (lower.length >= 2 && turn(lower[lower.length - 2], lower[lower.length - 1], point) <= 0)
+                    lower.pop();
+                lower.push(point);
+            }
+            const upper = [];
+            for (const point of points.reverse()) {
+                while (upper.length >= 2 && turn(upper[upper.length - 2], upper[upper.length - 1], point) <= 0)
+                    upper.pop();
+                upper.push(point);
+            }
+            const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+            hull.push(hull[0]);
+            return hull;
+        }
+        // An apostrophe w by h round `center`: drawn in an 8 by 15 box (the
+        // pill's), a round head at the top and a tail from it curling down
+        // and to the left to a point.
+        function apostropheAt(center: point, w: real, h: real, steps: int): var {
+            const across = w / 8;
+            const down = h / 15;
+            const outline = [];
+            // the head, from its right round over the top to its lower left
+            const turn = -250 * Math.PI / 180;
+            for (let step = 0; step <= steps * 3; step++) {
+                const angle = turn * step / (steps * 3);
+                outline.push({ x: Math.cos(angle) * 4, y: -3.5 + Math.sin(angle) * 4 });
+            }
+            // then the tail's inside down to its point, and its outside back
+            // up to where the head began
+            const curve = (from, through, to) => {
+                for (let step = 1; step <= steps * 2; step++) {
+                    const t = step / (steps * 2);
+                    const u = 1 - t;
+                    outline.push({ x: u * u * from.x + 2 * u * t * through.x + t * t * to.x, y: u * u * from.y + 2 * u * t * through.y + t * t * to.y });
+                }
+            };
+            const tip = { x: -2.6, y: 7.5 };
+            curve(outline[outline.length - 1], { x: 0.4, y: 3.6 }, tip);
+            curve(tip, { x: 4.3, y: 3.4 }, outline[0]);
+            return outline.map(point => Qt.point(center.x + point.x * across, center.y + point.y * down));
         }
         // The outline of an eye w by h with corners of `radius`, round its
         // middle at `center`, each corner in `steps` straight pieces.
@@ -602,7 +684,7 @@ Item {
                         strokeColor: "transparent"
                         fillColor: pair.partColor
                         PathPolyline {
-                            path: pair.eyeAt(Qt.point(drawnEye.index * (pair.eyeW + pair.gap) + pair.eyeW / 2 + pair.shownX, pair.eyeH / 2 + pair.shownY), pair.partW, pair.partH, Theme.radius(Math.min(pair.partW, pair.partH) / 2), 12)
+                            path: pair.outline(Qt.point(drawnEye.index * (pair.eyeW + pair.gap) + pair.eyeW / 2 + pair.shownX, pair.eyeH / 2 + pair.shownY), pair.partW, pair.partH, 12)
                         }
                     }
                 }
@@ -610,9 +692,25 @@ Item {
         }
 
         // the eyes themselves, while there are no streaks (see above for
-        // while there are)
+        // while there are): apostrophes drawn as their outline...
         Repeater {
-            model: pair.trails ? 0 : pair.count
+            model: pair.trails || pair.shape !== "apostrophe" ? 0 : pair.count
+            Shape {
+                id: stillEye
+                required property int index
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: "transparent"
+                    fillColor: pair.partColor
+                    PathPolyline {
+                        path: pair.outline(Qt.point(stillEye.index * (pair.eyeW + pair.gap) + pair.eyeW / 2 + pair.shownX, pair.eyeH / 2 + pair.shownY), pair.partW, pair.partH, 12)
+                    }
+                }
+            }
+        }
+        // ...and pills as rounded rectangles
+        Repeater {
+            model: pair.trails || pair.shape === "apostrophe" ? 0 : pair.count
             Rectangle {
                 required property int index
                 x: index * (pair.eyeW + pair.gap) + pair.shownX

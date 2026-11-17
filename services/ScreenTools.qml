@@ -4,22 +4,22 @@ import Quickshell
 import Quickshell.Io
 import "root:/config"
 
-// The screen tools: pointing at what is on screen and asking about it. Five
-// things share this file because they are one gesture with five endings -
-// take the screen, let the user drag a rectangle over some of it, do
-// something with what was in the rectangle. Nothing ever reads more of the
+// The screen tools: pointing at what is on screen and doing something with
+// it. Two things share this file because they are one gesture with two
+// endings - take the screen, let the user drag a rectangle over some of it,
+// do something with what was in the rectangle. Nothing ever reads more of the
 // screen than the rectangle it was given:
 //
-//   search     the text inside is read and offered up to a web search, the
-//              clipboard, a translation or an image search
-//   copy       the text inside is read and goes straight to the clipboard
-//   code       a QR code or barcode inside is read (zbarimg) and offered up
-//              to be opened, copied or searched for
-//   translate  every paragraph inside that is not already in the user's
-//              language is repainted in it, in place
+//   search     what is inside is read - its text by tesseract, and any QR
+//              code or barcode by zbarimg - and the frame stays up with the
+//              words lit where they sit. Words can be selected by dragging
+//              over them like a document's and copied; the picture can be
+//              looked up (or the selected words searched for), a code's
+//              link opened, and the whole rectangle translated in place
 //   region     the rectangle goes to the recorder (see Recorder) as the area
-//              to record. The only one that never looks at a pixel, so the
-//              only one that never freezes the screen
+//              to record, or a click with no drag in it the whole output. The
+//              only one that never looks at a pixel, so the only one that
+//              never freezes the screen
 //
 // The freeze is the color picker's, for the color picker's reasons (see
 // ScreenColor, which this deliberately leaves alone rather than generalising -
@@ -37,8 +37,8 @@ import "root:/config"
 // ever paints boxes tesseract found.
 //
 // Translation is the one step that leaves the machine, and only on the user's
-// say-so: nothing is sent until `pibble translate` is run or the card's
-// translate chip is pressed, and Settings.translateCommand replaces the
+// say-so: nothing is sent until `pibble translate` is run or T is pressed
+// over what was read, and Settings.translateCommand replaces the
 // network call outright with a command of the user's own.
 //
 // Like ScreenColor, every script below is written without backslashes and
@@ -53,9 +53,12 @@ Singleton {
     // screen - input and all - for as long as this is set.
     property string mode: ""
     readonly property bool active: root.mode !== ""
-    // the ones that read what the rectangle holds, all of which keep the
-    // frame up for another rectangle when one held nothing
-    readonly property bool reading: ["search", "copy", "code", "translate"].includes(root.mode)
+    // the one that reads what the rectangle holds, and keeps the frame up
+    // for another rectangle after it
+    readonly property bool reading: root.mode === "search"
+    // `pibble translate`: a search that translates what it read the moment
+    // the reading is done, as T would
+    property bool translateOnRead: false
     // Who draws the gesture: "overlay", the tools' own surface, or
     // "launcher", over the launcher as it stands when one was started with
     // it up - so a tool used on one of pibble's pages reads that page and
@@ -67,7 +70,7 @@ Singleton {
     //   capture  grim is writing the frame (the overlay is up but transparent)
     //   frame    the file exists; waiting for the overlay to decode it
     //   select   waiting for the user to mark something
-    //   working  reading, or translating what was read
+    //   working  reading what was marked
     //   result   there is something to show
     property string phase: ""
 
@@ -91,13 +94,56 @@ Singleton {
     // closing the overlay does not wait for a tesseract it no longer wants.
     property int job: 0
 
-    // the rectangle dragged (frame pixels), and what was read out of it
+    // the rectangle dragged (frame pixels), and what was read out of it: the
+    // text as it was set, a line to each line
     property rect selection: Qt.rect(0, 0, 0, 0)
     property string text: ""
-    property string translation: ""
-    property bool translating: false
 
-    // translate: one row per paragraph found - its box in frame pixels, the
+    // Every word read, in reading order (paragraph by paragraph, top to
+    // bottom; a line at a time; left to right), each with its box in frame
+    // pixels and the line it sits in counted down the whole rectangle - what
+    // selecting text picks from. Words are picked whole: tesseract says where
+    // each word is, never where each letter is.
+    property var words: []
+    // The words selected, first and last, as indices into `words` in either
+    // order (the end is wherever the drag is now), or -1 with none.
+    property int pickFrom: -1
+    property int pickTo: -1
+    readonly property bool picked: root.pickFrom >= 0 && root.pickTo >= 0
+    readonly property int pickFirst: Math.min(root.pickFrom, root.pickTo)
+    readonly property int pickLast: Math.max(root.pickFrom, root.pickTo)
+    readonly property string pickedText: {
+        if (!root.picked)
+            return "";
+        const lines = [];
+        let line = -1;
+        for (let i = root.pickFirst; i <= root.pickLast && i < root.words.length; i++) {
+            const word = root.words[i];
+            if (word.line !== line) {
+                lines.push([]);
+                line = word.line;
+            }
+            lines[lines.length - 1].push(word.text);
+        }
+        return lines.map(parts => root.join(parts)).join("\n");
+    }
+    function pick(from: int, to: int): void {
+        root.pickFrom = from;
+        root.pickTo = to;
+    }
+
+    // What a QR code or barcode in the rectangle holds, read alongside the
+    // text when zbarimg is there; "" for none.
+    property string code: ""
+    // what it holds is a web address, to be opened rather than copied
+    readonly property bool isLink: /^https?:\/\/\S+$/i.test(root.code.trim())
+
+    // Translating the rectangle in place, which T starts and then turns on
+    // and off: "" not asked, "working" while batches are out, "shown" with
+    // the translation painted over the page, "hidden" with it taken off again.
+    property string translate: ""
+
+    // one row per paragraph found - its box in frame pixels, the
     // height of one of its lines, the text read and the text it became. A
     // ListModel rather than a plain array so that a translation landing fills
     // in its rows where they stand, instead of rebuilding every box on screen
@@ -157,23 +203,19 @@ Singleton {
     }
 
     // What picking one of the menu's actions does, wherever that menu was
-    // drawn. "pause" and "stop" are a running recording's controls; the two
-    // record actions do nothing while one runs, there being one recorder.
+    // drawn. "pause" and "stop" are a running recording's controls; record
+    // does nothing while one runs, there being one recorder.
     function run(action: string): void {
-        if (["search", "translate", "copy", "code"].includes(action))
-            root.request(action);
+        if (action === "search")
+            root.request("search");
         else if (action === "color")
             root.pickColor();
         else if (action === "pause")
             Recorder.togglePause();
         else if (action === "stop")
             Recorder.stop();
-        else if (Recorder.recording)
-            return;
-        else if (action === "area")
+        else if (action === "record" && !Recorder.recording)
             Recorder.toggleRegion();
-        else if (action === "record")
-            Recorder.toggle();
     }
 
     // The screen color picker (services/ScreenColor.qml) as a tool: pick any
@@ -240,16 +282,15 @@ Singleton {
     // compositor's own layout coordinates. Empty means the whole output.
     signal regionChosen(string output, string geometry)
 
+    // What a gesture cannot run without. zbarimg is not among them: a code
+    // is read when it is there and simply not looked for when it is not (see
+    // `optional`), and curl is asked after only once a translation is.
     function toolsFor(mode: string): var {
         if (mode === "region")
             return [];
-        if (mode === "code")
-            return ["grim", "ffmpeg", "zbarimg"];
-        const tools = ["grim", "tesseract", "ffmpeg"];
-        if (mode === "translate" && !Settings.translateCommand)
-            tools.push("curl");
-        return tools;
+        return ["grim", "tesseract", "ffmpeg"];
     }
+    readonly property var optional: ["zbarimg"]
 
     // Tools already seen on PATH. As with the eyedropper, a yes is trusted and
     // a no is asked again: a tool installed since the last try is found by the
@@ -257,16 +298,18 @@ Singleton {
     property var have: ({})
     property string asking: ""
 
-    // The one way in. Asking again while a gesture is up ends it, so the same
-    // keybind opens and closes the overlay.
+    // The one way in: "search", "translate" (a search that translates as
+    // soon as it has read) or "region". Asking again while a gesture is up
+    // ends it, so the same keybind opens and closes the overlay.
     function request(mode: string): void {
         if (root.active) {
             root.close();
             return;
         }
-        if (probe.running || !["search", "translate", "region", "copy", "code"].includes(mode))
+        if (probe.running || !["search", "translate", "region"].includes(mode))
             return;
-        const unknown = root.toolsFor(mode).filter(tool => !root.have[tool]);
+        const needed = root.toolsFor(mode === "translate" ? "search" : mode);
+        const unknown = needed.concat(mode === "region" ? [] : root.optional).filter(tool => !root.have[tool]);
         if (unknown.length === 0) {
             root.grant(mode);
             return;
@@ -290,7 +333,7 @@ Singleton {
                     const [verdict, tool] = line.trim().split(" ");
                     if (verdict === "have")
                         have[tool] = true;
-                    else if (verdict === "miss")
+                    else if (verdict === "miss" && !root.optional.includes(tool))
                         missing.push(tool);
                 }
                 root.have = have;
@@ -313,8 +356,6 @@ Singleton {
             return Strings.tr("tesseract is used to read the text on screen - install it, along with a language pack for each language you read.");
         if (tool === "ffmpeg")
             return Strings.tr("ffmpeg is used to cut the selection out of the screen capture - install it to search or translate what is on screen.");
-        if (tool === "zbarimg")
-            return Strings.tr("zbarimg is used to read QR codes and barcodes - install zbar (zbar-tools on Debian and Ubuntu) to scan codes on screen.");
         return Strings.tr("curl is used to reach the translator - install it, or set a translate command of your own.");
     }
 
@@ -325,7 +366,8 @@ Singleton {
         root.outputName = screen ? screen.name : "";
         root.outputX = screen ? screen.x : 0;
         root.outputY = screen ? screen.y : 0;
-        root.mode = mode;
+        root.translateOnRead = mode === "translate";
+        root.mode = mode === "translate" ? "search" : mode;
         root.phase = "capture";
         // a gesture picked off the menu waits for the menu to go; one that was
         // cancelled in that moment has nothing left to grant
@@ -401,8 +443,10 @@ Singleton {
         ocr.again = false;
         ocr.running = false;
         scanner.running = false;
+        sampler.running = false;
         translator.running = false;
         root.queue = [];
+        root.translateOnRead = false;
         root.mode = "";
         root.phase = "";
         root.host = "overlay";
@@ -426,8 +470,11 @@ Singleton {
     function clearResults(): void {
         root.selection = Qt.rect(0, 0, 0, 0);
         root.text = "";
-        root.translation = "";
-        root.translating = false;
+        root.words = [];
+        root.found = [];
+        root.pick(-1, -1);
+        root.code = "";
+        root.translate = "";
         root.notice = "";
         root.blocks.clear();
         root.painted = 0;
@@ -448,22 +495,20 @@ Singleton {
         if (w < 4 || h < 4)
             return;
         translator.running = false;
+        sampler.running = false;
+        root.queue = [];
         root.clearResults();
         root.selection = Qt.rect(left, top, w, h);
         root.phase = "working";
-        if (root.mode === "code") {
+        // a code is looked for alongside the text, and lands whenever it does
+        if (root.have.zbarimg)
             root.scan(left, top, w, h);
-            return;
-        }
         // 11 is "sparse text": find every line there is and assume nothing
         // about how they relate - the truth about a stretch of screen, where
         // 3, the page layout analysis, goes looking for a single column of
-        // print. A translation's paragraphs are put together afterwards,
-        // from where the lines sit (see paragraphs). 6, "one uniform block of
-        // text", suits the rest: a rectangle dragged to be searched or copied
-        // is usually a word, a line or a paragraph, and the layout analysis
-        // gives up on anything that small and reports an empty one.
-        root.read(left, top, w, h, root.mode === "translate" ? "11" : "6");
+        // print. Paragraphs are put together afterwards, from where the lines
+        // sit (see paragraphs).
+        root.read(left, top, w, h, "11");
     }
 
     // Back to an empty frame, for a second try at a rectangle.
@@ -471,6 +516,8 @@ Singleton {
         if (!root.reading || root.phase === "capture" || root.phase === "frame")
             return;
         translator.running = false;
+        sampler.running = false;
+        root.queue = [];
         root.clearResults();
         root.phase = "select";
     }
@@ -543,11 +590,6 @@ Singleton {
         const filter = "crop=" + width + ":" + height + ":" + x + ":" + y + ",scale=" + scaledWidth + ":" + Math.max(1, Math.round(height * up)) + ":flags=lanczos";
         ocr.strips = root.strips(scaledWidth);
         const cuts = ocr.strips.map(strip => strip.x + ":" + strip.w).join(" ");
-        // only a translation paints over the page, so only it asks for colors
-        const thumbHeight = Math.max(1, Math.round(root.thumbWidth * root.frameHeight / Math.max(1, root.frameWidth)));
-        const thumb = root.mode === "translate" ? root.thumbWidth + ":" + thumbHeight : "";
-        root.thumb = { width: 0, height: 0, hex: "" };
-        ocr.thumbHeight = thumbHeight;
         root.reads++;
         ocr.offsetX = x;
         ocr.offsetY = y;
@@ -578,7 +620,7 @@ Singleton {
             # package on some distros, and asking for one that is not there is
             # an error where this is not.
             i=0
-            for cut in $8; do
+            for cut in $7; do
                 x=$(printf '%s' "$cut" | cut -d: -f1); w=$(printf '%s' "$cut" | cut -d: -f2)
                 part="$crop.$6.$i.ppm"
                 (
@@ -591,7 +633,7 @@ Singleton {
             done
             wait
             i=0
-            for cut in $8; do
+            for cut in $7; do
                 part="$crop.$6.$i.ppm"
                 echo "STRIP $i"
                 cat "$part.a" 2>/dev/null
@@ -599,13 +641,8 @@ Singleton {
                 cat "$part.b" 2>/dev/null
                 rm -f "$part" "$part.a" "$part.b"
                 i=$((i + 1))
-            done
-            # the frame in miniature, as hex, for the page's colors (see swatch)
-            if [ -n "$7" ]; then
-                echo "THUMB"
-                ffmpeg -v error -i "$frame" -vf "scale=$7:flags=area" -f rawvideo -pix_fmt rgb24 - 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
-            fi`,
-            "_", root.shotPath, root.cropPath, filter, (Settings.ocrLanguages || "").trim(), psm, String(root.reads), thumb, cuts];
+            done`,
+            "_", root.shotPath, root.cropPath, filter, (Settings.ocrLanguages || "").trim(), psm, String(root.reads), cuts];
         // A read still running is for a selection nobody wants any more. It is
         // killed, and the new one starts from its exit - a Process cannot be
         // restarted in the same breath it is stopped in.
@@ -624,7 +661,6 @@ Singleton {
         property int offsetY: 0
         property real up: 1
         property var strips: []
-        property int thumbHeight: 0
         property bool again: false
         onExited: {
             if (ocr.again) {
@@ -653,12 +689,7 @@ Singleton {
                     root.fail(Strings.tr("Reading the screen failed"), Strings.tr("ffmpeg could not cut the selection out of the captured frame."));
                     return;
                 }
-                const mark = body.indexOf("\nTHUMB\n");
-                const hex = mark < 0 ? "" : body.slice(mark + 7).trim();
-                // a thumbnail of the wrong length is one ffmpeg did not finish
-                if (hex.length === root.thumbWidth * ocr.thumbHeight * 6)
-                    root.thumb = { width: root.thumbWidth, height: ocr.thumbHeight, hex: hex };
-                root.readFinished(root.paragraphs(mark < 0 ? body : body.slice(0, mark), ocr.strips, ocr.offsetX, ocr.offsetY, ocr.up));
+                root.readFinished(root.paragraphs(body, ocr.strips, ocr.offsetX, ocr.offsetY, ocr.up));
             }
         }
     }
@@ -692,13 +723,9 @@ Singleton {
     // if that one is an ideograph, which is a word by itself; and a run that
     // short has to be one tesseract was sure of.
     //
-    // When translating, a run tesseract was not reasonably sure of as a whole
-    // is not text either: that is what it makes of a photograph or a scan behind the
-    // words - "GE GEIS HE" out of a book's page edge - and translated, it is
-    // painted over the picture as a box of nonsense.
+    // (A paragraph tesseract was not reasonably sure of as a whole is kept
+    // for selecting, but not translated - see `sure` in paragraphs.)
     function legible(text: string, sure: real): bool {
-        if (root.mode === "translate" && sure < 62)
-            return false;
         const kept = text.match(/[A-Za-z0-9À-῿ぁ-ゖァ-ヺ㐀-鿿가-힯豈-﫿]/g);
         if (kept === null)
             return false;
@@ -867,10 +894,11 @@ Singleton {
             let run = null;
             for (const word of line.words) {
                 if (!run || word.x0 - run.x1 > height * 2) {
-                    run = { words: [], sure: 0, x0: word.x0, y0: word.y0, x1: word.x1, y1: word.y1 };
+                    run = { words: [], items: [], sure: 0, x0: word.x0, y0: word.y0, x1: word.x1, y1: word.y1 };
                     runs.push(run);
                 }
                 run.words.push(word.text);
+                run.items.push(word);
                 run.sure += word.sure;
                 run.x0 = Math.min(run.x0, word.x0);
                 run.y0 = Math.min(run.y0, word.y0);
@@ -909,10 +937,13 @@ Singleton {
                 home = paragraph;
             }
             if (!home) {
-                home = { parts: [], heights: [], x0: run.x0, y0: run.y0, x1: run.x1, y1: run.y1, last: run };
+                home = { parts: [], heights: [], runs: [], sure: 0, count: 0, x0: run.x0, y0: run.y0, x1: run.x1, y1: run.y1, last: run };
                 found.push(home);
             }
             home.parts.push(run.text);
+            home.runs.push(run);
+            home.sure += run.sure;
+            home.count += run.words.length;
             home.heights.push(height);
             home.x0 = Math.min(home.x0, run.x0);
             home.y0 = Math.min(home.y0, run.y0);
@@ -943,6 +974,22 @@ Singleton {
                 // the same words as they were set, a line to each line - what
                 // copying text wants, where a translator wants the sentences
                 lines: paragraph.parts.join("\n"),
+                // How sure tesseract was of the paragraph as a whole. One it
+                // was not reasonably sure of is what it makes of a photograph
+                // or a scan behind the words - "GE GEIS HE" out of a book's
+                // page edge - and is not translated: painted over the picture
+                // it is a box of nonsense.
+                sure: paragraph.sure / Math.max(1, paragraph.count),
+                // every word, a list to each line, in the frame's pixels -
+                // each as tall as its line, so a selection's band along a
+                // line is one height whatever letters its words have
+                rows: paragraph.runs.map(run => run.items.map(word => ({
+                    text: word.text,
+                    x: offsetX + word.x0 / up,
+                    y: offsetY + run.y0 / up,
+                    w: (word.x1 - word.x0) / up,
+                    h: (run.y1 - run.y0) / up
+                }))),
                 text: "",
                 // set once a translation has come back identical to the source:
                 // the paragraph was already in the user's language
@@ -1030,55 +1077,32 @@ Singleton {
         return kept.sort((a, b) => a.by - b.by || a.bx - b.bx);
     }
 
+    // The paragraphs the last read found, kept for a translation asked for
+    // later (see toggleTranslation).
+    property var found: []
+
+    // What was read is up, the frame with it: nothing is done with it until
+    // the user says what. A rectangle that held no text still has a picture
+    // to look up and copy, and perhaps a code.
     function readFinished(found: var): void {
-        if (root.mode === "search") {
-            root.text = found.map(p => p.source).join("\n");
-            root.notice = root.text ? "" : Strings.tr("No text found here");
-            root.phase = "result";
-            return;
-        }
-        if (root.mode === "copy") {
-            const text = found.map(p => p.lines).join("\n");
-            if (text) {
-                // onto the clipboard while the overlay still has the keyboard:
-                // a Wayland compositor can refuse a selection from a client
-                // with no focused surface left
-                Notifier.copyToClipboard(text);
-                root.close();
-                return;
+        root.found = found;
+        const words = [];
+        let line = 0;
+        for (const paragraph of found) {
+            for (const row of paragraph.rows) {
+                for (const word of row)
+                    words.push(Object.assign({ line: line }, word));
+                line++;
             }
-            // the frame stays up, for another rectangle
-            root.notice = Strings.tr("No text found here - drag again");
-            root.phase = "select";
-            return;
         }
-        if (found.length === 0) {
-            root.notice = Strings.tr("No text found here - drag again");
-            root.phase = "select";
-            return;
+        root.words = words;
+        root.text = found.map(p => p.lines).join("\n");
+        root.notice = root.text ? "" : Strings.tr("No text found here");
+        root.phase = "result";
+        if (root.translateOnRead) {
+            root.translateOnRead = false;
+            root.toggleTranslation();
         }
-        const kept = root.uncrowded(found);
-        for (const paragraph of kept)
-            root.blocks.append(Object.assign(paragraph, root.swatch(paragraph.bx, paragraph.by, paragraph.bw, paragraph.bh)));
-        // The translator takes a few thousand characters at a time, so the
-        // screen goes to it in batches of whole paragraphs, one per line -
-        // line breaks are the one thing it reliably hands back where it found
-        // them, which is what lets each answer find its box again.
-        const batches = [];
-        let batch = null;
-        // counted over the paragraphs that were kept - the same list, in the
-        // same order, as the boxes each answer is written back into
-        for (let i = 0; i < kept.length; i++) {
-            const length = kept[i].source.length + 1;
-            if (!batch || batch.length + length > 3500) {
-                batch = { first: i, count: 0, length: 0 };
-                batches.push(batch);
-            }
-            batch.count++;
-            batch.length += length;
-        }
-        root.queue = batches;
-        root.nextBatch();
     }
 
     // ---------- codes ----------
@@ -1102,7 +1126,8 @@ Singleton {
             # XML rather than the plain listing: a code can hold several lines,
             # and only the XML says where one code ends and the next begins
             zbarimg -q --xml "$crop" 2>/dev/null
-            true`, "_", root.shotPath, root.cropPath, filter, String(root.scans)];
+            rm -f "$crop"
+            true`, "_", root.shotPath, root.runtimeDir + "/pibble-tools-code.png", filter, String(root.scans)];
         // as with a read, a scan still going is for a circle nobody wants
         if (scanner.running) {
             scanner.again = true;
@@ -1126,14 +1151,13 @@ Singleton {
             onStreamFinished: {
                 const cut = text.indexOf("\n");
                 const head = cut < 0 ? text : text.slice(0, cut);
-                if (head !== "SCAN " + root.scans || scanner.job !== root.job || root.phase !== "working")
+                // the read can be done first, so the frame may well be up
+                // with its result already
+                if (head !== "SCAN " + root.scans || scanner.job !== root.job || !["working", "result"].includes(root.phase))
                     return;
-                const body = text.slice(cut + 1);
-                if (body.startsWith("NOCROP")) {
-                    root.fail(Strings.tr("Reading the screen failed"), Strings.tr("ffmpeg could not cut the selection out of the captured frame."));
-                    return;
-                }
-                root.scanned(root.codes(body));
+                // a crop that failed fails the read as well, which says so
+                const found = root.codes(text.slice(cut + 1));
+                root.code = found.length > 0 ? found[0] : "";
             }
         }
     }
@@ -1165,33 +1189,19 @@ Singleton {
         return found;
     }
 
-    // The first code in the rectangle is the one shown; none leaves the
-    // frame up for another rectangle.
-    function scanned(found: var): void {
-        if (found.length > 0) {
-            root.text = found[0];
-            root.phase = "result";
-            return;
-        }
-        root.notice = Strings.tr("No code found here - drag again");
-        root.phase = "select";
-    }
-
-    // what a code holds is a web address, to be opened rather than searched
-    readonly property bool isLink: root.mode === "code" && /^https?:\/\/\S+$/i.test(root.text.trim())
-
-    // A code's web address goes to the browser; anything else it holds is
-    // searched for, the way circled text is.
+    // A code's web address goes to the browser; anything else it holds (a
+    // wifi login, a plain string) to the clipboard.
     function openCode(): void {
-        if (root.mode !== "code" || root.phase !== "result")
+        if (!root.code || root.phase !== "result")
             return;
+        const code = root.code.trim();
         if (!root.isLink) {
-            root.searchText();
+            Notifier.copyToClipboard(root.code);
+            root.close();
             return;
         }
-        const url = root.text.trim();
         root.close();
-        Quickshell.execDetached(["xdg-open", url]);
+        Quickshell.execDetached(["xdg-open", code]);
     }
 
     // ---------- translating ----------
@@ -1199,13 +1209,102 @@ Singleton {
     property var queue: []
     property int asks: 0
 
+    // T: the rectangle translated in place, then the translation taken off
+    // and put back. The first press needs the page's colors under each
+    // paragraph (see swatch), which `sampler` fetches before the first batch
+    // goes; and curl, unless a translate command of the user's own stands in
+    // for it.
+    function toggleTranslation(): void {
+        if (root.phase !== "result")
+            return;
+        if (root.translate === "shown") {
+            root.translate = "hidden";
+            return;
+        }
+        if (root.translate === "hidden") {
+            root.translate = "shown";
+            return;
+        }
+        if (root.translate === "working")
+            return;
+        const kept = root.uncrowded(root.found.filter(paragraph => paragraph.sure >= 62));
+        if (kept.length === 0) {
+            root.notice = root.text ? Strings.tr("Nothing here reads clearly enough to translate") : Strings.tr("No text found here");
+            return;
+        }
+        root.notice = "";
+        root.translate = "working";
+        root.blocks.clear();
+        root.painted = 0;
+        for (const paragraph of kept)
+            root.blocks.append({ bx: paragraph.bx, by: paragraph.by, bw: paragraph.bw, bh: paragraph.bh, lineHeight: paragraph.lineHeight, source: paragraph.source, text: "", same: false, paper: paragraph.paper, ink: paragraph.ink });
+        sampler.job = root.job;
+        const height = Math.max(1, Math.round(root.thumbWidth * root.frameHeight / Math.max(1, root.frameWidth)));
+        sampler.height = height;
+        sampler.command = ["bash", "-c", `
+            export PATH="$HOME/.local/bin:$PATH"
+            [ -n "$3" ] || command -v curl >/dev/null 2>&1 || { echo NOCURL; exit 0; }
+            echo THUMB
+            ffmpeg -v error -i "$1" -vf "scale=$2:flags=area" -f rawvideo -pix_fmt rgb24 - 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'`,
+            "_", root.shotPath, root.thumbWidth + ":" + height, Settings.translateCommand];
+        sampler.running = true;
+    }
+
+    // The frame in miniature, as hex, for the page's colors (see swatch) -
+    // and then the paragraphs, batch by batch.
+    Process {
+        id: sampler
+        property int job: 0
+        property int height: 0
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (sampler.job !== root.job || root.translate !== "working")
+                    return;
+                if (text.startsWith("NOCURL")) {
+                    root.translate = "";
+                    root.blocks.clear();
+                    Notifier.missingDependency(Strings.trf("%1 not found", "curl"), root.whatFor("curl"));
+                    return;
+                }
+                const hex = text.slice(text.indexOf("\n") + 1).trim();
+                // a thumbnail of the wrong length is one ffmpeg did not finish
+                root.thumb = hex.length === root.thumbWidth * sampler.height * 6 ? { width: root.thumbWidth, height: sampler.height, hex: hex } : { width: 0, height: 0, hex: "" };
+                for (let i = 0; i < root.blocks.count; i++) {
+                    const row = root.blocks.get(i);
+                    const colors = root.swatch(row.bx, row.by, row.bw, row.bh);
+                    root.blocks.setProperty(i, "paper", colors.paper);
+                    root.blocks.setProperty(i, "ink", colors.ink);
+                }
+                // The translator takes a few thousand characters at a time,
+                // so the screen goes to it in batches of whole paragraphs, one
+                // per line - line breaks are the one thing it reliably hands
+                // back where it found them, which is what lets each answer
+                // find its box again.
+                const batches = [];
+                let batch = null;
+                for (let i = 0; i < root.blocks.count; i++) {
+                    const length = root.blocks.get(i).source.length + 1;
+                    if (!batch || batch.length + length > 3500) {
+                        batch = { first: i, count: 0, length: 0 };
+                        batches.push(batch);
+                    }
+                    batch.count++;
+                    batch.length += length;
+                }
+                root.queue = batches;
+                root.nextBatch();
+            }
+        }
+    }
+
     function nextBatch(): void {
         if (root.queue.length === 0) {
             if (root.painted > 0) {
-                root.phase = "result";
+                root.translate = "shown";
             } else {
+                root.translate = "";
+                root.blocks.clear();
                 root.notice = Strings.tr("Already in your language");
-                root.phase = "select";
             }
             return;
         }
@@ -1216,8 +1315,7 @@ Singleton {
         root.ask(lines.join("\n"), batch);
     }
 
-    // `batch` is the queue entry the answer belongs to, or null for the
-    // search card's own translate chip.
+    // `batch` is the queue entry the answer belongs to.
     function ask(text: string, batch: var): void {
         root.asks++;
         translator.batch = batch;
@@ -1284,24 +1382,18 @@ Singleton {
     }
 
     function answered(answer: string, batch: var): void {
-        if (!batch) {
-            root.translating = false;
-            if (answer)
-                root.translation = answer;
-            else
-                root.notice = Strings.tr("Translation failed - is the network up?");
-            return;
-        }
-        if (root.phase !== "working" || root.queue[0] !== batch)
+        if (root.translate !== "working" || root.queue[0] !== batch)
             return;
         if (!answer) {
             root.queue = [];
             Notifier.error(Strings.tr("Translation failed"), Strings.tr("The translator could not be reached - is the network up?"));
             // what was translated before the failure stays on screen
-            if (root.painted > 0)
-                root.phase = "result";
-            else
-                root.close();
+            if (root.painted > 0) {
+                root.translate = "shown";
+            } else {
+                root.translate = "";
+                root.blocks.clear();
+            }
             return;
         }
         const lines = answer.split("\n");
@@ -1333,44 +1425,63 @@ Singleton {
         root.nextBatch();
     }
 
-    // ---------- what a search result can be turned into ----------
+    // ---------- what can be done with what was read ----------
 
-    // The text as one line, short enough to be a query.
-    readonly property string query: root.text.replace(/\s+/g, " ").trim().slice(0, 300)
+    // Each acts on the words selected, or with none selected on everything
+    // the rectangle held - its text, and failing that its picture.
 
-    function searchText(): void {
-        if (!root.query)
+    // The words selected as one line, short enough to be a query.
+    readonly property string query: root.pickedText.replace(/\s+/g, " ").trim().slice(0, 300)
+
+    // C, Ctrl+C: the words selected; with none, every word, a line to each
+    // line as it was set; with no words at all, the picture. With the
+    // translation showing, the translation.
+    function copy(): void {
+        if (root.phase !== "result")
             return;
+        if (root.translate === "shown") {
+            root.copyTranslation();
+            return;
+        }
+        const text = root.picked ? root.pickedText : root.text;
+        if (!text) {
+            root.copyImage();
+            return;
+        }
+        // onto the clipboard while the overlay still has the keyboard: a
+        // Wayland compositor can refuse a selection from a client with no
+        // focused surface left
+        Notifier.copyToClipboard(text);
+        root.close();
+    }
+
+    // S: the words selected go to the web search; with none, the picture goes
+    // to Google Lens, which reads whatever text is in it better than a query
+    // made of all of it would.
+    function search(): void {
+        if (root.phase !== "result")
+            return;
+        if (!root.picked || !root.query) {
+            root.searchImage();
+            return;
+        }
         const url = (Settings.searchUrl || Defaults.searchUrl).replace("%s", encodeURIComponent(root.query));
         root.close();
         Quickshell.execDetached(["xdg-open", url]);
     }
 
-    function copyText(): void {
-        const text = root.translation || root.text;
-        if (!text)
-            return;
-        // before the overlay goes, for the reason copy's own read gives
-        Notifier.copyToClipboard(text);
-        root.close();
+    // Enter: copying, with the translation showing; a code's, if there is
+    // one and nothing is selected; else search.
+    readonly property string primary: root.translate === "shown" ? "copy" : root.code && !root.picked ? "open" : "search"
+    function act(): void {
+        if (root.primary === "copy")
+            root.copy();
+        else if (root.primary === "open")
+            root.openCode();
+        else
+            root.search();
     }
 
-    function translateText(): void {
-        if (!root.text || root.translating || root.translation)
-            return;
-        root.notice = "";
-        root.translating = true;
-        // one request's worth: the translator turns away much more than this,
-        // and a selection that long was not circled to be read off a card
-        root.ask(root.text.slice(0, 4500), null);
-    }
-
-    // The selection itself, handed to Google Lens. There is no API for this:
-    // the upload is the form the Lens page posts, and what comes back is a
-    // redirect to the results - which is all a browser needs to be given. A
-    // form like that can change without notice, so when no redirect comes back
-    // the picture is put on the clipboard and the Lens page opened instead,
-    // where a paste does by hand what the upload could not.
     // Google Lens, with the circled part of the screen. The upload has to be
     // made by the browser itself: the results page Lens redirects to is tied
     // to the session that did the uploading, so an upload made from here and

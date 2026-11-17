@@ -10,18 +10,17 @@
 #                    switches to it if another page is open, or closes if it's
 #                    already the one showing)
 #   pibble toggle tools
-#                    show/hide the tools menu (search, copy text, scan a code,
-#                    translate, record, pick a color): the launcher's own while
-#                    it is up, else on its own on the desktop
-#   pibble search    freeze the screen and drag over anything on it to search for
-#                    it, copy it, translate it, or look the picture up
-#   pibble copy      drag over some text on screen and copy it
-#   pibble scan      drag over a QR code or barcode to read it
-#   pibble translate drag over some text and translate it, in place
-#   pibble record [region|pause]
-#                    start recording the screen (or, with "region", a dragged
-#                    rectangle of it); the same command stops the recording,
-#                    and "pause" pauses and resumes it
+#                    show/hide the tools menu (search, record, pick a color):
+#                    the launcher's own while it is up, else on its own on the
+#                    desktop
+#   pibble search    freeze the screen and drag over anything on it: select and
+#                    copy its words, look the picture up (or search the words
+#                    selected), open a code in it, or translate it in place
+#   pibble translate the same, translating as soon as it has been read
+#   pibble record [pause]
+#                    drag the area to record (or click for the whole screen);
+#                    the same command stops the recording, and "pause" pauses
+#                    and resumes it
 #   pibble replay    re-fire one recent notification; repeated presses step
 #                    back through history (see "Replay count" in flyout settings)
 #   pibble install / uninstall [options]
@@ -204,18 +203,17 @@ Commands:
             (or closes if it's already the one showing)
             available: $(list_pages)
   toggle tools
-            show/hide the tools menu (search, copy text, scan a code,
-            translate, record, pick a color) - in the launcher if it is
-            open, on its own on the desktop if not
-  search    freeze the screen and drag over anything on it: search for the
-            text, copy it, translate it, or look the picture up
-  copy      freeze the screen, drag over some text, and it is copied
-  scan      drag over a QR code or barcode: open it, copy it
-  translate drag over some text and translate it into your language, in place
-  record [region|pause]
-            start recording the screen, or with \`region\` a rectangle you
-            drag on it; run it again (or press stop on the pill) to stop,
-            and \`pause\` to pause and resume
+            show/hide the tools menu (search, record, pick a color) - in the
+            launcher if it is open, on its own on the desktop if not
+  search    freeze the screen and drag over anything on it: select its words
+            and copy them (Ctrl+C), look the picture up or search the words
+            selected (S), open a QR code or barcode in it (O), or translate
+            it into your language in place (T)
+  translate the same, translating as soon as it has been read
+  record [pause]
+            drag the area to record, or click for the whole screen; run it
+            again (or press stop in the tools menu) to stop, and \`pause\` to
+            pause and resume
   replay    re-fire one recent notification; repeated presses step back
   env       print the environment a daemon is started with, as shell
             exports - for running \`qs\` against this repo by hand and
@@ -290,7 +288,7 @@ toggle)
     done
     exit 1
     ;;
-search | translate | copy | scan)
+search | translate)
     # like toggle, these start the daemon if they have to: a keybind that does
     # nothing on the first press after login reads as broken
     if ipc "$1"; then
@@ -314,9 +312,11 @@ record)
     # $2 is "region", "pause" or nothing; passed through even when empty, as
     # with toggle's page, since the IPC function takes it as a required argument
     case "$2" in
+    # "region" is what asking for an area used to take, before every
+    # recording asked for one
     "" | region | pause) ;;
     *)
-        echo "pibble: record takes 'region', 'pause' or nothing, not '$2'" >&2
+        echo "pibble: record takes 'pause' or nothing, not '$2'" >&2
         exit 1
         ;;
     esac
