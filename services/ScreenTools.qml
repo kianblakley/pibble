@@ -609,11 +609,15 @@ Singleton {
             # strips (see strips()) are cut from it, each read on a core of its
             # own.
             ffmpeg -y -v error -i "$frame" -vf "$filter" -frames:v 1 "$crop" 2>/dev/null || { echo NOCROP; exit 0; }
-            # Each strip is read twice at once, under two ways of telling ink
-            # from paper (0 is one threshold for the image, 2 one that follows
-            # the local background); the two answers are folded together in
-            # merged(). Every file is named for this read, so a killed read's
-            # straggler cannot write into the next one's. One tesseract thread
+            # Each strip is read three times at once: under two ways of telling
+            # ink from paper (0 is one threshold for the image, 2 one that
+            # follows the local background), and the second again on the strip
+            # inverted, since light text on a dark or colored background is
+            # what both lose most of and tesseract reads best as dark on light
+            # (a clock on a wallpaper came back in pieces without it). The
+            # answers are folded together in merged(). Every file is named for
+            # this read, so a killed read's straggler cannot write into the
+            # next one's. One tesseract thread
             # each: the strips are the parallelism, and its own threads on top
             # only fight them for the cores. The tsv variable rather than the
             # "tsv" config file that sets it: the file ships in a separate
@@ -625,8 +629,10 @@ Singleton {
                 part="$crop.$6.$i.ppm"
                 (
                     ffmpeg -y -v error -i "$crop" -vf "crop=$w:ih:$x:0" -frames:v 1 "$part" 2>/dev/null || exit 0
+                    ffmpeg -y -v error -i "$part" -vf "format=gray,negate" -frames:v 1 "$part.n.pgm" 2>/dev/null
                     OMP_THREAD_LIMIT=1 tesseract "$part" - -l "$langs" --psm "$psm" -c tessedit_create_tsv=1 > "$part.a" 2>/dev/null &
-                    OMP_THREAD_LIMIT=1 tesseract "$part" - -l "$langs" --psm "$psm" -c tessedit_create_tsv=1 -c thresholding_method=2 > "$part.b" 2>/dev/null
+                    OMP_THREAD_LIMIT=1 tesseract "$part" - -l "$langs" --psm "$psm" -c tessedit_create_tsv=1 -c thresholding_method=2 > "$part.b" 2>/dev/null &
+                    [ -s "$part.n.pgm" ] && OMP_THREAD_LIMIT=1 tesseract "$part.n.pgm" - -l "$langs" --psm "$psm" -c tessedit_create_tsv=1 -c thresholding_method=2 > "$part.c" 2>/dev/null
                     wait
                 ) &
                 i=$((i + 1))
@@ -639,7 +645,9 @@ Singleton {
                 cat "$part.a" 2>/dev/null
                 echo "PASS"
                 cat "$part.b" 2>/dev/null
-                rm -f "$part" "$part.a" "$part.b"
+                echo "PASS"
+                cat "$part.c" 2>/dev/null
+                rm -f "$part" "$part.n.pgm" "$part.a" "$part.b" "$part.c"
                 i=$((i + 1))
             done`,
             "_", root.shotPath, root.cropPath, filter, (Settings.ocrLanguages || "").trim(), psm, String(root.reads), cuts];
@@ -772,17 +780,20 @@ Singleton {
         return lines;
     }
 
-    // Two readings of one image, folded into one. The screen is read twice
-    // because tesseract has to decide what is ink and what is paper before it
+    // Two readings of one image, folded into one. The screen is read more
+    // than once because tesseract has to decide what is ink and what is paper before it
     // reads anything, and no one way of deciding suits a whole screen: its
     // default finds dark text on a light page and loses a white title on a
     // colored bar; the adaptive one finds the title and drops body text the
-    // default had. A line only one of them saw is kept as it is. Where both
-    // read the same line the first reading stands unless the second is better
-    // by a clear margin: the adaptive pass reports looser boxes around what it
-    // reads (a word's box is often its whole line's), and a line that measures
-    // twice the height of its neighbours no longer joins their paragraph - so
-    // a tie, or a win by one stray quote mark, goes to the default.
+    // default had, and both lose light text on a dark or colored background
+    // that the adaptive one finds on the image inverted - so a third reading
+    // is folded in the same way. A line only one of them saw is kept as it
+    // is. Where both read the same line the first reading stands unless the
+    // second is better by a clear margin: the adaptive pass reports looser
+    // boxes around what it reads (a word's box is often its whole line's), and
+    // a line that measures twice the height of its neighbours no longer joins
+    // their paragraph - so a tie, or a win by one stray quote mark, goes to
+    // the default.
     function merged(first: var, second: var): var {
         const out = first.slice();
         for (const line of second) {
